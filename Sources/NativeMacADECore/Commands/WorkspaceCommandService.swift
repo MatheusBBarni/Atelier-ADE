@@ -16,6 +16,7 @@ public enum WorkspaceCommandError: Error, Equatable, Sendable {
 public protocol WorkspaceCommandService {
     func openProject(path: String) async throws -> WorkspaceProject
     func removeProject(id: UUID) async throws
+    func removeSession(id: UUID) async throws
     func selectProject(id: UUID?) async throws
     func selectSession(id: UUID?) async throws
     func selectTab(id: UUID?) async throws

@@ -210,6 +210,8 @@ struct ProjectSidebarView: View {
     @State private var renameDraft: SessionRenameDraft?
     @State private var availableShortcuts: [SessionShortcut] = []
     @State private var expandedProjectIDs: Set<UUID> = []
+    @State private var hoveredSessionID: UUID?
+    @State private var initializingSessionIDs: Set<UUID> = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -244,7 +246,7 @@ struct ProjectSidebarView: View {
                                         toggleProjectExpansion(project.id)
                                     },
                                     onSelectProject: {
-                                        selectProject(project.id)
+                                        handleProjectSelection(project.id, isExpanded: isExpanded)
                                     }
                                 ) {
                                     pendingRemoval = project
@@ -274,11 +276,26 @@ struct ProjectSidebarView: View {
                                         } else {
                                             VStack(alignment: .leading, spacing: 8) {
                                                 ForEach(projectSessions) { session in
-                                                    SessionRowView(session: session, isActive: session.id == store.selectedSessionID) {
-                                                        renameDraft = SessionRenameDraft(session: session)
-                                                    }
-                                                    .onTapGesture {
-                                                        selectSession(session.id)
+                                                    SessionRowView(
+                                                        session: session,
+                                                        isActive: session.id == store.selectedSessionID,
+                                                        showsMenu: hoveredSessionID == session.id || session.id == store.selectedSessionID,
+                                                        onSelect: {
+                                                            selectSession(session.id)
+                                                        },
+                                                        onRename: {
+                                                            renameDraft = SessionRenameDraft(session: session)
+                                                        },
+                                                        onDelete: {
+                                                            removeSession(session.id)
+                                                        }
+                                                    )
+                                                    .onHover { isHovering in
+                                                        if isHovering {
+                                                            hoveredSessionID = session.id
+                                                        } else if hoveredSessionID == session.id {
+                                                            hoveredSessionID = nil
+                                                        }
                                                     }
                                                     if session.id != projectSessions.last?.id {
                                                         Divider()
@@ -329,9 +346,6 @@ struct ProjectSidebarView: View {
             }
         }
         .task(id: store.selectedProjectID) {
-            if let selectedProjectID = store.selectedProjectID {
-                expandedProjectIDs.insert(selectedProjectID)
-            }
             await loadShortcuts()
         }
     }
@@ -385,7 +399,15 @@ struct ProjectSidebarView: View {
                 expandProject(projectID)
                 let session = try await commandService.createSession(projectID: projectID, shortcutID: shortcutID)
                 if shortcutID == nil {
-                    _ = try await commandService.createTab(sessionID: session.id)
+                    initializingSessionIDs.insert(session.id)
+                    do {
+                        _ = try await commandService.createTab(sessionID: session.id)
+                    } catch {
+                        initializingSessionIDs.remove(session.id)
+                        try? await commandService.removeSession(id: session.id)
+                        throw error
+                    }
+                    initializingSessionIDs.remove(session.id)
                 }
             } catch {
                 userMessage = UserMessage(title: "Session could not be created", detail: String(describing: error))
@@ -410,11 +432,27 @@ struct ProjectSidebarView: View {
             do {
                 try await commandService.selectSession(id: id)
                 if let id,
+                   !initializingSessionIDs.contains(id),
                    !store.tabs.contains(where: { $0.sessionID == id }) {
-                    _ = try await commandService.createTab(sessionID: id)
+                    do {
+                        _ = try await commandService.createTab(sessionID: id)
+                    } catch {
+                        try? await commandService.removeSession(id: id)
+                        throw error
+                    }
                 }
             } catch {
                 userMessage = UserMessage(title: "Session selection could not be saved", detail: String(describing: error))
+            }
+        }
+    }
+
+    private func removeSession(_ id: UUID) {
+        Task {
+            do {
+                try await commandService.removeSession(id: id)
+            } catch {
+                userMessage = UserMessage(title: "Session could not be removed", detail: String(describing: error))
             }
         }
     }
@@ -433,6 +471,15 @@ struct ProjectSidebarView: View {
         } else {
             expandedProjectIDs.insert(id)
         }
+    }
+
+    private func handleProjectSelection(_ id: UUID, isExpanded: Bool) {
+        if isExpanded {
+            expandedProjectIDs.remove(id)
+        } else {
+            expandedProjectIDs.insert(id)
+        }
+        selectProject(id)
     }
 }
 
@@ -560,9 +607,14 @@ struct SessionListView: View {
                 )
             } else {
                 List(store.sessionsForSelectedProject, selection: selectedSessionBinding) { session in
-                    SessionRowView(session: session, isActive: session.id == store.selectedSessionID) {
-                        renameDraft = SessionRenameDraft(session: session)
-                    }
+                    SessionRowView(
+                        session: session,
+                        isActive: session.id == store.selectedSessionID,
+                        showsMenu: true,
+                        onSelect: { selectSession(session.id) },
+                        onRename: { renameDraft = SessionRenameDraft(session: session) },
+                        onDelete: { }
+                    )
                         .tag(session.id)
                         .contextMenu {
                             Button("Resume") { selectSession(session.id) }
@@ -683,35 +735,55 @@ struct SessionShortcutPicker: View {
 struct SessionRowView: View {
     let session: WorkspaceSession
     let isActive: Bool
+    let showsMenu: Bool
+    let onSelect: () -> Void
     let onRename: () -> Void
+    let onDelete: () -> Void
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: isActive ? "rectangle.stack.fill" : "rectangle.stack")
-                .foregroundStyle(isActive ? NordTheme.snowStorm2.color : NordTheme.frost0.color)
-                .frame(width: 20)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(session.title)
-                    .font(.headline)
-                    .foregroundStyle(NordTheme.primaryText.color)
-                    .lineLimit(1)
-                Text(session.isUserNamed ? "User named • Resume ready" : "Default timestamp title • Resume ready")
-                    .font(.caption)
-                    .foregroundStyle(NordTheme.mutedText.color)
-                    .lineLimit(1)
+            Button(action: onSelect) {
+                HStack(spacing: 10) {
+                    Image(systemName: isActive ? "rectangle.stack.fill" : "rectangle.stack")
+                        .foregroundStyle(isActive ? NordTheme.snowStorm2.color : NordTheme.frost0.color)
+                        .frame(width: 20)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(session.title)
+                            .font(.headline)
+                            .foregroundStyle(NordTheme.primaryText.color)
+                            .lineLimit(1)
+                        Text(session.isUserNamed ? "User named • Resume ready" : "Default timestamp title • Resume ready")
+                            .font(.caption)
+                            .foregroundStyle(NordTheme.mutedText.color)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 8)
+                    if isActive {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(NordTheme.auroraGreen.color)
+                            .accessibilityHidden(true)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
-            Spacer(minLength: 8)
-            if isActive {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(NordTheme.auroraGreen.color)
-                    .accessibilityHidden(true)
-                Button("Rename", systemImage: "pencil", action: onRename)
-                    .labelStyle(.iconOnly)
-                    .buttonStyle(.borderless)
-                    .help("Rename active session")
+            .buttonStyle(.plain)
+
+            if showsMenu {
+                Menu {
+                    Button("Rename", systemImage: "pencil", action: onRename)
+                    Button("Delete", systemImage: "trash", role: .destructive, action: onDelete)
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.callout.weight(.semibold))
+                        .frame(width: 28, height: 28)
+                        .background(NordTheme.shellBackground.color.opacity(0.85), in: Circle())
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help("Session actions")
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 8)
         .padding(.horizontal, 6)
         .background(isActive ? NordTheme.activeBackground.color.opacity(0.32) : Color.clear, in: RoundedRectangle(cornerRadius: 10))
@@ -879,7 +951,7 @@ struct TabChromeView: View {
             do {
                 try await commandService.closeTab(tabID: id, force: false)
             } catch WorkspaceCommandError.closeRejected {
-                userMessage = UserMessage(title: "Tab is still running", detail: "Ghostty reported that this terminal has a live process. Close was cancelled to avoid interrupting work.")
+                userMessage = UserMessage(title: "Tab is still running", detail: "This terminal still has a live process. Close was cancelled to avoid interrupting work.")
             } catch {
                 userMessage = UserMessage(title: "Tab could not be closed", detail: String(describing: error))
             }

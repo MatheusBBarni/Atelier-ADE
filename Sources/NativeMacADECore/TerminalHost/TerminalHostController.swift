@@ -1,6 +1,7 @@
 import AppKit
 import Darwin
 import Foundation
+@preconcurrency import SwiftTerm
 
 @MainActor
 public final class TerminalHostController: WorkspaceTerminalSurfaceManaging {
@@ -20,22 +21,34 @@ public final class TerminalHostController: WorkspaceTerminalSurfaceManaging {
         if let existing = surfacesByTabID[tab.id] { return existing }
 
         let configuration = GhosttyLaunchConfiguration(tab: tab)
-        try await adapter.initializeIfNeeded()
-        let surface = try await adapter.createSurface(configuration: configuration)
-        surfacesByTabID[tab.id] = surface
+        let surface: GhosttySurfaceHandle
         let driver: TerminalSessionDriver?
+
         if adapter.usesEmbeddedSessionDriver {
             let liveDriver = sessionDriver(for: tab, appearance: configuration.appearance)
-            liveDriver.startIfNeeded()
+            do {
+                try liveDriver.startIfNeeded()
+            } catch {
+                liveDriver.stop()
+                sessionDriversByTabID[tab.id] = nil
+                throw error
+            }
+            surface = GhosttySurfaceHandle()
             driver = liveDriver
         } else {
+            try await adapter.initializeIfNeeded()
+            surface = try await adapter.createSurface(configuration: configuration)
             driver = nil
         }
+
+        surfacesByTabID[tab.id] = surface
         if let hostView = hostViewsByTabID[tab.id] {
             hostView.attach(surface: surface, tab: tab, appearance: configuration.appearance, driver: driver)
             resizeToCurrentBounds(tabID: tab.id, hostView: hostView)
         }
-        startExitMonitoring(tabID: tab.id)
+        if !adapter.usesEmbeddedSessionDriver {
+            startExitMonitoring(tabID: tab.id)
+        }
         return surface
     }
 
@@ -44,18 +57,26 @@ public final class TerminalHostController: WorkspaceTerminalSurfaceManaging {
     }
 
     public func canClose(surface: GhosttySurfaceHandle) async -> Bool {
-        if let driver = sessionDriversBySurface(surface), driver.isRunning { return true }
+        if let driver = sessionDriversBySurface(surface) {
+            return !driver.isRunning
+        }
         return await adapter.canClose(surface: surface)
     }
 
     public func focus(tabID: UUID) {
-        guard let surface = surfacesByTabID[tabID] else { return }
-        adapter.focus(surface: surface)
         hostViewsByTabID[tabID]?.isActiveTerminalHost = true
         hostViewsByTabID[tabID]?.focusTerminal()
+
+        guard !adapter.usesEmbeddedSessionDriver,
+              let surface = surfacesByTabID[tabID]
+        else {
+            return
+        }
+        adapter.focus(surface: surface)
     }
 
     public func resize(tabID: UUID, columns: Int, rows: Int) {
+        guard !adapter.usesEmbeddedSessionDriver else { return }
         guard let surface = surfacesByTabID[tabID] else { return }
         adapter.resize(surface: surface, columns: columns, rows: rows)
     }
@@ -73,7 +94,7 @@ public final class TerminalHostController: WorkspaceTerminalSurfaceManaging {
         exitMonitorsByTabID[tabID] = nil
         sessionDriversByTabID[tabID]?.stop()
         sessionDriversByTabID[tabID] = nil
-        if let surface = surfacesByTabID[tabID] {
+        if !adapter.usesEmbeddedSessionDriver, let surface = surfacesByTabID[tabID] {
             adapter.destroySurface(surface)
         }
         surfacesByTabID[tabID] = nil
@@ -87,11 +108,7 @@ public final class TerminalHostController: WorkspaceTerminalSurfaceManaging {
         hostViewsByTabID[tab.id] = hostView
         hostView.configure(tab: tab, appearance: .nordDefault, isActive: isActive)
         configureResizeCallback(for: hostView, tabID: tab.id)
-        if adapter.usesEmbeddedSessionDriver {
-            let driver = sessionDriver(for: tab, appearance: .nordDefault)
-            driver.startIfNeeded()
-            hostView.attach(driver: driver, appearance: .nordDefault)
-        } else if let driver = sessionDriversByTabID[tab.id] {
+        if let driver = sessionDriversByTabID[tab.id] {
             hostView.attach(driver: driver, appearance: .nordDefault)
         }
         if let surface = surfacesByTabID[tab.id] {
@@ -106,11 +123,7 @@ public final class TerminalHostController: WorkspaceTerminalSurfaceManaging {
         hostViewsByTabID[tab.id] = hostView
         hostView.configure(tab: tab, appearance: .nordDefault, isActive: isActive)
         configureResizeCallback(for: hostView, tabID: tab.id)
-        if adapter.usesEmbeddedSessionDriver {
-            let driver = sessionDriver(for: tab, appearance: .nordDefault)
-            driver.startIfNeeded()
-            hostView.attach(driver: driver, appearance: .nordDefault)
-        } else if let driver = sessionDriversByTabID[tab.id] {
+        if let driver = sessionDriversByTabID[tab.id] {
             hostView.attach(driver: driver, appearance: .nordDefault)
         }
         if let surface = surfacesByTabID[tab.id] {
@@ -193,7 +206,7 @@ public final class TerminalSurfaceHostNSView: NSView {
     public private(set) var attachedSurface: GhosttySurfaceHandle?
     public private(set) var terminalAppearance: TerminalAppearance = .nordDefault
     public private(set) var embeddedSurfaceView: NSView?
-    private(set) var terminalTextView: TerminalTextView?
+    public private(set) var localProcessTerminalView: LocalProcessTerminalView?
     public var onResize: ((CGSize) -> Void)?
     public var isActiveTerminalHost: Bool = false {
         didSet { updateLayerStyle() }
@@ -227,26 +240,26 @@ public final class TerminalSurfaceHostNSView: NSView {
         attachedSurface = surface
         tabID = tab.id
         self.terminalAppearance = appearance
-        ensureEmbeddedSurfaceView()
         if let driver {
             attach(driver: driver, appearance: appearance)
+        } else {
+            ensurePlaceholderSurfaceView()
         }
         updateLayerStyle()
     }
 
     func attach(driver: TerminalSessionDriver, appearance: TerminalAppearance) {
         self.terminalAppearance = appearance
-        let textView = ensureEmbeddedSurfaceView()
-        driver.bind(to: textView)
+        driver.update(tabID: tabID, appearance: appearance)
+        embedSurfaceView(driver.embeddedView, terminalView: driver.embeddedView)
         updateLayerStyle()
     }
 
     public func detachSurface() {
-        terminalTextView?.onInputData = nil
         attachedSurface = nil
         embeddedSurfaceView?.removeFromSuperview()
         embeddedSurfaceView = nil
-        terminalTextView = nil
+        localProcessTerminalView = nil
         updateLayerStyle()
     }
 
@@ -263,46 +276,19 @@ public final class TerminalSurfaceHostNSView: NSView {
     }
 
     public func focusTerminal() {
-        guard let terminalTextView else { return }
-        window?.makeFirstResponder(terminalTextView)
+        guard let localProcessTerminalView else { return }
+        window?.makeFirstResponder(localProcessTerminalView)
     }
 
     @discardableResult
-    private func ensureEmbeddedSurfaceView() -> TerminalTextView {
-        if let terminalTextView {
-            return terminalTextView
+    private func ensurePlaceholderSurfaceView() -> NSView {
+        if let embeddedSurfaceView {
+            return embeddedSurfaceView
         }
 
-        let scrollView = NSScrollView(frame: bounds)
-        scrollView.autoresizingMask = [.width, .height]
-        scrollView.borderType = .noBorder
-        scrollView.hasVerticalScroller = true
-        scrollView.hasHorizontalScroller = false
-        scrollView.drawsBackground = false
-
-        let contentSize = scrollView.contentSize
-        let textStorage = NSTextStorage()
-        let layoutManager = NSLayoutManager()
-        let textContainer = NSTextContainer(containerSize: NSSize(width: contentSize.width, height: CGFloat.greatestFiniteMagnitude))
-        textContainer.widthTracksTextView = true
-        layoutManager.addTextContainer(textContainer)
-        textStorage.addLayoutManager(layoutManager)
-
-        let textView = TerminalTextView(frame: NSRect(origin: NSPoint.zero, size: contentSize), textContainer: textContainer)
-        textView.minSize = .zero
-        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
-        textView.isVerticallyResizable = true
-        textView.isHorizontallyResizable = false
-        textView.autoresizingMask = NSView.AutoresizingMask(rawValue: NSView.AutoresizingMask.width.rawValue)
-        textView.textContainer?.containerSize = NSSize(width: contentSize.width, height: CGFloat.greatestFiniteMagnitude)
-        textView.textContainer?.widthTracksTextView = true
-        textView.applyAppearance(terminalAppearance)
-
-        scrollView.documentView = textView
-        addSubview(scrollView)
-        embeddedSurfaceView = scrollView
-        terminalTextView = textView
-        return textView
+        let placeholderView = NSView(frame: bounds)
+        embedSurfaceView(placeholderView, terminalView: nil)
+        return placeholderView
     }
 
     private func updateLayerStyle() {
@@ -313,232 +299,115 @@ public final class TerminalSurfaceHostNSView: NSView {
 
     private func layoutEmbeddedSurfaceView() {
         embeddedSurfaceView?.frame = bounds
+    }
 
-        guard let scrollView = embeddedSurfaceView as? NSScrollView,
-              let textView = terminalTextView
-        else {
-            return
+    private func embedSurfaceView(_ surfaceView: NSView, terminalView: LocalProcessTerminalView?) {
+        if embeddedSurfaceView !== surfaceView {
+            embeddedSurfaceView?.removeFromSuperview()
+            surfaceView.removeFromSuperview()
+            surfaceView.frame = bounds
+            surfaceView.autoresizingMask = [.width, .height]
+            addSubview(surfaceView)
+            embeddedSurfaceView = surfaceView
         }
-
-        let contentSize = scrollView.contentSize
-        let width = max(contentSize.width, 1)
-        let height = max(contentSize.height, 1)
-
-        textView.textContainer?.containerSize = NSSize(width: width, height: CGFloat.greatestFiniteMagnitude)
-        textView.textContainer?.widthTracksTextView = true
-        textView.minSize = NSSize(width: 0, height: height)
-
-        let usedHeight = textView.textContainer.flatMap { container in
-            textView.layoutManager?.usedRect(for: container).height
-        } ?? 0
-        let fittedHeight = max(height, ceil(usedHeight + (textView.textContainerInset.height * 2)))
-
-        textView.frame = NSRect(origin: .zero, size: NSSize(width: width, height: fittedHeight))
+        localProcessTerminalView = terminalView
+        layoutEmbeddedSurfaceView()
     }
 }
 
 @MainActor
-final class TerminalTextView: NSTextView {
-    var onInputData: ((Data) -> Void)?
-
-    override var acceptsFirstResponder: Bool { true }
-
-    override init(frame frameRect: NSRect, textContainer container: NSTextContainer?) {
-        super.init(frame: frameRect, textContainer: container)
-        isEditable = false
-        isSelectable = true
-        allowsUndo = false
-        drawsBackground = true
-        insertionPointColor = .white
-        textContainerInset = NSSize(width: 12, height: 12)
-        textContainer?.lineFragmentPadding = 0
-        font = .monospacedSystemFont(ofSize: 13, weight: .regular)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        nil
-    }
-
-    func applyAppearance(_ appearance: TerminalAppearance) {
-        backgroundColor = NSColor(hex: appearance.backgroundHex)
-        textColor = NSColor(hex: appearance.foregroundHex)
-        insertionPointColor = NSColor(hex: appearance.cursorHex)
-        font = NSFont(name: appearance.fontName, size: appearance.fontSize) ?? .monospacedSystemFont(ofSize: appearance.fontSize, weight: .regular)
-    }
-
-    func replaceContents(with text: String) {
-        string = text
-        scrollToEndOfDocument(nil)
-    }
-
-    func appendOutput(_ text: String) {
-        textStorage?.append(NSAttributedString(string: text, attributes: [.foregroundColor: textColor ?? .textColor]))
-        scrollToEndOfDocument(nil)
-    }
-
-    override func keyDown(with event: NSEvent) {
-        if sendSpecialKey(for: event) { return }
-        if let characters = event.characters, let data = characters.data(using: .utf8) {
-            onInputData?(data)
-            return
-        }
-        super.keyDown(with: event)
-    }
-
-    private func sendSpecialKey(for event: NSEvent) -> Bool {
-        let sequence: String?
-        switch event.keyCode {
-        case 36, 76:
-            sequence = "\n"
-        case 48:
-            sequence = "\t"
-        case 51:
-            sequence = "\u{7F}"
-        case 123:
-            sequence = "\u{1B}[D"
-        case 124:
-            sequence = "\u{1B}[C"
-        case 125:
-            sequence = "\u{1B}[B"
-        case 126:
-            sequence = "\u{1B}[A"
-        default:
-            sequence = nil
-        }
-
-        guard let sequence, let data = sequence.data(using: .utf8) else { return false }
-        onInputData?(data)
-        return true
-    }
-}
-
-@MainActor
-final class TerminalSessionDriver {
+final class TerminalSessionDriver: NSObject {
     let tabID: UUID
     var onExit: ((Int32?) -> Void)?
     private var tab: WorkspaceTab
     private var appearance: TerminalAppearance
-    private let process = Process()
-    private let inputPipe = Pipe()
-    private let outputPipe = Pipe()
-    private var bufferedOutput = ""
+    private let terminalView: LocalProcessTerminalView
     private(set) var isStarted = false
     private(set) var hasExited = false
     private(set) var exitStatus: Int32?
-    private weak var textView: TerminalTextView?
 
     init(tab: WorkspaceTab, appearance: TerminalAppearance) {
         self.tabID = tab.id
         self.tab = tab
         self.appearance = appearance
+        self.terminalView = LocalProcessTerminalView(frame: .zero)
+        super.init()
+        terminalView.processDelegate = self
+        terminalView.autoresizingMask = [.width, .height]
+        applyAppearance(appearance)
     }
 
     var isRunning: Bool {
-        isStarted && !hasExited
+        terminalView.process.running && !hasExited
+    }
+
+    var embeddedView: LocalProcessTerminalView {
+        terminalView
     }
 
     func update(tab: WorkspaceTab, appearance: TerminalAppearance) {
         self.tab = tab
-        self.appearance = appearance
-        textView?.applyAppearance(appearance)
+        update(tabID: tab.id, appearance: appearance)
     }
 
-    func startIfNeeded() {
+    func update(tabID: UUID?, appearance: TerminalAppearance) {
+        self.appearance = appearance
+        applyAppearance(appearance)
+    }
+
+    func startIfNeeded() throws {
         guard !isStarted else { return }
         isStarted = true
         hasExited = false
         exitStatus = nil
 
-        appendOutput(launchBanner())
-
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: tab.workingDirectory, isDirectory: &isDirectory), isDirectory.boolValue else {
-            hasExited = true
-            appendOutput("[Directory unavailable: \(tab.workingDirectory)]\n")
-            return
+            throw TerminalSessionDriverError.directoryUnavailable(tab.workingDirectory)
         }
 
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/script")
-        process.currentDirectoryURL = URL(fileURLWithPath: tab.workingDirectory, isDirectory: true)
-        process.environment = processEnvironment()
-        process.standardInput = inputPipe
-        process.standardOutput = outputPipe
-        process.standardError = outputPipe
-        process.arguments = launchArguments()
-        process.qualityOfService = .userInitiated
-        process.terminationHandler = { [weak self] process in
-            Task { @MainActor in
-                guard let self else { return }
-                self.hasExited = true
-                self.exitStatus = process.terminationStatus
-                self.appendOutput("\n[Process exited with status \(process.terminationStatus)]\n")
-                self.onExit?(process.terminationStatus)
-            }
-        }
+        terminalView.feed(text: launchBanner())
 
-        outputPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
-            let data = handle.availableData
-            guard !data.isEmpty else { return }
-            guard let self else { return }
-            Task { @MainActor in
-                self.appendOutput(self.sanitizedOutput(from: data))
-            }
-        }
+        terminalView.startProcess(
+            executable: preferredShellPath(),
+            args: launchArguments(),
+            environment: processEnvironment(),
+            execName: loginExecName(),
+            currentDirectory: tab.workingDirectory
+        )
 
-        do {
-            try process.run()
-        } catch {
-            hasExited = true
-            appendOutput("[Terminal process could not start: \(error.localizedDescription)]\n")
-        }
-    }
-
-    func bind(to textView: TerminalTextView) {
-        self.textView = textView
-        textView.applyAppearance(appearance)
-        textView.replaceContents(with: bufferedOutput)
-        textView.onInputData = { [weak self] data in
-            self?.sendInput(data)
+        guard terminalView.process.running else {
+            throw TerminalSessionDriverError.processCouldNotStart
         }
     }
 
     func stop() {
-        outputPipe.fileHandleForReading.readabilityHandler = nil
-        textView?.onInputData = nil
-        if process.isRunning {
-            process.terminate()
+        terminalView.processDelegate = nil
+        if terminalView.process.running {
+            terminalView.terminate()
         }
         hasExited = true
     }
 
-    private func sendInput(_ data: Data) {
-        guard process.isRunning else { return }
-        try? inputPipe.fileHandleForWriting.write(contentsOf: data)
-    }
-
-    private func appendOutput(_ text: String) {
-        guard !text.isEmpty else { return }
-        bufferedOutput.append(text)
-        textView?.appendOutput(text)
-    }
-
     private func launchArguments() -> [String] {
-        let shellPath = preferredShellPath()
-
         if let commandLine = launchCommandLine() {
-            return ["-q", "/dev/null", shellPath, "-ilc", commandLine]
+            return ["-ilc", commandLine]
         }
 
-        return ["-q", "/dev/null", shellPath, "-il"]
+        return ["-il"]
     }
 
-    private func processEnvironment() -> [String: String] {
+    private func processEnvironment() -> [String] {
         var environment = ProcessInfo.processInfo.environment
         environment["SHELL"] = preferredShellPath()
         environment["TERM"] = environment["TERM"] ?? "xterm-256color"
         environment["COLORTERM"] = environment["COLORTERM"] ?? "truecolor"
+        for (key, value) in launchEnvironmentOverrides() {
+            environment[key] = value
+        }
         return environment
+            .sorted { $0.key < $1.key }
+            .map { "\($0.key)=\($0.value)" }
     }
 
     private func launchBanner() -> String {
@@ -547,12 +416,19 @@ final class TerminalSessionDriver {
         return "Another ADE terminal\nWorking directory: \(tab.workingDirectory)\nCommand: \(commandDescription)\n\n"
     }
 
-    private func sanitizedOutput(from data: Data) -> String {
-        let rawString = String(decoding: data, as: UTF8.self)
-        var sanitized = rawString.replacingOccurrences(of: "\r", with: "")
-        sanitized = sanitized.replacingOccurrences(of: "\u{001B}\\[[0-?]*[ -/]*[@-~]", with: "", options: .regularExpression)
-        sanitized = sanitized.replacingOccurrences(of: "\u{001B}\\][^\u{0007}]*\u{0007}", with: "", options: .regularExpression)
-        return sanitized
+    private func applyAppearance(_ appearance: TerminalAppearance) {
+        let background = NSColor(hex: appearance.backgroundHex)
+        let foreground = NSColor(hex: appearance.foregroundHex)
+        terminalView.font = NSFont(name: appearance.fontName, size: appearance.fontSize) ?? .monospacedSystemFont(ofSize: appearance.fontSize, weight: .regular)
+        terminalView.nativeBackgroundColor = background
+        terminalView.nativeForegroundColor = foreground
+        terminalView.selectedTextBackgroundColor = NSColor(hex: appearance.selectionHex)
+        terminalView.caretColor = NSColor(hex: appearance.cursorHex)
+        terminalView.caretTextColor = background
+    }
+
+    private func loginExecName() -> String {
+        "-\(URL(fileURLWithPath: preferredShellPath()).lastPathComponent)"
     }
 
     private func preferredShellPath() -> String {
@@ -581,7 +457,7 @@ final class TerminalSessionDriver {
 
         let resolvedArguments = resolvedLaunchArguments(for: command)
         let commandTokens = [Self.shellEscape(command)] + resolvedArguments.map(Self.shellEscape)
-        let environmentTokens = launchEnvironmentOverrides(for: command)
+        let environmentTokens = launchEnvironmentOverrides()
             .sorted { $0.key < $1.key }
             .map { key, value in
                 "\(key)=\(Self.shellEscape(value))"
@@ -602,17 +478,38 @@ final class TerminalSessionDriver {
             arguments.append("--no-alt-screen")
         }
 
+        if executableName == "codex", !arguments.contains("-c") {
+            arguments.append(contentsOf: ["-c", "tui.raw_output_mode=true"])
+        }
+
+        if executableName == "claude", !arguments.contains("--dangerously-skip-permissions") {
+            arguments.append("--dangerously-skip-permissions")
+        }
+
         return arguments
     }
 
-    private func launchEnvironmentOverrides(for command: String) -> [String: String] {
-        let executableName = URL(fileURLWithPath: command).lastPathComponent.lowercased()
+    private func launchEnvironmentOverrides() -> [String: String] {
+        let executableName = tab.launchCommand.map { URL(fileURLWithPath: $0).lastPathComponent.lowercased() }
+        var environment: [String: String] = [:]
 
-        if executableName == "claude" {
-            return ["CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN": "1"]
+        guard let executableName else {
+            return environment
         }
 
-        return [:]
+        if executableName == "codex" {
+            environment["CODEX_TUI_DISABLE_KEYBOARD_ENHANCEMENT"] = "1"
+        }
+
+        if executableName == "claude" {
+            environment["CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN"] = "1"
+            environment["CLAUDE_CODE_DISABLE_MOUSE"] = "1"
+            environment["CLAUDE_CODE_ACCESSIBILITY"] = "1"
+            environment["CLAUDE_CODE_DISABLE_TERMINAL_TITLE"] = "1"
+            environment["CLAUDE_CODE_SYNTAX_HIGHLIGHT"] = "false"
+        }
+
+        return environment
     }
 
     private func resolvedCommandDescription() -> String {
@@ -631,6 +528,42 @@ final class TerminalSessionDriver {
 
     private static func shellEscape(_ value: String) -> String {
         "'" + value.replacingOccurrences(of: "'", with: "'\"'\"'") + "'"
+    }
+}
+
+enum TerminalSessionDriverError: Error, Equatable, Sendable, CustomStringConvertible {
+    case directoryUnavailable(String)
+    case processCouldNotStart
+
+    var description: String {
+        switch self {
+        case .directoryUnavailable(let path):
+            return "Directory unavailable: \(path)"
+        case .processCouldNotStart:
+            return "Terminal process could not start"
+        }
+    }
+}
+
+extension TerminalSessionDriver: LocalProcessTerminalViewDelegate {
+    nonisolated func sizeChanged(source: LocalProcessTerminalView, newCols: Int, newRows: Int) {}
+
+    nonisolated func setTerminalTitle(source: LocalProcessTerminalView, title: String) {}
+
+    nonisolated func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
+
+    nonisolated func processTerminated(source: TerminalView, exitCode: Int32?) {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.hasExited = true
+            self.exitStatus = exitCode
+            if let exitCode {
+                self.terminalView.feed(text: "\n[Process exited with status \(exitCode)]\n")
+            } else {
+                self.terminalView.feed(text: "\n[Terminal process ended unexpectedly]\n")
+            }
+            self.onExit?(exitCode)
+        }
     }
 }
 

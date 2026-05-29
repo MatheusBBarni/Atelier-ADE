@@ -115,6 +115,35 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
         try await persistSnapshot()
     }
 
+    public func removeSession(id: UUID) async throws {
+        guard store.sessions.contains(where: { $0.id == id }) else {
+            let persistedSessions = try await persist { try await persistenceStore.loadSessions() }
+            guard persistedSessions.contains(where: { $0.id == id }) else {
+                throw WorkspaceCommandError.missingSession(id)
+            }
+            try await persist { try await persistenceStore.deleteSession(id: id) }
+            try await persistSnapshot()
+            return
+        }
+
+        let removedTabs = store.tabs.filter { $0.sessionID == id }
+        for tab in removedTabs {
+            if let surface = surfacesByTabID[tab.id] ?? terminalSurfaceManager.surface(for: tab.id) {
+                guard await terminalSurfaceManager.canClose(surface: surface) else {
+                    throw WorkspaceCommandError.closeRejected(tab.id)
+                }
+            }
+        }
+
+        try await persist { try await persistenceStore.deleteSession(id: id) }
+        for tab in removedTabs {
+            terminalSurfaceManager.releaseSurface(for: tab.id)
+            surfacesByTabID[tab.id] = nil
+        }
+        store.removeSession(id: id)
+        try await persistSnapshot()
+    }
+
     public func selectProject(id: UUID?) async throws {
         if let id, !store.projects.contains(where: { $0.id == id }) {
             throw WorkspaceCommandError.missingProject(id)

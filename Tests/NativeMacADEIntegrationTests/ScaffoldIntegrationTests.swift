@@ -14,15 +14,15 @@ struct ScaffoldIntegrationTests {
     }
 
     @Test
-    func terminalHostCreatesSingleSurfaceAgainstPinnedGhosttyRevision() async throws {
+    func terminalHostCreatesSingleEmbeddedSurfaceWithoutRequiringGhosttyRuntime() async throws {
         let host = TerminalHostController()
-        let tab = WorkspaceTab(sessionID: UUID(), workingDirectory: "/tmp/ade", ordinal: 0)
+        let tab = WorkspaceTab(sessionID: UUID(), workingDirectory: try makeTemporaryDirectory(), ordinal: 0)
 
         let surface = try await host.createSurface(for: tab)
 
         #expect(LiveGhosttyAdapter.pinnedRevision == "cb36966a752982014827a9cabcf630ec3788b3d9")
-        #expect(surface.rawSurfaceID > 0)
-        #expect(surface.appContextID == 1)
+        #expect(surface.rawSurfaceID == 0)
+        #expect(surface.appContextID == 0)
     }
 
     @Test
@@ -57,4 +57,11 @@ struct ScaffoldIntegrationTests {
             Issue.record("Unexpected error: \(error)")
         }
     }
+}
+
+private func makeTemporaryDirectory() throws -> String {
+    let url = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        .appendingPathComponent("native-mac-ade-scaffold-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    return url.path
 }

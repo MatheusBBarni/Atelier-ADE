@@ -32,7 +32,9 @@ struct TerminalHostIntegrationTests {
         controller.focus(tabID: tab.id)
         controller.resize(tabID: tab.id, columns: 132, rows: 43)
         view.setFrameSize(NSSize(width: 960, height: 384))
-        try await Task.sleep(for: .milliseconds(10))
+        try await waitUntil("ghostty resize callback") {
+            adapter.resizeRequests.contains(ResizeRequest(surface: surface, columns: 120, rows: 24))
+        }
 
         #expect(adapter.focusedSurfaces == [surface])
         #expect(adapter.resizeRequests.contains(ResizeRequest(surface: surface, columns: 132, rows: 43)))
@@ -107,14 +109,29 @@ struct TerminalHostIntegrationTests {
         controller.onSurfaceExited = { exitedEvents.append(($0, $1)) }
 
         _ = try await controller.createSurface(for: tab)
-        try await Task.sleep(for: .milliseconds(25))
+        try await waitUntil("terminal exit callback") {
+            exitedEvents.count == 1
+        }
 
         #expect(exitedEvents.map(\.0) == [tab.id])
         #expect(exitedEvents.map(\.1) == [0])
     }
 
     @Test
-    func liveTerminalHostRelayoutsTextViewAfterZeroSizedInitialAttach() async throws {
+    func embeddedShellPreventsCloseWhileProcessIsRunning() async throws {
+        let controller = TerminalHostController()
+        let workingDirectory = try makeTemporaryDirectory()
+        let tab = WorkspaceTab(sessionID: UUID(), workingDirectory: workingDirectory, ordinal: 0)
+
+        let surface = try await controller.createSurface(for: tab)
+
+        #expect(await controller.canClose(surface: surface) == false)
+
+        controller.releaseSurface(for: tab.id)
+    }
+
+    @Test
+    func liveTerminalHostRelayoutsSwiftTermViewAfterZeroSizedInitialAttach() async throws {
         let controller = TerminalHostController()
         let workingDirectory = try makeTemporaryDirectory()
         let tab = WorkspaceTab(sessionID: UUID(), workingDirectory: workingDirectory, ordinal: 0)
@@ -122,12 +139,15 @@ struct TerminalHostIntegrationTests {
 
         _ = try await controller.createSurface(for: tab)
         view.setFrameSize(NSSize(width: 800, height: 320))
-        try await Task.sleep(for: .milliseconds(25))
+        try await waitUntil("swiftterm view attachment") {
+            guard let terminalView = view.localProcessTerminalView else { return false }
+            return terminalView.frame.width > 0 && terminalView.frame.height > 0 && terminalView.process.running
+        }
 
-        let textView = try #require(view.terminalTextView)
-        #expect(textView.frame.width > 0)
-        #expect(textView.frame.height > 0)
-        #expect(textView.string.contains("Another ADE terminal"))
+        let terminalView = try #require(view.localProcessTerminalView)
+        #expect(terminalView.frame.width > 0)
+        #expect(terminalView.frame.height > 0)
+        #expect(terminalView.process.running)
 
         controller.releaseSurface(for: tab.id)
     }
@@ -197,6 +217,30 @@ private func makeTemporaryDirectory() throws -> String {
         .appendingPathComponent("native-mac-ade-terminal-host-\(UUID().uuidString)", isDirectory: true)
     try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
     return url.path
+}
+
+@MainActor
+private func waitUntil(
+    _ description: String,
+    timeout: Duration = .seconds(1),
+    pollInterval: Duration = .milliseconds(10),
+    condition: @MainActor () -> Bool
+) async throws {
+    let clock = ContinuousClock()
+    let deadline = clock.now.advanced(by: timeout)
+
+    while clock.now < deadline {
+        if condition() {
+            return
+        }
+        try await Task.sleep(for: pollInterval)
+    }
+
+    throw WaitTimeoutError(description: description)
+}
+
+private struct WaitTimeoutError: Error, CustomStringConvertible {
+    let description: String
 }
 
 private extension NSColor {

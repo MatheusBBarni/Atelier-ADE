@@ -11,6 +11,9 @@ let package = Package(
         .executable(name: "NativeMacADE", targets: ["NativeMacADE"]),
         .library(name: "NativeMacADECore", targets: ["NativeMacADECore"])
     ],
+    dependencies: [
+        .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", from: "1.13.0")
+    ],
     targets: [
         .executableTarget(
             name: "NativeMacADE",
@@ -25,7 +28,10 @@ let package = Package(
         ),
         .target(
             name: "NativeMacADECore",
-            dependencies: ["CGhostty"]
+            dependencies: [
+                "CGhostty",
+                .product(name: "SwiftTerm", package: "SwiftTerm")
+            ]
         ),
         .testTarget(
             name: "NativeMacADECoreTests",
