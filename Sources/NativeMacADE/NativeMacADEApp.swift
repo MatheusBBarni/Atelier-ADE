@@ -27,6 +27,11 @@ struct NativeMacADEApp: App {
         .windowStyle(.titleBar)
         .commands {
             CommandGroup(replacing: .newItem) {
+                Button("Toggle Sidebar") {
+                    NotificationCenter.default.post(name: .toggleWorkspaceSidebar, object: nil)
+                }
+                .keyboardShortcut("b", modifiers: [.command])
+
                 Button("New Session") {
                     guard let selectedProjectID = workspaceStore.selectedProjectID else { return }
                     Task { try? await commandService.createSession(projectID: selectedProjectID, shortcutID: nil) }
@@ -61,4 +66,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
     }
+}
+
+extension Notification.Name {
+    static let toggleWorkspaceSidebar = Notification.Name("NativeMacADE.toggleWorkspaceSidebar")
 }

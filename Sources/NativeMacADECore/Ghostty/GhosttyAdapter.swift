@@ -145,6 +145,7 @@ public struct GhosttyLifecycleCallbacks {
 
 @MainActor
 public protocol GhosttyAdapter {
+    var usesEmbeddedSessionDriver: Bool { get }
     func initializeIfNeeded() async throws
     func createSurface(configuration: GhosttyLaunchConfiguration) async throws -> GhosttySurfaceHandle
     func createInheritedSurface(
@@ -157,6 +158,10 @@ public protocol GhosttyAdapter {
     func hasExited(surface: GhosttySurfaceHandle) async -> Bool
     func exitStatus(surface: GhosttySurfaceHandle) async -> Int32?
     func destroySurface(_ surface: GhosttySurfaceHandle)
+}
+
+public extension GhosttyAdapter {
+    var usesEmbeddedSessionDriver: Bool { false }
 }
 
 @MainActor
@@ -182,6 +187,8 @@ public final class LiveGhosttyAdapter: GhosttyAdapter {
         self.runtime = runtime
         self.callbacks = callbacks
     }
+
+    public var usesEmbeddedSessionDriver: Bool { true }
 
     func resetSharedAppContextForTesting() {
         Self.sharedAppContext = nil

@@ -112,6 +112,25 @@ struct TerminalHostIntegrationTests {
         #expect(exitedEvents.map(\.0) == [tab.id])
         #expect(exitedEvents.map(\.1) == [0])
     }
+
+    @Test
+    func liveTerminalHostRelayoutsTextViewAfterZeroSizedInitialAttach() async throws {
+        let controller = TerminalHostController()
+        let workingDirectory = try makeTemporaryDirectory()
+        let tab = WorkspaceTab(sessionID: UUID(), workingDirectory: workingDirectory, ordinal: 0)
+        let view = try #require(controller.makeHostView(for: tab, isActive: true) as? TerminalSurfaceHostNSView)
+
+        _ = try await controller.createSurface(for: tab)
+        view.setFrameSize(NSSize(width: 800, height: 320))
+        try await Task.sleep(for: .milliseconds(25))
+
+        let textView = try #require(view.terminalTextView)
+        #expect(textView.frame.width > 0)
+        #expect(textView.frame.height > 0)
+        #expect(textView.string.contains("Another ADE terminal"))
+
+        controller.releaseSurface(for: tab.id)
+    }
 }
 
 @MainActor
@@ -171,6 +190,13 @@ private struct ResizeRequest: Equatable {
     let surface: GhosttySurfaceHandle
     let columns: Int
     let rows: Int
+}
+
+private func makeTemporaryDirectory() throws -> String {
+    let url = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        .appendingPathComponent("native-mac-ade-terminal-host-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    return url.path
 }
 
 private extension NSColor {

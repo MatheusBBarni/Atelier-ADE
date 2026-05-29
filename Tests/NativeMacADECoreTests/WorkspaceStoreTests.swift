@@ -53,18 +53,21 @@ struct WorkspaceStoreTests {
                     id: olderFirstSessionID,
                     projectID: firstProjectID,
                     title: "Older first",
+                    createdAt: Date(timeIntervalSince1970: 100),
                     lastActivatedAt: Date(timeIntervalSince1970: 100)
                 ),
                 WorkspaceSession(
                     id: newerFirstSessionID,
                     projectID: firstProjectID,
                     title: "Newer first",
+                    createdAt: Date(timeIntervalSince1970: 200),
                     lastActivatedAt: Date(timeIntervalSince1970: 200)
                 ),
                 WorkspaceSession(
                     id: secondSessionID,
                     projectID: secondProjectID,
                     title: "Second",
+                    createdAt: Date(timeIntervalSince1970: 300),
                     lastActivatedAt: Date(timeIntervalSince1970: 300)
                 )
             ],
@@ -90,6 +93,44 @@ struct WorkspaceStoreTests {
         #expect(store.selectedSessionID == secondSessionID)
         #expect(store.tabsForSelectedSession.map(\.id) == [unrelatedTabID])
         #expect(store.selectedTabID == unrelatedTabID)
+    }
+
+    @Test
+    func selectingSessionDoesNotReorderDisplayedSessionList() {
+        let projectID = UUID()
+        let olderSessionID = UUID()
+        let newerSessionID = UUID()
+        let store = WorkspaceStore(
+            projects: [
+                WorkspaceProject(id: projectID, path: "/tmp/project", displayName: "project")
+            ],
+            sessions: [
+                WorkspaceSession(
+                    id: olderSessionID,
+                    projectID: projectID,
+                    title: "Older",
+                    createdAt: Date(timeIntervalSince1970: 100),
+                    lastActivatedAt: Date(timeIntervalSince1970: 300)
+                ),
+                WorkspaceSession(
+                    id: newerSessionID,
+                    projectID: projectID,
+                    title: "Newer",
+                    createdAt: Date(timeIntervalSince1970: 200),
+                    lastActivatedAt: Date(timeIntervalSince1970: 200)
+                )
+            ]
+        )
+
+        store.selectProject(id: projectID)
+
+        #expect(store.selectedSessionID == olderSessionID)
+        #expect(store.sessionsForSelectedProject.map(\.id) == [newerSessionID, olderSessionID])
+
+        store.selectSession(id: newerSessionID)
+
+        #expect(store.selectedSessionID == newerSessionID)
+        #expect(store.sessionsForSelectedProject.map(\.id) == [newerSessionID, olderSessionID])
     }
 
     @Test

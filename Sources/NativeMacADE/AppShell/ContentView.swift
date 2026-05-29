@@ -11,13 +11,12 @@ struct ContentView: View {
     @State private var restoreResult: RestoreWorkspaceResult?
     @State private var pilotDiagnostics: PilotDiagnostics?
     @State private var userMessage: UserMessage?
+    @State private var splitViewVisibility: NavigationSplitViewVisibility = .all
 
     var body: some View {
         ZStack {
-            NavigationSplitView {
+            NavigationSplitView(columnVisibility: $splitViewVisibility) {
                 ProjectSidebarView(store: store, commandService: commandService, userMessage: $userMessage)
-            } content: {
-                SessionListView(store: store, commandService: commandService, userMessage: $userMessage)
             } detail: {
                 WorkspaceDetailView(store: store, commandService: commandService, terminalHostController: terminalHostController, userMessage: $userMessage)
             }
@@ -77,10 +76,19 @@ struct ContentView: View {
         } message: {
             Text(userMessage?.detail ?? "")
         }
+        .onReceive(NotificationCenter.default.publisher(for: .toggleWorkspaceSidebar)) { _ in
+            toggleSidebar()
+        }
     }
 
     private var userMessagePresented: Binding<Bool> {
         Binding(get: { userMessage != nil }, set: { if !$0 { userMessage = nil } })
+    }
+
+    private func toggleSidebar() {
+        withAnimation(.easeInOut(duration: 0.16)) {
+            splitViewVisibility = splitViewVisibility == .detailOnly ? .all : .detailOnly
+        }
     }
 }
 
@@ -199,6 +207,9 @@ struct ProjectSidebarView: View {
     let commandService: any WorkspaceCommandService
     @Binding var userMessage: UserMessage?
     @State private var pendingRemoval: WorkspaceProject?
+    @State private var renameDraft: SessionRenameDraft?
+    @State private var availableShortcuts: [SessionShortcut] = []
+    @State private var expandedProjectIDs: Set<UUID> = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -219,24 +230,81 @@ struct ProjectSidebarView: View {
                     action: openProject
                 )
             } else {
-                List(store.projects, selection: selectedProjectBinding) { project in
-                    ProjectRowView(project: project, isActive: project.id == store.selectedProjectID) {
-                        pendingRemoval = project
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 14) {
+                        ForEach(store.projects) { project in
+                            let projectSessions = sessions(for: project.id)
+                            let isExpanded = expandedProjectIDs.contains(project.id)
+                            VStack(alignment: .leading, spacing: 12) {
+                                ProjectRowView(
+                                    project: project,
+                                    isActive: project.id == store.selectedProjectID,
+                                    isExpanded: isExpanded,
+                                    onToggleDisclosure: {
+                                        toggleProjectExpansion(project.id)
+                                    },
+                                    onSelectProject: {
+                                        selectProject(project.id)
+                                    }
+                                ) {
+                                    pendingRemoval = project
+                                }
+
+                                if isExpanded {
+                                    VStack(alignment: .leading, spacing: 12) {
+                                        Text("Sessions")
+                                            .font(.caption.weight(.semibold))
+                                            .foregroundStyle(NordTheme.mutedText.color)
+
+                                        if !availableShortcuts.isEmpty {
+                                            SessionShortcutPicker(shortcuts: availableShortcuts) { shortcut in
+                                                createSession(projectID: project.id, shortcutID: shortcut?.id)
+                                            }
+                                        }
+
+                                        if projectSessions.isEmpty {
+                                            SidebarInlineEmptyState(
+                                                title: "No sessions yet",
+                                                message: "Create a session and its first terminal tab will start in this project.",
+                                                actionTitle: "New Session",
+                                                action: {
+                                                    createSession(projectID: project.id)
+                                                }
+                                            )
+                                        } else {
+                                            VStack(alignment: .leading, spacing: 8) {
+                                                ForEach(projectSessions) { session in
+                                                    SessionRowView(session: session, isActive: session.id == store.selectedSessionID) {
+                                                        renameDraft = SessionRenameDraft(session: session)
+                                                    }
+                                                    .onTapGesture {
+                                                        selectSession(session.id)
+                                                    }
+                                                    if session.id != projectSessions.last?.id {
+                                                        Divider()
+                                                            .overlay(NordTheme.polarNight3.color.opacity(0.65))
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    .padding(.top, 4)
+                                }
+                            }
+                            .padding(12)
+                            .background(NordTheme.elevatedBackground.color.opacity(0.82), in: RoundedRectangle(cornerRadius: 18))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 18)
+                                    .stroke(project.id == store.selectedProjectID ? NordTheme.activeBorder.color.opacity(0.85) : NordTheme.polarNight3.color.opacity(0.65), lineWidth: 1)
+                            }
+                        }
                     }
-                        .tag(project.id)
-                        .contextMenu {
-                            Button("Select") { selectProject(project.id) }
-                            Button("Remove Project", role: .destructive) { pendingRemoval = project }
-                        }
-                        .swipeActions(edge: .trailing) {
-                            Button("Remove", role: .destructive) { pendingRemoval = project }
-                        }
+                    .padding(16)
                 }
-                .scrollContentBackground(.hidden)
             }
         }
         .background(NordTheme.sidebarBackground.color)
-        .navigationSplitViewColumnWidth(min: 240, ideal: 280)
+        .navigationSplitViewColumnWidth(min: 280, ideal: 360)
         .confirmationDialog("Remove project?", isPresented: removalDialogBinding, titleVisibility: .visible) {
             Button("Remove Project", role: .destructive) {
                 guard let pendingRemoval else { return }
@@ -246,10 +314,26 @@ struct ProjectSidebarView: View {
         } message: {
             Text("Sessions and tabs for this project will be removed from the workspace metadata. This does not delete files from disk.")
         }
-    }
-
-    private var selectedProjectBinding: Binding<WorkspaceProject.ID?> {
-        Binding(get: { store.selectedProjectID }, set: { selectProject($0) })
+        .sheet(item: $renameDraft) { draft in
+            SessionRenameView(draft: draft) { sessionID, title in
+                Task {
+                    do {
+                        try await commandService.renameSession(sessionID: sessionID, title: title)
+                        renameDraft = nil
+                    } catch {
+                        userMessage = UserMessage(title: "Session could not be renamed", detail: String(describing: error))
+                    }
+                }
+            } onCancel: {
+                renameDraft = nil
+            }
+        }
+        .task(id: store.selectedProjectID) {
+            if let selectedProjectID = store.selectedProjectID {
+                expandedProjectIDs.insert(selectedProjectID)
+            }
+            await loadShortcuts()
+        }
     }
 
     private var removalDialogBinding: Binding<Bool> {
@@ -260,7 +344,8 @@ struct ProjectSidebarView: View {
         guard let path = ProjectDirectoryPicker.chooseDirectoryPath() else { return }
         Task {
             do {
-                _ = try await commandService.openProject(path: path)
+                let project = try await commandService.openProject(path: path)
+                expandProject(project.id)
             } catch {
                 userMessage = UserMessage(title: "Project could not be opened", detail: String(describing: error))
             }
@@ -271,6 +356,7 @@ struct ProjectSidebarView: View {
         Task {
             do {
                 try await commandService.removeProject(id: project.id)
+                expandedProjectIDs.remove(project.id)
                 pendingRemoval = nil
             } catch {
                 userMessage = UserMessage(title: "Project could not be removed", detail: String(describing: error))
@@ -287,36 +373,121 @@ struct ProjectSidebarView: View {
             }
         }
     }
+
+    private func createSession() {
+        guard let selectedProjectID = store.selectedProjectID else { return }
+        createSession(projectID: selectedProjectID, shortcutID: nil)
+    }
+
+    private func createSession(projectID: UUID, shortcutID: UUID? = nil) {
+        Task {
+            do {
+                expandProject(projectID)
+                let session = try await commandService.createSession(projectID: projectID, shortcutID: shortcutID)
+                if shortcutID == nil {
+                    _ = try await commandService.createTab(sessionID: session.id)
+                }
+            } catch {
+                userMessage = UserMessage(title: "Session could not be created", detail: String(describing: error))
+            }
+        }
+    }
+
+    private func loadShortcuts() async {
+        guard store.selectedProjectID != nil else {
+            availableShortcuts = []
+            return
+        }
+        do {
+            availableShortcuts = try await commandService.availableSessionShortcuts()
+        } catch {
+            userMessage = UserMessage(title: "Shortcuts could not be loaded", detail: String(describing: error))
+        }
+    }
+
+    private func selectSession(_ id: UUID?) {
+        Task {
+            do {
+                try await commandService.selectSession(id: id)
+                if let id,
+                   !store.tabs.contains(where: { $0.sessionID == id }) {
+                    _ = try await commandService.createTab(sessionID: id)
+                }
+            } catch {
+                userMessage = UserMessage(title: "Session selection could not be saved", detail: String(describing: error))
+            }
+        }
+    }
+
+    private func sessions(for projectID: UUID) -> [WorkspaceSession] {
+        store.orderedSessions(for: projectID)
+    }
+
+    private func expandProject(_ id: UUID) {
+        expandedProjectIDs.insert(id)
+    }
+
+    private func toggleProjectExpansion(_ id: UUID) {
+        if expandedProjectIDs.contains(id) {
+            expandedProjectIDs.remove(id)
+        } else {
+            expandedProjectIDs.insert(id)
+        }
+    }
 }
 
 struct ProjectRowView: View {
     let project: WorkspaceProject
     let isActive: Bool
+    let isExpanded: Bool
+    let onToggleDisclosure: () -> Void
+    let onSelectProject: () -> Void
     let onRemove: () -> Void
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: isActive ? "folder.fill" : "folder")
-                .foregroundStyle(isActive ? NordTheme.snowStorm2.color : NordTheme.frost1.color)
-                .frame(width: 20)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(project.displayName)
-                    .font(.headline)
-                    .foregroundStyle(NordTheme.primaryText.color)
-                    .lineLimit(1)
-                Text(project.path)
-                    .font(.caption.monospaced())
+            Button(action: onToggleDisclosure) {
+                Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(NordTheme.mutedText.color)
-                    .lineLimit(1)
+                    .frame(width: 12)
             }
-            Spacer(minLength: 8)
+            .buttonStyle(.plain)
+            .help(isExpanded ? "Collapse sessions" : "Expand sessions")
+
+            Button(action: onSelectProject) {
+                HStack(spacing: 10) {
+                    Image(systemName: isActive ? "folder.fill" : "folder")
+                        .foregroundStyle(isActive ? NordTheme.snowStorm2.color : NordTheme.frost1.color)
+                        .frame(width: 20)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(project.displayName)
+                            .font(.headline)
+                            .foregroundStyle(NordTheme.primaryText.color)
+                            .lineLimit(1)
+                        Text(project.path)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(NordTheme.mutedText.color)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 8)
+                    if isActive {
+                        Text("Active")
+                            .font(.caption2.weight(.bold))
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 4)
+                            .background(NordTheme.activeBorder.color.opacity(0.22), in: Capsule())
+                            .foregroundStyle(NordTheme.snowStorm2.color)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(project.displayName)
+            .accessibilityValue(projectAccessibilityValue)
+
             if isActive {
-                Text("Active")
-                    .font(.caption2.weight(.bold))
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 4)
-                    .background(NordTheme.activeBorder.color.opacity(0.22), in: Capsule())
-                    .foregroundStyle(NordTheme.snowStorm2.color)
                 Button("Remove", systemImage: "trash", role: .destructive, action: onRemove)
                     .labelStyle(.iconOnly)
                     .buttonStyle(.borderless)
@@ -331,10 +502,19 @@ struct ProjectRowView: View {
             RoundedRectangle(cornerRadius: 10)
                 .stroke(isActive ? NordTheme.activeBorder.color : Color.clear, lineWidth: 1)
         }
-        .contentShape(Rectangle())
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(project.displayName)
-        .accessibilityValue(isActive ? "Active project" : "Project")
+    }
+
+    private var projectAccessibilityValue: String {
+        switch (isActive, isExpanded) {
+        case (true, true):
+            return "Active project, expanded"
+        case (true, false):
+            return "Active project, collapsed"
+        case (false, true):
+            return "Project, expanded"
+        case (false, false):
+            return "Project, collapsed"
+        }
     }
 }
 
@@ -455,6 +635,30 @@ struct SessionListView: View {
     }
 }
 
+struct SidebarInlineEmptyState: View {
+    let title: String
+    let message: String
+    let actionTitle: String
+    let action: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(NordTheme.primaryText.color)
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(NordTheme.secondaryText.color)
+            Button(actionTitle, action: action)
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(NordTheme.shellBackground.color.opacity(0.6), in: RoundedRectangle(cornerRadius: 12))
+    }
+}
+
 struct SessionShortcutPicker: View {
     let shortcuts: [SessionShortcut]
     let onPick: (SessionShortcut?) -> Void
@@ -507,6 +711,7 @@ struct SessionRowView: View {
                     .help("Rename active session")
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 8)
         .padding(.horizontal, 6)
         .background(isActive ? NordTheme.activeBackground.color.opacity(0.32) : Color.clear, in: RoundedRectangle(cornerRadius: 10))
@@ -514,6 +719,7 @@ struct SessionRowView: View {
             RoundedRectangle(cornerRadius: 10)
                 .stroke(isActive ? NordTheme.activeBorder.color : Color.clear, lineWidth: 1)
         }
+        .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
         .accessibilityLabel(session.title)
         .accessibilityValue(isActive ? "Active session" : "Session")

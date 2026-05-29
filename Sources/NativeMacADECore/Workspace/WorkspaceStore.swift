@@ -45,9 +45,13 @@ public final class WorkspaceStore {
 
     public var sessionsForSelectedProject: [WorkspaceSession] {
         guard let selectedProjectID else { return [] }
-        return sessions
-            .filter { $0.projectID == selectedProjectID }
-            .sorted { $0.lastActivatedAt > $1.lastActivatedAt }
+        return orderedSessions(for: selectedProjectID)
+    }
+
+    public func orderedSessions(for projectID: UUID) -> [WorkspaceSession] {
+        sessions
+            .filter { $0.projectID == projectID }
+            .sorted(by: Self.sessionDisplaySort)
     }
 
     public var tabsForSelectedSession: [WorkspaceTab] {
@@ -74,7 +78,7 @@ public final class WorkspaceStore {
             return
         }
 
-        selectedSessionID = sessionsForSelectedProject.first?.id
+        selectedSessionID = preferredSessionID(for: id)
         ensureSelectedTabBelongsToSelectedSession()
     }
 
@@ -166,7 +170,7 @@ public final class WorkspaceStore {
         }
 
         if let removed, selectedProjectID == removed.projectID {
-            selectedSessionID = sessionsForSelectedProject.first?.id
+            selectedSessionID = preferredSessionID(for: removed.projectID)
             ensureSelectedTabBelongsToSelectedSession()
         } else {
             normalizeSelection()
@@ -304,8 +308,36 @@ public final class WorkspaceStore {
             return
         }
 
-        self.selectedSessionID = sessionsForSelectedProject.first?.id
+        self.selectedSessionID = preferredSessionID(for: selectedProjectID)
         ensureSelectedTabBelongsToSelectedSession()
+    }
+
+    private func preferredSessionID(for projectID: UUID) -> UUID? {
+        sessions
+            .filter { $0.projectID == projectID }
+            .sorted(by: Self.sessionSelectionSort)
+            .first?
+            .id
+    }
+
+    private static func sessionDisplaySort(_ lhs: WorkspaceSession, _ rhs: WorkspaceSession) -> Bool {
+        if lhs.createdAt != rhs.createdAt {
+            return lhs.createdAt > rhs.createdAt
+        }
+
+        return lhs.id.uuidString > rhs.id.uuidString
+    }
+
+    private static func sessionSelectionSort(_ lhs: WorkspaceSession, _ rhs: WorkspaceSession) -> Bool {
+        if lhs.lastActivatedAt != rhs.lastActivatedAt {
+            return lhs.lastActivatedAt > rhs.lastActivatedAt
+        }
+
+        if lhs.createdAt != rhs.createdAt {
+            return lhs.createdAt > rhs.createdAt
+        }
+
+        return lhs.id.uuidString > rhs.id.uuidString
     }
 
     public static func defaultSessionTitle(date: Date) -> String {
