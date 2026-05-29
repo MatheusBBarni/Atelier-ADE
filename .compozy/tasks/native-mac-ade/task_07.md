@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Implement restore coordinator and relaunch recovery flow"
 type: backend
 complexity: high
@@ -32,11 +32,11 @@ Implement the V1 relaunch behavior that reconstructs the workspace from saved me
 </requirements>
 
 ## Subtasks
-- [ ] 7.1 Implement the restore coordinator and launch-time replay flow.
-- [ ] 7.2 Load and validate the active restore snapshot and rebuild the workspace context from metadata.
-- [ ] 7.3 Recreate fresh terminal tabs through the existing command and terminal-host boundaries.
-- [ ] 7.4 Add missing-project recovery handling and visible user recovery feedback.
-- [ ] 7.5 Add tests for happy-path restore, partial restore, and skipped-project recovery behavior.
+- [x] 7.1 Implement the restore coordinator and launch-time replay flow.
+- [x] 7.2 Load and validate the active restore snapshot and rebuild the workspace context from metadata.
+- [x] 7.3 Recreate fresh terminal tabs through the existing command and terminal-host boundaries.
+- [x] 7.4 Add missing-project recovery handling and visible user recovery feedback.
+- [x] 7.5 Add tests for happy-path restore, partial restore, and skipped-project recovery behavior.
 
 ## Implementation Details
 Follow TechSpec "Restore Coordinator" and "Development Sequencing > Build Order" step 6. Restoration is app-owned and metadata-only per ADR-005, so this task must stop short of any live shell persistence, checkpointing, or deep history replay.
@@ -70,13 +70,13 @@ Follow TechSpec "Restore Coordinator" and "Development Sequencing > Build Order"
 
 ## Tests
 - Unit tests:
-  - [ ] Restoring a valid snapshot selects the expected project, session, and tab IDs.
-  - [ ] Restore replay reopens fresh shells instead of attempting live-session attachment.
-  - [ ] Skipping an inaccessible project leaves the remaining restored projects and tabs intact.
+  - [x] Restoring a valid snapshot selects the expected project, session, and tab IDs.
+  - [x] Restore replay reopens fresh shells instead of attempting live-session attachment.
+  - [x] Skipping an inaccessible project leaves the remaining restored projects and tabs intact.
 - Integration tests:
-  - [ ] Relaunch with a valid snapshot reconstructs the same visible project/session/tab layout from metadata.
-  - [ ] Relaunch with one missing project path restores the remaining context and surfaces recovery UI for the skipped item.
-  - [ ] Corrupted or incomplete snapshot data fails safely without crashing the app and returns the user to a recoverable workspace state.
+  - [x] Relaunch with a valid snapshot reconstructs the same visible project/session/tab layout from metadata.
+  - [x] Relaunch with one missing project path restores the remaining context and surfaces recovery UI for the skipped item.
+  - [x] Corrupted or incomplete snapshot data fails safely without crashing the app and returns the user to a recoverable workspace state.
 - Test coverage target: >=80%
 - All tests must pass
 

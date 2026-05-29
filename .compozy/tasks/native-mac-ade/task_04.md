@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Implement workspace store and command services"
 type: backend
 complexity: high
@@ -29,11 +29,11 @@ Implement the in-memory workspace source of truth and the command boundary that 
 </requirements>
 
 ## Subtasks
-- [ ] 4.1 Add workspace state structures for opened projects, selected context, sessions, and tabs.
-- [ ] 4.2 Implement the store update rules for selection, recency, and tab/session membership.
-- [ ] 4.3 Implement the default command service for project open, session create/rename, tab create/close, and restore invocation.
-- [ ] 4.4 Add typed command and validation errors for invalid project, session, tab, and terminal lifecycle states.
-- [ ] 4.5 Add tests that verify state transitions, duplicate handling, and failure rollback behavior.
+- [x] 4.1 Add workspace state structures for opened projects, selected context, sessions, and tabs.
+- [x] 4.2 Implement the store update rules for selection, recency, and tab/session membership.
+- [x] 4.3 Implement the default command service for project open, session create/rename, tab create/close, and restore invocation.
+- [x] 4.4 Add typed command and validation errors for invalid project, session, tab, and terminal lifecycle states.
+- [x] 4.5 Add tests that verify state transitions, duplicate handling, and failure rollback behavior.
 
 ## Implementation Details
 Reference TechSpec "Core Interfaces" and "System Architecture > Component Overview" for the command boundary and store responsibilities. This task should stay narrow: local command services, no event bus, no external API, and no background orchestration abstractions.
@@ -69,14 +69,14 @@ Reference TechSpec "Core Interfaces" and "System Architecture > Component Overvi
 
 ## Tests
 - Unit tests:
-  - [ ] Opening an already-known project reselects the existing project instead of duplicating it.
-  - [ ] Creating a session assigns a default timestamp title and links it to the selected project.
-  - [ ] Renaming a session updates the title and flips `isUserNamed` to true.
-  - [ ] Creating a tab inherits the current project/session context and updates selection state.
+  - [x] Opening an already-known project reselects the existing project instead of duplicating it.
+  - [x] Creating a session assigns a default timestamp title and links it to the selected project.
+  - [x] Renaming a session updates the title and flips `isUserNamed` to true.
+  - [x] Creating a tab inherits the current project/session context and updates selection state.
 - Integration tests:
-  - [ ] A failed tab creation request leaves persistence and in-memory tab state unchanged.
-  - [ ] Restoring a saved project/session/tab graph reconstructs the same selected context in the store.
-  - [ ] Closing the last tab in a session updates store state without leaving stale selected-tab references.
+  - [x] A failed tab creation request leaves persistence and in-memory tab state unchanged.
+  - [x] Restoring a saved project/session/tab graph reconstructs the same selected context in the store.
+  - [x] Closing the last tab in a session updates store state without leaving stale selected-tab references.
 - Test coverage target: >=80%
 - All tests must pass
 

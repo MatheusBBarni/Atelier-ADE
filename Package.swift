@@ -14,7 +14,10 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "NativeMacADE",
-            dependencies: ["NativeMacADECore"]
+            dependencies: ["NativeMacADECore"],
+            resources: [
+                .process("Resources")
+            ]
         ),
         .target(
             name: "CGhostty",

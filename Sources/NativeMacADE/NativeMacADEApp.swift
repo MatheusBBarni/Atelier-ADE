@@ -1,8 +1,10 @@
+import AppKit
 import NativeMacADECore
 import SwiftUI
 
 @main
 struct NativeMacADEApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var workspaceStore: WorkspaceStore
     private let commandService: any WorkspaceCommandService
     private let terminalHostController: TerminalHostController
@@ -15,6 +17,7 @@ struct NativeMacADEApp: App {
         _workspaceStore = State(initialValue: container.workspaceStore)
         commandService = container.workspaceCommandService
         terminalHostController = container.terminalHostController
+        Self.installApplicationIcon()
     }
 
     var body: some Scene {
@@ -39,5 +42,23 @@ struct NativeMacADEApp: App {
                 .disabled(workspaceStore.selectedSession == nil)
             }
         }
+    }
+
+    private static func installApplicationIcon() {
+        guard let iconURL = Bundle.module.url(forResource: "AppIcon", withExtension: "png"),
+              let iconImage = NSImage(contentsOf: iconURL)
+        else {
+            return
+        }
+
+        iconImage.size = NSSize(width: 512, height: 512)
+        NSApplication.shared.applicationIconImage = iconImage
+    }
+}
+
+private final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
     }
 }

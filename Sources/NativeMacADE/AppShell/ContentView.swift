@@ -56,7 +56,7 @@ struct ContentView: View {
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
-        .navigationTitle("Native Mac ADE")
+        .navigationTitle("Another ADE")
         .frame(minWidth: 1_040, minHeight: 680)
         .background(NordTheme.shellBackground.color)
         .preferredColorScheme(.dark)

@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Add lightweight session shortcuts and pilot observability polish"
 type: backend
 complexity: medium
@@ -31,11 +31,11 @@ Add the optional session shortcuts and pilot diagnostics that round out the V1 w
 </requirements>
 
 ## Subtasks
-- [ ] 8.1 Add lightweight session shortcut definitions, persistence support, and launch-profile mapping.
-- [ ] 8.2 Extend session creation flows so users can choose an optional shortcut without changing session semantics.
-- [ ] 8.3 Add local structured log events and pilot metrics for workspace, restore, and terminal lifecycle flows.
-- [ ] 8.4 Add pilot-oriented diagnostics or debug surfaces needed to inspect release-blocking regressions locally.
-- [ ] 8.5 Add tests for shortcut launch mapping and observability event coverage.
+- [x] 8.1 Add lightweight session shortcut definitions, persistence support, and launch-profile mapping.
+- [x] 8.2 Extend session creation flows so users can choose an optional shortcut without changing session semantics.
+- [x] 8.3 Add local structured log events and pilot metrics for workspace, restore, and terminal lifecycle flows.
+- [x] 8.4 Add pilot-oriented diagnostics or debug surfaces needed to inspect release-blocking regressions locally.
+- [x] 8.5 Add tests for shortcut launch mapping and observability event coverage.
 
 ## Implementation Details
 Use TechSpec "Monitoring and Observability" and the PRD's lightweight shortcut scope to keep this work narrow. Do not turn shortcuts into an agent-first abstraction or turn observability into backend alerting; both must stay local and app-owned in V1.
@@ -69,13 +69,13 @@ Use TechSpec "Monitoring and Observability" and the PRD's lightweight shortcut s
 
 ## Tests
 - Unit tests:
-  - [ ] Selecting a shortcut when creating a session stores the expected shortcut ID and launch profile metadata.
-  - [ ] Shortcut launch mapping produces the expected command and argument set for the Ghostty launch config.
-  - [ ] Structured log payloads include hashed project identifiers and the required event fields.
+  - [x] Selecting a shortcut when creating a session stores the expected shortcut ID and launch profile metadata.
+  - [x] Shortcut launch mapping produces the expected command and argument set for the Ghostty launch config.
+  - [x] Structured log payloads include hashed project identifiers and the required event fields.
 - Integration tests:
-  - [ ] Creating a session with a lightweight shortcut launches the first tab with the expected shortcut-derived configuration.
-  - [ ] Restore replay preserves shortcut-linked launch intent when reconstructing a session from metadata.
-  - [ ] Terminal-surface failure and restore failure paths emit the expected pilot diagnostics without backend dependencies.
+  - [x] Creating a session with a lightweight shortcut launches the first tab with the expected shortcut-derived configuration.
+  - [x] Restore replay preserves shortcut-linked launch intent when reconstructing a session from metadata.
+  - [x] Terminal-surface failure and restore failure paths emit the expected pilot diagnostics without backend dependencies.
 - Test coverage target: >=80%
 - All tests must pass
 
