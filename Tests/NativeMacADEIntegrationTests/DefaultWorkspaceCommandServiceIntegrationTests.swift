@@ -665,6 +665,26 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
     }
 
     @Test
+    func openingFileTabProducesEditorPresentationAndKeepsTerminalSurfaceIsolated() async throws {
+        let harness = try makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+        let fileURL = try makeTemporaryProjectFile(in: projectPath, relativePath: "Sources/File.swift")
+        let project = try await harness.service.openProject(path: projectPath)
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let terminalTab = try #require(harness.store.tabs.first)
+
+        let fileTab = try await harness.service.openFileTab(sessionID: session.id, path: fileURL.path)
+        let presentation = FileEditorPresentation(tab: fileTab, buffer: harness.fileBuffers.buffer(for: fileTab.id))
+
+        #expect(harness.store.selectedTabID == fileTab.id)
+        #expect(harness.store.tabsForSelectedSession.map(\.kind) == [.terminal, .file])
+        #expect(presentation?.title == "File.swift")
+        #expect(presentation?.languageConfigurationKey == "swift")
+        #expect(presentation?.isDirty == false)
+        #expect(harness.terminal.createdTabs.map(\.id) == [terminalTab.id])
+    }
+
+    @Test
     func fileOpenEditSavePersistsMetadataAndWritesSavedContentsToDisk() async throws {
         let harness = try makeHarness()
         let projectPath = try makeTemporaryProjectDirectory()

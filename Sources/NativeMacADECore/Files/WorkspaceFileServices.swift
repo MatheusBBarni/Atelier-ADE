@@ -253,7 +253,7 @@ public final class WorkspaceFileBufferController: WorkspaceFileBufferManaging {
             fileReference: fileReference,
             text: text,
             savedText: text,
-            languageConfigurationKey: Self.languageConfigurationKey(for: fileReference.path),
+            languageConfigurationKey: Self.languageConfigurationKey(forPath: fileReference.path),
             lastLoadedAt: now()
         )
     }
@@ -300,7 +300,7 @@ public final class WorkspaceFileBufferController: WorkspaceFileBufferManaging {
             fileReference: fileReference,
             text: text,
             savedText: text,
-            languageConfigurationKey: Self.languageConfigurationKey(for: fileReference.path),
+            languageConfigurationKey: Self.languageConfigurationKey(forPath: fileReference.path),
             editorPosition: existingPosition,
             lastLoadedAt: now()
         )
@@ -320,10 +320,20 @@ public final class WorkspaceFileBufferController: WorkspaceFileBufferManaging {
         return fileReference
     }
 
-    private static func languageConfigurationKey(for path: String) -> String {
+    nonisolated public static func languageConfigurationKey(forPath path: String) -> String {
         switch URL(fileURLWithPath: path).pathExtension.lowercased() {
         case "swift":
             return "swift"
+        case "sql", "sqlite":
+            return "sqlite"
+        case "hs", "lhs":
+            return "haskell"
+        case "agda":
+            return "agda"
+        case "cabal":
+            return "cabal"
+        case "cypher", "cql":
+            return "cypher"
         case "js", "jsx", "mjs", "cjs":
             return "javascript"
         case "ts", "tsx":

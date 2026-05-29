@@ -1,4 +1,6 @@
 import AppKit
+@preconcurrency import CodeEditorView
+import LanguageSupport
 import NativeMacADECore
 import SwiftUI
 
@@ -29,6 +31,8 @@ struct ContentView: View {
     let store: WorkspaceStore
     let commandService: any WorkspaceCommandService
     let terminalHostController: TerminalHostController
+    let fileAccessService: any WorkspaceFileAccessing
+    let fileBufferController: any WorkspaceFileBufferManaging
     @State private var didRequestRestore = false
     @State private var isRestoring = true
     @State private var restoreResult: RestoreWorkspaceResult?
@@ -46,6 +50,8 @@ struct ContentView: View {
                     store: store,
                     commandService: commandService,
                     terminalHostController: terminalHostController,
+                    fileAccessService: fileAccessService,
+                    fileBufferController: fileBufferController,
                     userMessage: $userMessage,
                     onOpenSettings: { shellState.presentSettings(source: .visibleEntryPoint) },
                     isSidebarCollapsed: splitViewVisibility == .detailOnly
@@ -1049,10 +1055,13 @@ struct WorkspaceDetailView: View {
     let store: WorkspaceStore
     let commandService: any WorkspaceCommandService
     let terminalHostController: TerminalHostController
+    let fileAccessService: any WorkspaceFileAccessing
+    let fileBufferController: any WorkspaceFileBufferManaging
     @Binding var userMessage: UserMessage?
     let onOpenSettings: () -> Void
     let isSidebarCollapsed: Bool
     @Environment(\.shellThemePalette) private var theme
+    @State private var fileBufferRevision = 0
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1063,17 +1072,40 @@ struct WorkspaceDetailView: View {
                 onOpenSettings: onOpenSettings,
                 isSidebarCollapsed: isSidebarCollapsed
             )
-            TabChromeView(store: store, commandService: commandService, userMessage: $userMessage)
-            Divider().overlay(theme.border.color)
-            TerminalHostAreaView(
+            TabChromeView(
                 store: store,
                 commandService: commandService,
-                terminalHostController: terminalHostController,
+                fileBufferController: fileBufferController,
+                fileBufferRevision: fileBufferRevision,
                 userMessage: $userMessage
             )
+            Divider().overlay(theme.border.color)
+            HSplitView {
+                WorkspacePrimaryHostAreaView(
+                    store: store,
+                    commandService: commandService,
+                    terminalHostController: terminalHostController,
+                    fileBufferController: fileBufferController,
+                    userMessage: $userMessage
+                )
+                .frame(minWidth: 420)
+
+                FileWorkspaceSidebarView(
+                    store: store,
+                    commandService: commandService,
+                    fileAccessService: fileAccessService,
+                    fileBufferController: fileBufferController,
+                    fileBufferRevision: fileBufferRevision,
+                    userMessage: $userMessage
+                )
+                .frame(minWidth: 280, idealWidth: 340, maxWidth: 460)
+            }
         }
         .background(theme.contentBackground.color)
         .ignoresSafeArea(.container, edges: .top)
+        .onReceive(NotificationCenter.default.publisher(for: .fileBufferDirtyStateChanged)) { _ in
+            fileBufferRevision += 1
+        }
     }
 
     private func showSessionCommandPalette() {
@@ -1129,10 +1161,13 @@ struct ActiveContextBanner: View {
 struct TabChromeView: View {
     let store: WorkspaceStore
     let commandService: any WorkspaceCommandService
+    let fileBufferController: any WorkspaceFileBufferManaging
+    let fileBufferRevision: Int
     @Binding var userMessage: UserMessage?
     @Environment(\.shellThemePalette) private var theme
 
     var body: some View {
+        let _ = fileBufferRevision
         ScrollView(.horizontal) {
             HStack(spacing: 6) {
                 if store.tabsForSelectedSession.isEmpty {
@@ -1144,6 +1179,7 @@ struct TabChromeView: View {
                         TabItemView(
                             tab: tab,
                             isActive: tab.id == store.selectedTabID,
+                            isDirty: tab.kind == .file && fileBufferController.isDirty(tabID: tab.id),
                             onSelect: { selectTab(tab.id) },
                             onClose: { closeTab(tab.id) }
                         )
@@ -1208,6 +1244,7 @@ struct TabChromeView: View {
 struct TabItemView: View {
     let tab: WorkspaceTab
     let isActive: Bool
+    let isDirty: Bool
     let onSelect: () -> Void
     let onClose: () -> Void
     @Environment(\.shellThemePalette) private var theme
@@ -1215,9 +1252,17 @@ struct TabItemView: View {
     var body: some View {
         HStack(spacing: 6) {
             Button(action: onSelect) {
-                Label(title, systemImage: iconName)
-                    .labelStyle(.titleAndIcon)
-                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Image(systemName: iconName)
+                    Text(title)
+                        .lineLimit(1)
+                    if isDirty {
+                        Circle()
+                            .fill(theme.warning.color)
+                            .frame(width: 6, height: 6)
+                            .accessibilityLabel("Unsaved changes")
+                    }
+                }
             }
             .buttonStyle(.plain)
             .foregroundStyle(isActive ? theme.primaryText.color : theme.secondaryText.color)
@@ -1265,7 +1310,7 @@ struct TabItemView: View {
         case .terminal:
             return "Close terminal tab"
         case .file:
-            return "Close file tab"
+            return isDirty ? "Close file tab with unsaved changes" : "Close file tab"
         }
     }
 
@@ -1274,15 +1319,16 @@ struct TabItemView: View {
         case .terminal:
             return "Terminal tab in \(tab.workingDirectory)"
         case .file:
-            return "File tab \(tab.fileReference?.path ?? tab.workingDirectory)"
+            return isDirty ? "Unsaved file tab \(tab.fileReference?.path ?? tab.workingDirectory)" : "File tab \(tab.fileReference?.path ?? tab.workingDirectory)"
         }
     }
 }
 
-struct TerminalHostAreaView: View {
+struct WorkspacePrimaryHostAreaView: View {
     let store: WorkspaceStore
     let commandService: any WorkspaceCommandService
     let terminalHostController: TerminalHostController
+    let fileBufferController: any WorkspaceFileBufferManaging
     @Binding var userMessage: UserMessage?
     @Environment(\.shellThemePalette) private var theme
 
@@ -1299,7 +1345,13 @@ struct TerminalHostAreaView: View {
                 .id(selectedTab.id)
                 .padding(12)
             } else if let selectedTab = store.selectedTab, selectedTab.kind == .file {
-                FileTabPlaceholderView(tab: selectedTab)
+                FileEditorHostView(
+                    tab: selectedTab,
+                    commandService: commandService,
+                    fileBufferController: fileBufferController,
+                    userMessage: $userMessage
+                )
+                .id(selectedTab.id)
             } else {
                 TerminalPlaceholderView(selectedProject: store.selectedProject, selectedSession: store.selectedSession)
             }
@@ -1321,20 +1373,231 @@ struct TerminalHostAreaView: View {
     }
 }
 
-struct FileTabPlaceholderView: View {
+struct FileEditorHostView: View {
     let tab: WorkspaceTab
+    let commandService: any WorkspaceCommandService
+    let fileBufferController: any WorkspaceFileBufferManaging
+    @Binding var userMessage: UserMessage?
+    @Environment(\.shellThemePalette) private var theme
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var editorText = ""
+    @State private var editorPosition = CodeEditor.Position()
+    @State private var messages = Set<TextLocated<Message>>()
+    @State private var bufferSnapshot: FileEditorBuffer?
+    @State private var loadError: String?
+    @State private var isLoading = false
+
+    private var presentation: FileEditorPresentation? {
+        FileEditorPresentation(tab: tab, buffer: bufferSnapshot)
+    }
+
+    private var isDirty: Bool {
+        guard let savedText = bufferSnapshot?.savedText else { return false }
+        return savedText != editorText
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            editorHeader
+            Divider().overlay(theme.border.color)
+            ZStack {
+                theme.contentBackground.color
+                if isLoading {
+                    ProgressView("Loading file...")
+                        .foregroundStyle(theme.secondaryText.color)
+                } else if let loadError {
+                    FileEditorUnavailableView(title: title, message: loadError)
+                } else if presentation != nil {
+                    CodeEditor(
+                        text: editorTextBinding,
+                        position: $editorPosition,
+                        messages: $messages,
+                        language: languageConfiguration
+                    )
+                    .environment(\.codeEditorTheme, codeEditorTheme)
+                    .environment(\.codeEditorLayoutConfiguration, CodeEditor.LayoutConfiguration(showMinimap: false, wrapText: false))
+                    .font(.system(.body, design: .monospaced))
+                    .onChange(of: editorPosition) { _, newPosition in
+                        updateEditorPosition(newPosition)
+                    }
+                } else {
+                    FileEditorUnavailableView(title: "File unavailable", message: tab.fileReference?.path ?? tab.workingDirectory)
+                }
+            }
+        }
+        .background(theme.contentBackground.color)
+        .task(id: tab.id) {
+            await loadBuffer()
+        }
+    }
+
+    private var editorHeader: some View {
+        HStack(spacing: 10) {
+            Image(systemName: isDirty ? "doc.text.fill" : "doc.text")
+                .foregroundStyle(isDirty ? theme.warning.color : theme.accent.color)
+                .frame(width: 18)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.headline)
+                    .foregroundStyle(theme.primaryText.color)
+                    .lineLimit(1)
+                Text(subtitle)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(theme.mutedText.color)
+                    .lineLimit(1)
+                    .textSelection(.enabled)
+            }
+            Spacer(minLength: 12)
+            if isDirty {
+                Text("Unsaved")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(theme.warning.color)
+            }
+            Button("Revert", systemImage: "arrow.uturn.backward", action: revert)
+                .labelStyle(.iconOnly)
+                .buttonStyle(.borderless)
+                .disabled(bufferSnapshot == nil || isLoading)
+                .help("Revert file")
+            Button("Save", systemImage: "square.and.arrow.down", action: save)
+                .labelStyle(.iconOnly)
+                .buttonStyle(.borderless)
+                .disabled(!isDirty || isLoading)
+                .help("Save file")
+            Button("Open Externally", systemImage: "arrow.up.forward.square", action: openExternally)
+                .labelStyle(.iconOnly)
+                .buttonStyle(.borderless)
+                .disabled(bufferSnapshot == nil || isLoading)
+                .help("Open in external editor")
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(theme.elevatedBackground.color.opacity(0.92))
+    }
+
+    private var title: String {
+        presentation?.title ?? tab.fileReference.map { FileEditorPresentation.fileName(for: $0.path) } ?? "File"
+    }
+
+    private var subtitle: String {
+        if let presentation {
+            return presentation.subtitle
+        }
+        return tab.fileReference?.path ?? tab.workingDirectory
+    }
+
+    private var editorTextBinding: Binding<String> {
+        Binding(
+            get: { editorText },
+            set: { newText in
+                editorText = newText
+                fileBufferController.updateBuffer(tabID: tab.id, text: newText)
+                refreshBufferSnapshot()
+                notifyFileBufferChanged()
+            }
+        )
+    }
+
+    private var languageConfiguration: LanguageConfiguration {
+        LanguageConfiguration.atelierConfiguration(for: presentation?.languageConfigurationKey ?? "plaintext")
+    }
+
+    private var codeEditorTheme: Theme {
+        colorScheme == .dark ? Theme.defaultDark : Theme.defaultLight
+    }
+
+    private func loadBuffer() async {
+        isLoading = true
+        loadError = nil
+        do {
+            try await fileBufferController.loadBuffer(for: tab)
+            guard let buffer = fileBufferController.buffer(for: tab.id) else {
+                throw WorkspaceFileBufferError.missingBuffer(tab.id)
+            }
+            bufferSnapshot = buffer
+            editorText = buffer.text
+            editorPosition = CodeEditor.Position(
+                selections: [NSRange(location: buffer.editorPosition.cursorOffset, length: buffer.editorPosition.selectionLength)],
+                verticalScrollPosition: CGFloat(buffer.editorPosition.firstVisibleLine)
+            )
+        } catch {
+            loadError = String(describing: error)
+            userMessage = UserMessage(title: "File unavailable", detail: String(describing: error))
+        }
+        isLoading = false
+        notifyFileBufferChanged()
+    }
+
+    private func save() {
+        Task {
+            do {
+                try await commandService.saveFileTab(tabID: tab.id)
+                refreshBufferSnapshot()
+                notifyFileBufferChanged()
+            } catch {
+                userMessage = UserMessage(title: "File could not be saved", detail: String(describing: error))
+            }
+        }
+    }
+
+    private func revert() {
+        Task {
+            do {
+                try await commandService.revertFileTab(tabID: tab.id)
+                refreshBufferSnapshot()
+                editorText = bufferSnapshot?.text ?? editorText
+                notifyFileBufferChanged()
+            } catch {
+                userMessage = UserMessage(title: "File could not be reverted", detail: String(describing: error))
+            }
+        }
+    }
+
+    private func openExternally() {
+        Task {
+            do {
+                try await commandService.openFileInExternalEditor(tabID: tab.id)
+            } catch {
+                userMessage = UserMessage(title: "File could not be opened", detail: String(describing: error))
+            }
+        }
+    }
+
+    private func updateEditorPosition(_ position: CodeEditor.Position) {
+        let selection = position.selections.first ?? .zero
+        fileBufferController.updateEditorPosition(
+            tabID: tab.id,
+            position: FileEditorPosition(
+                cursorOffset: max(selection.location, 0),
+                selectionLength: max(selection.length, 0),
+                firstVisibleLine: max(Int(position.verticalScrollPosition), 0)
+            )
+        )
+    }
+
+    private func refreshBufferSnapshot() {
+        bufferSnapshot = fileBufferController.buffer(for: tab.id)
+    }
+
+    private func notifyFileBufferChanged() {
+        NotificationCenter.default.post(name: .fileBufferDirtyStateChanged, object: tab.id)
+    }
+}
+
+struct FileEditorUnavailableView: View {
+    let title: String
+    let message: String
     @Environment(\.shellThemePalette) private var theme
 
     var body: some View {
         VStack(spacing: 12) {
-            Image(systemName: "doc.text")
-                .font(.system(size: 42))
-                .foregroundStyle(theme.accent.color)
+            Image(systemName: "doc.badge.exclamationmark")
+                .font(.system(size: 40))
+                .foregroundStyle(theme.warning.color)
             Text(title)
                 .font(.title3.weight(.semibold))
                 .foregroundStyle(theme.primaryText.color)
                 .lineLimit(1)
-            Text(tab.fileReference?.path ?? tab.workingDirectory)
+            Text(message)
                 .font(.callout.monospaced())
                 .foregroundStyle(theme.secondaryText.color)
                 .multilineTextAlignment(.center)
@@ -1342,14 +1605,366 @@ struct FileTabPlaceholderView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(28)
-        .background(theme.contentBackground.color)
+    }
+}
+
+struct FileWorkspaceSidebarView: View {
+    let store: WorkspaceStore
+    let commandService: any WorkspaceCommandService
+    let fileAccessService: any WorkspaceFileAccessing
+    let fileBufferController: any WorkspaceFileBufferManaging
+    let fileBufferRevision: Int
+    @Binding var userMessage: UserMessage?
+    @Environment(\.shellThemePalette) private var theme
+    @State private var repositoryNodes: [WorkspaceFileNode] = []
+    @State private var expandedDirectoryPaths: Set<String> = []
+    @State private var repositoryError: String?
+    @State private var isRepositoryLoading = false
+
+    var body: some View {
+        let _ = fileBufferRevision
+        VStack(alignment: .leading, spacing: 0) {
+            FileWorkspaceHeaderView(project: store.selectedProject, reload: reloadRepository)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 14) {
+                    workingSetSection
+                    repositorySection
+                }
+                .padding(12)
+            }
+        }
+        .background(theme.sidebarBackground.color)
+        .overlay(alignment: .leading) {
+            Rectangle()
+                .fill(theme.border.color)
+                .frame(width: 1)
+        }
+        .task(id: repositoryTaskID) {
+            await loadRepositoryNodes()
+        }
+        .onChange(of: store.selectedTabID) { _, _ in
+            expandSelectedFileAncestors()
+        }
     }
 
-    private var title: String {
-        guard let path = tab.fileReference?.path else { return "File tab" }
-        let fileName = URL(fileURLWithPath: path).lastPathComponent
-        return fileName.isEmpty ? path : fileName
+    private var workingSetSection: some View {
+        FileWorkspaceSection(title: "Working Set", systemImage: "clock.arrow.circlepath") {
+            let entries = store.selectedSessionFileWorkingSetEntries(dirtyTabIDs: dirtyFileTabIDs)
+            if entries.isEmpty {
+                FileWorkspaceInlineEmptyState(title: "No open files")
+            } else {
+                VStack(alignment: .leading, spacing: 5) {
+                    ForEach(entries) { entry in
+                        FileWorkingSetRow(entry: entry) {
+                            selectTab(entry.tabID)
+                        }
+                    }
+                }
+            }
+        }
     }
+
+    private var repositorySection: some View {
+        FileWorkspaceSection(title: "Repository", systemImage: "folder") {
+            if store.selectedProject == nil {
+                FileWorkspaceInlineEmptyState(title: "No project selected")
+            } else if isRepositoryLoading {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Loading files")
+                        .font(.caption)
+                        .foregroundStyle(theme.secondaryText.color)
+                }
+                .padding(.vertical, 8)
+            } else if let repositoryError {
+                FileWorkspaceInlineEmptyState(title: repositoryError)
+            } else if repositoryEntries.isEmpty {
+                FileWorkspaceInlineEmptyState(title: "No files")
+            } else {
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(repositoryEntries) { entry in
+                        RepositoryTreeRow(entry: entry) {
+                            handleRepositoryEntry(entry)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var dirtyFileTabIDs: Set<UUID> {
+        Set(store.tabsForSelectedSession.compactMap { tab in
+            guard tab.kind == .file, fileBufferController.isDirty(tabID: tab.id) else { return nil }
+            return tab.id
+        })
+    }
+
+    private var repositoryEntries: [FileWorkspaceTreeEntry] {
+        guard let project = store.selectedProject else { return [] }
+        return WorkspaceFileTreeBuilder.visibleEntries(
+            projectRoot: project.path,
+            nodes: repositoryNodes,
+            expandedDirectoryPaths: expandedDirectoryPaths
+        )
+    }
+
+    private var repositoryTaskID: String {
+        store.selectedProject?.path ?? "no-project"
+    }
+
+    private func loadRepositoryNodes() async {
+        guard let project = store.selectedProject else {
+            repositoryNodes = []
+            repositoryError = nil
+            isRepositoryLoading = false
+            return
+        }
+
+        isRepositoryLoading = true
+        repositoryError = nil
+        do {
+            repositoryNodes = try await fileAccessService.enumerateProjectFiles(projectRoot: project.path)
+            expandSelectedFileAncestors()
+        } catch {
+            repositoryNodes = []
+            repositoryError = "Files unavailable"
+            userMessage = UserMessage(title: "Repository files unavailable", detail: String(describing: error))
+        }
+        isRepositoryLoading = false
+    }
+
+    private func reloadRepository() {
+        Task {
+            await loadRepositoryNodes()
+        }
+    }
+
+    private func selectTab(_ id: UUID) {
+        Task {
+            do {
+                try await commandService.selectTab(id: id)
+            } catch {
+                userMessage = UserMessage(title: "Tab selection could not be saved", detail: String(describing: error))
+            }
+        }
+    }
+
+    private func handleRepositoryEntry(_ entry: FileWorkspaceTreeEntry) {
+        if entry.isDirectory {
+            toggleDirectory(entry.path)
+            return
+        }
+
+        guard let sessionID = store.selectedSessionID else {
+            userMessage = UserMessage(title: "Session required", detail: "Select a session before opening a file.")
+            return
+        }
+
+        Task {
+            do {
+                _ = try await commandService.openFileTab(sessionID: sessionID, path: entry.path)
+                expandAncestors(of: entry.path)
+            } catch {
+                userMessage = UserMessage(title: "File could not be opened", detail: String(describing: error))
+            }
+        }
+    }
+
+    private func toggleDirectory(_ path: String) {
+        if expandedDirectoryPaths.contains(path) {
+            expandedDirectoryPaths.remove(path)
+        } else {
+            expandedDirectoryPaths.insert(path)
+        }
+    }
+
+    private func expandSelectedFileAncestors() {
+        guard let filePath = store.selectedTab?.fileReference?.path else { return }
+        expandAncestors(of: filePath)
+    }
+
+    private func expandAncestors(of path: String) {
+        var url = URL(fileURLWithPath: path).deletingLastPathComponent()
+        let rootPath = store.selectedProject?.path
+        while !url.path.isEmpty, url.path != "/" {
+            expandedDirectoryPaths.insert(url.path)
+            if let rootPath, URL(fileURLWithPath: rootPath, isDirectory: true).standardizedFileURL.path == url.standardizedFileURL.path {
+                break
+            }
+            url.deleteLastPathComponent()
+        }
+    }
+}
+
+struct FileWorkspaceHeaderView: View {
+    let project: WorkspaceProject?
+    let reload: () -> Void
+    @Environment(\.shellThemePalette) private var theme
+
+    var body: some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Files")
+                    .font(.headline)
+                    .foregroundStyle(theme.primaryText.color)
+                Text(project?.displayName ?? "No project")
+                    .font(.caption.monospaced())
+                    .foregroundStyle(theme.mutedText.color)
+                    .lineLimit(1)
+            }
+            Spacer()
+            Button("Reload", systemImage: "arrow.clockwise", action: reload)
+                .labelStyle(.iconOnly)
+                .buttonStyle(.borderless)
+                .disabled(project == nil)
+                .help("Reload files")
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(theme.tabBarBackground.color)
+    }
+}
+
+struct FileWorkspaceSection<Content: View>: View {
+    let title: String
+    let systemImage: String
+    @ViewBuilder let content: Content
+    @Environment(\.shellThemePalette) private var theme
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(title, systemImage: systemImage)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(theme.secondaryText.color)
+            content
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+struct FileWorkingSetRow: View {
+    let entry: FileWorkspaceWorkingSetEntry
+    let action: () -> Void
+    @Environment(\.shellThemePalette) private var theme
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: entry.isSelected ? "doc.text.fill" : "doc.text")
+                    .foregroundStyle(entry.isSelected ? theme.selectedText.color : theme.accent.color)
+                    .frame(width: 16)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 5) {
+                        Text(entry.title)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(theme.primaryText.color)
+                            .lineLimit(1)
+                        if entry.isDirty {
+                            Circle()
+                                .fill(theme.warning.color)
+                                .frame(width: 6, height: 6)
+                        }
+                    }
+                    Text(entry.subtitle)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(theme.mutedText.color)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 6)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 7)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(entry.isSelected ? theme.activeBackground.color.opacity(0.34) : theme.elevatedBackground.color.opacity(0.52), in: RoundedRectangle(cornerRadius: 6))
+            .overlay {
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(entry.isSelected ? theme.activeBorder.color : theme.border.color.opacity(0.55), lineWidth: 1)
+            }
+        }
+        .buttonStyle(.plain)
+        .help(entry.path)
+    }
+}
+
+struct RepositoryTreeRow: View {
+    let entry: FileWorkspaceTreeEntry
+    let action: () -> Void
+    @Environment(\.shellThemePalette) private var theme
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                if entry.isDirectory {
+                    Image(systemName: entry.isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(theme.mutedText.color)
+                        .frame(width: 10)
+                    Image(systemName: entry.isExpanded ? "folder.fill" : "folder")
+                        .foregroundStyle(theme.secondaryAccent.color)
+                        .frame(width: 16)
+                } else {
+                    Color.clear
+                        .frame(width: 10)
+                    Image(systemName: "doc.text")
+                        .foregroundStyle(theme.accent.color)
+                        .frame(width: 16)
+                }
+                Text(entry.name)
+                    .font(.caption)
+                    .foregroundStyle(theme.primaryText.color)
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+            }
+            .padding(.leading, CGFloat(entry.depth * 14))
+            .padding(.trailing, 6)
+            .padding(.vertical, 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(entry.path)
+    }
+}
+
+struct FileWorkspaceInlineEmptyState: View {
+    let title: String
+    @Environment(\.shellThemePalette) private var theme
+
+    var body: some View {
+        Text(title)
+            .font(.caption)
+            .foregroundStyle(theme.mutedText.color)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 7)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(theme.elevatedBackground.color.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
+    }
+}
+
+private extension LanguageConfiguration {
+    static func atelierConfiguration(for key: String) -> LanguageConfiguration {
+        switch key {
+        case "swift":
+            return .swift()
+        case "sqlite":
+            return .sqlite()
+        case "haskell":
+            return .haskell()
+        case "agda":
+            return .agda()
+        case "cabal":
+            return .cabal()
+        case "cypher":
+            return .cypher()
+        default:
+            return .none
+        }
+    }
+}
+
+extension Notification.Name {
+    static let fileBufferDirtyStateChanged = Notification.Name("Atelier.fileBufferDirtyStateChanged")
 }
 
 struct TerminalHostView: NSViewRepresentable {
@@ -1521,6 +2136,8 @@ extension NordColorToken {
     let persistence = InMemoryWorkspacePersistenceStore()
     let restoreCoordinator = RestoreCoordinator(persistenceStore: persistence)
     let terminalHostController = TerminalHostController()
+    let fileAccessService = LocalWorkspaceFileAccess()
+    let fileBufferController = WorkspaceFileBufferController(fileAccess: fileAccessService)
     ContentView(
         shellState: AppShellState(),
         store: store,
@@ -1528,8 +2145,12 @@ extension NordColorToken {
             store: store,
             persistenceStore: persistence,
             restoreCoordinator: restoreCoordinator,
-            terminalSurfaceManager: terminalHostController
+            terminalSurfaceManager: terminalHostController,
+            fileAccess: fileAccessService,
+            fileBufferManager: fileBufferController
         ),
-        terminalHostController: terminalHostController
+        terminalHostController: terminalHostController,
+        fileAccessService: fileAccessService,
+        fileBufferController: fileBufferController
     )
 }

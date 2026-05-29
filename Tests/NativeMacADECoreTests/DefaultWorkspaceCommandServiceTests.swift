@@ -707,6 +707,29 @@ struct DefaultWorkspaceCommandServiceTests {
     }
 
     @Test
+    func selectingFileTabUpdatesSharedSelectionWithoutTerminalSideEffects() async throws {
+        let harness = makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+        let fileURL = try makeTemporaryProjectFile(in: projectPath, relativePath: "Sources/File.swift")
+        let project = try await harness.service.openProject(path: projectPath)
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let terminalTab = try #require(harness.store.tabs.first)
+        let fileTab = try await harness.service.openFileTab(sessionID: session.id, path: fileURL.path)
+        try await harness.service.selectTab(id: terminalTab.id)
+        let terminalCreatedBeforeSelection = harness.terminal.createdTabs
+        let terminalCloseRequestsBeforeSelection = harness.terminal.canCloseRequestCount
+
+        try await harness.service.selectTab(id: fileTab.id)
+
+        #expect(harness.store.selectedProjectID == project.id)
+        #expect(harness.store.selectedSessionID == session.id)
+        #expect(harness.store.selectedTabID == fileTab.id)
+        #expect(harness.terminal.createdTabs == terminalCreatedBeforeSelection)
+        #expect(harness.terminal.canCloseRequestCount == terminalCloseRequestsBeforeSelection)
+        #expect(harness.terminal.releasedTabIDs.isEmpty)
+    }
+
+    @Test
     func openingFileOutsideProjectRejectsWithoutAddingFileTab() async throws {
         let harness = makeHarness()
         let projectPath = try makeTemporaryProjectDirectory()

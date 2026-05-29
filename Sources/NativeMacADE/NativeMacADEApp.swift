@@ -9,6 +9,8 @@ struct AtelierApp: App {
     @State private var appShellState: AppShellState
     private let commandService: any WorkspaceCommandService
     private let terminalHostController: TerminalHostController
+    private let fileAccessService: any WorkspaceFileAccessing
+    private let fileBufferController: any WorkspaceFileBufferManaging
 
     init() {
         self.init(container: .live())
@@ -19,6 +21,8 @@ struct AtelierApp: App {
         _appShellState = State(initialValue: AppShellState())
         commandService = container.workspaceCommandService
         terminalHostController = container.terminalHostController
+        fileAccessService = container.fileAccessService
+        fileBufferController = container.fileBufferController
         Self.installApplicationIcon()
     }
 
@@ -28,7 +32,9 @@ struct AtelierApp: App {
                 shellState: appShellState,
                 store: workspaceStore,
                 commandService: commandService,
-                terminalHostController: terminalHostController
+                terminalHostController: terminalHostController,
+                fileAccessService: fileAccessService,
+                fileBufferController: fileBufferController
             )
                 .toolbar(removing: .title)
         }
@@ -86,7 +92,7 @@ struct AtelierApp: App {
 
                 Divider()
 
-                Button("Toggle Sidebar") {
+                Button("Toggle Left Sidebar") {
                     NotificationCenter.default.post(name: .toggleWorkspaceSidebar, object: nil)
                 }
                 .managedKeyboardShortcut(.toggleRightSidebar, preferences: workspaceStore.appPreferences)

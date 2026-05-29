@@ -12,12 +12,17 @@ let package = Package(
         .library(name: "NativeMacADECore", targets: ["NativeMacADECore"])
     ],
     dependencies: [
+        .package(url: "https://github.com/mchakravarty/CodeEditorView.git", from: "0.15.4"),
         .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", from: "1.13.0")
     ],
     targets: [
         .executableTarget(
             name: "NativeMacADE",
-            dependencies: ["NativeMacADECore"],
+            dependencies: [
+                "NativeMacADECore",
+                .product(name: "CodeEditorView", package: "CodeEditorView"),
+                .product(name: "LanguageSupport", package: "CodeEditorView")
+            ],
             resources: [
                 .process("Resources")
             ]

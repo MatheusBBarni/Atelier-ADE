@@ -228,6 +228,55 @@ struct WorkspaceStoreTests {
     }
 
     @Test
+    func mixedTabActivationOrderProducesWorkingSetInputForRightSidebar() {
+        let projectID = UUID()
+        let sessionID = UUID()
+        let olderFileTabID = UUID()
+        let newerFileTabID = UUID()
+        let terminalTabID = UUID()
+        let projectPath = "/tmp/project"
+        let store = WorkspaceStore(
+            projects: [
+                WorkspaceProject(id: projectID, path: projectPath, displayName: "project")
+            ],
+            sessions: [
+                WorkspaceSession(id: sessionID, projectID: projectID, title: "Mixed")
+            ],
+            tabs: [
+                WorkspaceTab(id: terminalTabID, sessionID: sessionID, workingDirectory: projectPath, ordinal: 0),
+                WorkspaceTab(
+                    id: newerFileTabID,
+                    sessionID: sessionID,
+                    kind: .file,
+                    workingDirectory: projectPath,
+                    fileReference: WorkspaceFileReference(path: "\(projectPath)/README.md", projectRoot: projectPath),
+                    ordinal: 2,
+                    lastActivatedAt: Date(timeIntervalSince1970: 300)
+                ),
+                WorkspaceTab(
+                    id: olderFileTabID,
+                    sessionID: sessionID,
+                    kind: .file,
+                    workingDirectory: projectPath,
+                    fileReference: WorkspaceFileReference(path: "\(projectPath)/Sources/App.swift", projectRoot: projectPath),
+                    ordinal: 1,
+                    lastActivatedAt: Date(timeIntervalSince1970: 100)
+                )
+            ],
+            selectedProjectID: projectID,
+            selectedSessionID: sessionID,
+            selectedTabID: olderFileTabID
+        )
+
+        let workingSet = store.selectedSessionFileWorkingSetEntries(dirtyTabIDs: [olderFileTabID])
+
+        #expect(workingSet.map(\.tabID) == [newerFileTabID, olderFileTabID])
+        #expect(workingSet.map(\.subtitle) == ["README.md", "Sources/App.swift"])
+        #expect(workingSet.map(\.isSelected) == [false, true])
+        #expect(workingSet.map(\.isDirty) == [false, true])
+    }
+
+    @Test
     func restoreCoordinatorHydratesStoreFromPersistenceBoundary() async throws {
         let projectID = UUID()
         let sessionID = UUID()
