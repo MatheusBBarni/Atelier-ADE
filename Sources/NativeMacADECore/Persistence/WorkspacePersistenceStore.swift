@@ -5,6 +5,7 @@ public protocol WorkspacePersistenceStore: Sendable {
     func loadSessions() async throws -> [WorkspaceSession]
     func loadTabs() async throws -> [WorkspaceTab]
     func loadSessionShortcuts() async throws -> [SessionShortcut]
+    func loadAppPreferences() async throws -> AppPreferences
     func loadRestoreSnapshot() async throws -> RestoreSnapshot?
     func save(project: WorkspaceProject) async throws
     func save(session: WorkspaceSession) async throws
@@ -12,6 +13,7 @@ public protocol WorkspacePersistenceStore: Sendable {
     func save(session: WorkspaceSession, firstTab: WorkspaceTab) async throws
     func saveActivation(project: WorkspaceProject?, session: WorkspaceSession?, tab: WorkspaceTab?, snapshot: RestoreSnapshot) async throws
     func save(shortcut: SessionShortcut) async throws
+    func save(appPreferences: AppPreferences) async throws
     func save(snapshot: RestoreSnapshot) async throws
     func deleteProject(id: UUID) async throws
     func deleteSession(id: UUID) async throws
@@ -24,6 +26,7 @@ public actor InMemoryWorkspacePersistenceStore: WorkspacePersistenceStore {
     private var sessions: [WorkspaceSession]
     private var tabs: [WorkspaceTab]
     private var shortcuts: [SessionShortcut]
+    private var appPreferences: AppPreferences
     private var restoreSnapshot: RestoreSnapshot?
 
     public init(
@@ -31,12 +34,14 @@ public actor InMemoryWorkspacePersistenceStore: WorkspacePersistenceStore {
         sessions: [WorkspaceSession] = [],
         tabs: [WorkspaceTab] = [],
         shortcuts: [SessionShortcut] = [],
+        appPreferences: AppPreferences = .defaults,
         restoreSnapshot: RestoreSnapshot? = nil
     ) {
         self.projects = projects
         self.sessions = sessions
         self.tabs = tabs
         self.shortcuts = shortcuts
+        self.appPreferences = appPreferences
         self.restoreSnapshot = restoreSnapshot
     }
 
@@ -64,6 +69,7 @@ public actor InMemoryWorkspacePersistenceStore: WorkspacePersistenceStore {
     public func loadSessionShortcuts() async throws -> [SessionShortcut] {
         shortcuts.sorted { $0.label < $1.label }
     }
+    public func loadAppPreferences() async throws -> AppPreferences { appPreferences }
     public func loadRestoreSnapshot() async throws -> RestoreSnapshot? { restoreSnapshot }
 
     public func save(project: WorkspaceProject) async throws {
@@ -114,6 +120,10 @@ public actor InMemoryWorkspacePersistenceStore: WorkspacePersistenceStore {
         shortcuts.append(shortcut)
     }
 
+    public func save(appPreferences: AppPreferences) async throws {
+        self.appPreferences = appPreferences
+    }
+
     public func save(snapshot: RestoreSnapshot) async throws {
         restoreSnapshot = snapshot
     }
@@ -137,6 +147,10 @@ public actor InMemoryWorkspacePersistenceStore: WorkspacePersistenceStore {
         shortcuts.removeAll { $0.id == id }
         for index in sessions.indices where sessions[index].shortcutID == id {
             sessions[index].shortcutID = nil
+        }
+        if appPreferences.defaultSessionShortcutID == id {
+            appPreferences.defaultSessionShortcutID = nil
+            appPreferences.updatedAt = Date()
         }
     }
 }

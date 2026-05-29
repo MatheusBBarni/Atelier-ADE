@@ -161,6 +161,7 @@ private actor SnapshotFailingPersistenceStore: WorkspacePersistenceStore {
     func loadSessions() async throws -> [WorkspaceSession] { [session] }
     func loadTabs() async throws -> [WorkspaceTab] { [tab] }
     func loadSessionShortcuts() async throws -> [SessionShortcut] { [] }
+    func loadAppPreferences() async throws -> AppPreferences { .defaults }
     func loadRestoreSnapshot() async throws -> RestoreSnapshot? { throw SnapshotFailure.unreadable }
     func save(project: WorkspaceProject) async throws {}
     func save(session: WorkspaceSession) async throws {}
@@ -168,6 +169,7 @@ private actor SnapshotFailingPersistenceStore: WorkspacePersistenceStore {
     func save(session: WorkspaceSession, firstTab: WorkspaceTab) async throws {}
     func saveActivation(project: WorkspaceProject?, session: WorkspaceSession?, tab: WorkspaceTab?, snapshot: RestoreSnapshot) async throws {}
     func save(shortcut: SessionShortcut) async throws {}
+    func save(appPreferences: AppPreferences) async throws {}
     func save(snapshot: RestoreSnapshot) async throws {}
     func deleteProject(id: UUID) async throws {}
     func deleteSession(id: UUID) async throws {}

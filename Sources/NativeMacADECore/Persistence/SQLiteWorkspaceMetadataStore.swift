@@ -87,16 +87,30 @@ public actor SQLiteWorkspaceMetadataStore: WorkspacePersistenceStore {
     }
 
     public func loadSessionShortcuts() async throws -> [SessionShortcut] {
-        try query("SELECT id, label, launch_command, launch_arguments_json, secret_ref, is_built_in FROM session_shortcuts ORDER BY label ASC") { statement in
+        try query("SELECT id, label, launch_command, launch_arguments_json, secret_ref, is_built_in, has_user_override FROM session_shortcuts ORDER BY label ASC") { statement in
             try SessionShortcut(
                 id: uuid(statement, 0),
                 label: text(statement, 1),
                 launchCommand: text(statement, 2),
                 launchArgumentsJSON: optionalText(statement, 3),
                 secretRef: optionalText(statement, 4),
-                isBuiltIn: bool(statement, 5)
+                isBuiltIn: bool(statement, 5),
+                hasUserOverride: bool(statement, 6)
             )
         }
+    }
+
+    public func loadAppPreferences() async throws -> AppPreferences {
+        let preferences = try query("SELECT id, theme_id, default_session_shortcut_id, keybindings_json, updated_at FROM app_preferences WHERE id = 1") { statement in
+            try AppPreferences(
+                id: int(statement, 0),
+                themeID: text(statement, 1),
+                defaultSessionShortcutID: optionalUUID(statement, 2),
+                keybindings: AppPreferences.decodeKeybindingsJSON(text(statement, 3)),
+                updatedAt: date(statement, 4)
+            )
+        }.first
+        return preferences ?? .defaults
     }
 
     public func loadRestoreSnapshot() async throws -> RestoreSnapshot? {
@@ -225,14 +239,15 @@ public actor SQLiteWorkspaceMetadataStore: WorkspacePersistenceStore {
 
     public func save(shortcut: SessionShortcut) async throws {
         try execute("""
-            INSERT INTO session_shortcuts (id, label, launch_command, launch_arguments_json, secret_ref, is_built_in)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO session_shortcuts (id, label, launch_command, launch_arguments_json, secret_ref, is_built_in, has_user_override)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 label = excluded.label,
                 launch_command = excluded.launch_command,
                 launch_arguments_json = excluded.launch_arguments_json,
                 secret_ref = excluded.secret_ref,
-                is_built_in = excluded.is_built_in
+                is_built_in = excluded.is_built_in,
+                has_user_override = excluded.has_user_override
             """) { statement in
             bind(statement, shortcut.id, 1)
             bind(statement, shortcut.label, 2)
@@ -240,6 +255,25 @@ public actor SQLiteWorkspaceMetadataStore: WorkspacePersistenceStore {
             bind(statement, shortcut.launchArgumentsJSON, 4)
             bind(statement, shortcut.secretRef, 5)
             bind(statement, shortcut.isBuiltIn, 6)
+            bind(statement, shortcut.hasUserOverride, 7)
+        }
+    }
+
+    public func save(appPreferences: AppPreferences) async throws {
+        let keybindingsJSON = try appPreferences.keybindingsJSON
+        try execute("""
+            INSERT INTO app_preferences (id, theme_id, default_session_shortcut_id, keybindings_json, updated_at)
+            VALUES (1, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                theme_id = excluded.theme_id,
+                default_session_shortcut_id = excluded.default_session_shortcut_id,
+                keybindings_json = excluded.keybindings_json,
+                updated_at = excluded.updated_at
+            """) { statement in
+            bind(statement, appPreferences.themeID, 1)
+            bind(statement, appPreferences.defaultSessionShortcutID, 2)
+            bind(statement, keybindingsJSON, 3)
+            bind(statement, appPreferences.updatedAt, 4)
         }
     }
 
@@ -286,8 +320,19 @@ public actor SQLiteWorkspaceMetadataStore: WorkspacePersistenceStore {
     }
 
     public func deleteShortcut(id: UUID) async throws {
-        try execute("DELETE FROM session_shortcuts WHERE id = ?") { statement in
-            bind(statement, id, 1)
+        do {
+            try executeRaw("BEGIN IMMEDIATE TRANSACTION")
+            try execute("UPDATE app_preferences SET default_session_shortcut_id = NULL, updated_at = ? WHERE default_session_shortcut_id = ?") { statement in
+                bind(statement, Date(), 1)
+                bind(statement, id, 2)
+            }
+            try execute("DELETE FROM session_shortcuts WHERE id = ?") { statement in
+                bind(statement, id, 1)
+            }
+            try executeRaw("COMMIT")
+        } catch {
+            try? executeRaw("ROLLBACK")
+            throw error
         }
     }
 

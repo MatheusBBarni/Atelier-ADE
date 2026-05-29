@@ -113,6 +113,7 @@ public struct SessionShortcut: Identifiable, Equatable, Sendable {
     public var launchArgumentsJSON: String?
     public var secretRef: String?
     public var isBuiltIn: Bool
+    public var hasUserOverride: Bool
 
     public init(
         id: UUID = UUID(),
@@ -120,7 +121,8 @@ public struct SessionShortcut: Identifiable, Equatable, Sendable {
         launchCommand: String,
         launchArgumentsJSON: String? = nil,
         secretRef: String? = nil,
-        isBuiltIn: Bool = false
+        isBuiltIn: Bool = false,
+        hasUserOverride: Bool = false
     ) {
         self.id = id
         self.label = label
@@ -128,6 +130,7 @@ public struct SessionShortcut: Identifiable, Equatable, Sendable {
         self.launchArgumentsJSON = launchArgumentsJSON
         self.secretRef = secretRef
         self.isBuiltIn = isBuiltIn
+        self.hasUserOverride = hasUserOverride
     }
 
     public static let builtInDefaults: [SessionShortcut] = [

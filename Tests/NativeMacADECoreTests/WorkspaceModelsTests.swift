@@ -4,6 +4,139 @@ import Testing
 
 struct WorkspaceModelsTests {
     @Test
+    func appPreferencesPreserveTypedValueSemanticFieldsAndManagedKeybindings() throws {
+        let shortcutID = UUID()
+        let updatedAt = Date(timeIntervalSince1970: 1_234)
+        let searchOverride = KeybindingOverride(
+            commandID: .searchSessions,
+            keyEquivalent: "k",
+            modifiers: [.command, .shift]
+        )
+        let zoomOverride = KeybindingOverride(
+            commandID: .zoomInTerminal,
+            keyEquivalent: "=",
+            modifiers: [.command]
+        )
+        let preferences = AppPreferences(
+            themeID: "dracula",
+            defaultSessionShortcutID: shortcutID,
+            keybindings: [
+                .searchSessions: searchOverride,
+                .zoomInTerminal: zoomOverride
+            ],
+            updatedAt: updatedAt
+        )
+
+        var copiedPreferences = preferences
+        copiedPreferences.themeID = "onedark"
+        let decodedKeybindings = try AppPreferences.decodeKeybindingsJSON(preferences.keybindingsJSON)
+
+        #expect(preferences.id == AppPreferences.fixedID)
+        #expect(preferences.themeID == "dracula")
+        #expect(preferences.defaultSessionShortcutID == shortcutID)
+        #expect(preferences.keybindings[.searchSessions] == searchOverride)
+        #expect(preferences.keybindings[.zoomInTerminal] == zoomOverride)
+        #expect(preferences.updatedAt == updatedAt)
+        #expect(copiedPreferences.themeID == "onedark")
+        #expect(preferences.themeID == "dracula")
+        #expect(decodedKeybindings == preferences.keybindings)
+        #expect(AppCommandID.allCases == [
+            .previousTab,
+            .nextTab,
+            .previousSession,
+            .nextSession,
+            .searchSessions,
+            .zoomInTerminal,
+            .zoomOutTerminal,
+            .toggleRightSidebar,
+            .openSettings
+        ])
+        #expect(AppCommandID.openSettings.defaultKeybinding.keyEquivalent == ",")
+        #expect(AppCommandID.toggleRightSidebar.defaultKeybinding.modifiers == [.command])
+    }
+
+    @Test
+    func sessionShortcutHasUserOverridePreservesBuiltInAndCustomState() {
+        let builtInShortcut = SessionShortcut(
+            label: "Codex",
+            launchCommand: "codex",
+            launchArgumentsJSON: "[]",
+            isBuiltIn: true,
+            hasUserOverride: true
+        )
+        let customShortcut = SessionShortcut(
+            label: "Review",
+            launchCommand: "claude",
+            launchArgumentsJSON: "[\"--continue\"]",
+            hasUserOverride: false
+        )
+
+        #expect(builtInShortcut.isBuiltIn == true)
+        #expect(builtInShortcut.hasUserOverride == true)
+        #expect(customShortcut.isBuiltIn == false)
+        #expect(customShortcut.hasUserOverride == false)
+        #expect(SessionShortcut.builtInDefaults.allSatisfy { $0.isBuiltIn && !$0.hasUserOverride })
+    }
+
+    @Test
+    func inMemoryPersistencePreservesAppPreferencesAndShortcutOverrideState() async throws {
+        let shortcut = SessionShortcut(
+            label: "OpenCode",
+            launchCommand: "opencode",
+            launchArgumentsJSON: "[]",
+            isBuiltIn: true,
+            hasUserOverride: true
+        )
+        let preferences = AppPreferences(
+            themeID: "catppuccin",
+            defaultSessionShortcutID: shortcut.id,
+            keybindings: [
+                .nextTab: KeybindingOverride(commandID: .nextTab, keyEquivalent: "rightArrow", modifiers: [.command, .option])
+            ],
+            updatedAt: Date(timeIntervalSince1970: 2_000)
+        )
+        let store = InMemoryWorkspacePersistenceStore(
+            shortcuts: [shortcut],
+            appPreferences: preferences
+        )
+
+        #expect(try await store.loadAppPreferences() == preferences)
+        #expect(try await store.loadSessionShortcuts() == [shortcut])
+
+        var updatedPreferences = preferences
+        updatedPreferences.themeID = "cursor"
+        updatedPreferences.defaultSessionShortcutID = nil
+        try await store.save(appPreferences: updatedPreferences)
+
+        var updatedShortcut = shortcut
+        updatedShortcut.hasUserOverride = false
+        try await store.save(shortcut: updatedShortcut)
+
+        #expect(try await store.loadAppPreferences() == updatedPreferences)
+        #expect(try await store.loadSessionShortcuts() == [updatedShortcut])
+    }
+
+    @Test
+    func deletingShortcutInMemoryClearsMatchingDefaultSessionShortcutID() async throws {
+        let shortcut = SessionShortcut(label: "Codex", launchCommand: "codex")
+        let session = WorkspaceSession(projectID: UUID(), title: "Shortcut", shortcutID: shortcut.id)
+        let preferences = AppPreferences(
+            defaultSessionShortcutID: shortcut.id,
+            updatedAt: Date(timeIntervalSince1970: 3_000)
+        )
+        let store = InMemoryWorkspacePersistenceStore(
+            sessions: [session],
+            shortcuts: [shortcut],
+            appPreferences: preferences
+        )
+
+        try await store.deleteShortcut(id: shortcut.id)
+
+        #expect(try await store.loadAppPreferences().defaultSessionShortcutID == nil)
+        #expect(try await store.loadSessions().first?.shortcutID == nil)
+    }
+
+    @Test
     func defaultSessionNamingUsesMonthDayHourMinuteUntilRename() {
         let date = Date(timeIntervalSince1970: 1_717_393_500) // 2024-06-03 05:45 UTC
         let projectID = UUID()

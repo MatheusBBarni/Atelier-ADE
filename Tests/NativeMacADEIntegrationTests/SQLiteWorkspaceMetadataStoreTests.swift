@@ -8,11 +8,16 @@ struct SQLiteWorkspaceMetadataStoreTests {
     @Test
     func bootstrapCreatesExactlyMetadataTables() async throws {
         let path = temporaryDatabasePath()
-        _ = try SQLiteWorkspaceMetadataStore(path: path)
+        let store = try SQLiteWorkspaceMetadataStore(path: path)
 
         let tables = try inspectUserTableNames(path: path)
+        let preferences = try await store.loadAppPreferences()
 
-        #expect(tables == ["projects", "sessions", "tabs", "session_shortcuts", "restore_snapshot"])
+        #expect(tables == WorkspaceMigrations.metadataTables)
+        #expect(try inspectColumnNames(path: path, tableName: "session_shortcuts").contains("has_user_override"))
+        #expect(try inspectUserVersion(path: path) == WorkspaceMigrations.currentUserVersion)
+        #expect(try inspectAppPreferencesRowCount(path: path) == 1)
+        #expect(preferences == .defaults)
     }
 
     @Test
@@ -154,6 +159,112 @@ struct SQLiteWorkspaceMetadataStoreTests {
     }
 
     @Test
+    func versionOneDatabaseUpgradesToVersionTwoWithoutMutatingWorkspaceMetadata() async throws {
+        let path = temporaryDatabasePath()
+        let fixture = try createVersionOneDatabase(path: path)
+
+        let store = try SQLiteWorkspaceMetadataStore(path: path)
+
+        #expect(try inspectUserVersion(path: path) == 2)
+        #expect(try inspectUserTableNames(path: path) == WorkspaceMigrations.metadataTables)
+        #expect(try inspectColumnNames(path: path, tableName: "session_shortcuts").contains("has_user_override"))
+        #expect(try inspectAppPreferencesRowCount(path: path) == 1)
+        #expect(try await store.loadProjects() == [fixture.project])
+        #expect(try await store.loadSessions() == [fixture.session])
+        #expect(try await store.loadTabs() == [fixture.tab])
+        #expect(try await store.loadSessionShortcuts() == [fixture.shortcut])
+        #expect(try await store.loadRestoreSnapshot() == fixture.restoreSnapshot)
+        #expect(try await store.loadAppPreferences() == .defaults)
+    }
+
+    @Test
+    func appPreferencesRoundTripPreservesNilAndNonNilDefaultShortcutReferences() async throws {
+        let path = temporaryDatabasePath()
+        let store = try SQLiteWorkspaceMetadataStore(path: path)
+        let nilDefaultPreferences = AppPreferences(
+            themeID: "dracula",
+            defaultSessionShortcutID: nil,
+            keybindings: [
+                .previousTab: KeybindingOverride(commandID: .previousTab, keyEquivalent: "leftArrow", modifiers: [.command, .option])
+            ],
+            updatedAt: Date(timeIntervalSince1970: 400)
+        )
+        let shortcut = SessionShortcut(
+            label: "Claude",
+            launchCommand: "claude",
+            launchArgumentsJSON: "[]",
+            isBuiltIn: true
+        )
+
+        try await store.save(appPreferences: nilDefaultPreferences)
+        #expect(try await store.loadAppPreferences() == nilDefaultPreferences)
+
+        try await store.save(shortcut: shortcut)
+        let nonNilDefaultPreferences = AppPreferences(
+            themeID: "onedark",
+            defaultSessionShortcutID: shortcut.id,
+            keybindings: [
+                .openSettings: KeybindingOverride(commandID: .openSettings, keyEquivalent: ",", modifiers: [.command, .shift]),
+                .zoomOutTerminal: KeybindingOverride(commandID: .zoomOutTerminal, keyEquivalent: "-", modifiers: [.command])
+            ],
+            updatedAt: Date(timeIntervalSince1970: 500)
+        )
+
+        try await store.save(appPreferences: nonNilDefaultPreferences)
+
+        #expect(try await store.loadAppPreferences() == nonNilDefaultPreferences)
+    }
+
+    @Test
+    func builtInShortcutOverrideStatePersistsThroughSQLiteRoundTrip() async throws {
+        let path = temporaryDatabasePath()
+        let store = try SQLiteWorkspaceMetadataStore(path: path)
+        let shortcut = SessionShortcut(
+            label: "Codex",
+            launchCommand: "codex",
+            launchArgumentsJSON: "[\"--model\",\"gpt-5.5\"]",
+            isBuiltIn: true,
+            hasUserOverride: true
+        )
+
+        try await store.save(shortcut: shortcut)
+
+        #expect(try await store.loadSessionShortcuts() == [shortcut])
+    }
+
+    @Test
+    func deletingPersistedShortcutClearsMatchingDefaultSessionShortcutID() async throws {
+        let path = temporaryDatabasePath()
+        let store = try SQLiteWorkspaceMetadataStore(path: path)
+        let shortcut = SessionShortcut(label: "OpenCode", launchCommand: "opencode")
+        let preferences = AppPreferences(
+            themeID: "cursor",
+            defaultSessionShortcutID: shortcut.id,
+            updatedAt: Date(timeIntervalSince1970: 600)
+        )
+
+        try await store.save(shortcut: shortcut)
+        try await store.save(appPreferences: preferences)
+        try await store.deleteShortcut(id: shortcut.id)
+
+        #expect(try await store.loadSessionShortcuts().isEmpty)
+        #expect(try await store.loadAppPreferences().defaultSessionShortcutID == nil)
+    }
+
+    @Test
+    func migrationExecuteReportsSQLiteErrors() throws {
+        var database: OpaquePointer?
+        guard sqlite3_open_v2(":memory:", &database, SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK else {
+            throw SQLiteWorkspaceMetadataStoreError.openFailed("Unable to open migration error fixture database")
+        }
+        defer { sqlite3_close(database) }
+
+        #expect(throws: WorkspaceMigrationError.self) {
+            try WorkspaceMigrations.execute(database, "CREATE TABLE broken (")
+        }
+    }
+
+    @Test
     func activationSavePersistsRecencyAndSnapshotAtomically() async throws {
         let path = temporaryDatabasePath()
         let store = try SQLiteWorkspaceMetadataStore(path: path)
@@ -270,6 +381,118 @@ struct SQLiteWorkspaceMetadataStoreTests {
         }.first ?? 0
     }
 
+    private func inspectAppPreferencesRowCount(path: String) throws -> Int {
+        try inspect(path: path, sql: "SELECT COUNT(*) FROM app_preferences") { statement in
+            Int(sqlite3_column_int64(statement, 0))
+        }.first ?? 0
+    }
+
+    private func inspectUserVersion(path: String) throws -> Int32 {
+        var database: OpaquePointer?
+        guard sqlite3_open_v2(path, &database, SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK else {
+            throw SQLiteWorkspaceMetadataStoreError.openFailed("Unable to open inspection database")
+        }
+        defer { sqlite3_close(database) }
+
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(database, "PRAGMA user_version", -1, &statement, nil) == SQLITE_OK else {
+            throw SQLiteWorkspaceMetadataStoreError.prepareFailed(String(cString: sqlite3_errmsg(database)))
+        }
+        defer { sqlite3_finalize(statement) }
+
+        guard sqlite3_step(statement) == SQLITE_ROW else {
+            throw SQLiteWorkspaceMetadataStoreError.invalidStoredValue("Unable to read user_version")
+        }
+        return sqlite3_column_int(statement, 0)
+    }
+
+    private func inspectColumnNames(path: String, tableName: String) throws -> Set<String> {
+        try inspect(path: path, sql: "PRAGMA table_info(\(tableName))") { statement in
+            guard let pointer = sqlite3_column_text(statement, 1) else { return nil }
+            return String(cString: pointer)
+        }
+    }
+
+    private func createVersionOneDatabase(path: String) throws -> VersionOneFixture {
+        let fixture = VersionOneFixture()
+        var database: OpaquePointer?
+        guard sqlite3_open_v2(path, &database, SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK else {
+            throw SQLiteWorkspaceMetadataStoreError.openFailed("Unable to create v1 fixture database")
+        }
+        defer { sqlite3_close(database) }
+
+        try execute(database, """
+        PRAGMA foreign_keys = ON;
+        CREATE TABLE projects (
+            id TEXT PRIMARY KEY NOT NULL,
+            path TEXT NOT NULL UNIQUE,
+            bookmark_data BLOB,
+            display_name TEXT NOT NULL,
+            created_at REAL NOT NULL,
+            last_opened_at REAL NOT NULL,
+            sort_index INTEGER NOT NULL
+        );
+        CREATE TABLE session_shortcuts (
+            id TEXT PRIMARY KEY NOT NULL,
+            label TEXT NOT NULL,
+            launch_command TEXT NOT NULL,
+            launch_arguments_json TEXT,
+            secret_ref TEXT,
+            is_built_in INTEGER NOT NULL CHECK (is_built_in IN (0, 1))
+        );
+        CREATE TABLE sessions (
+            id TEXT PRIMARY KEY NOT NULL,
+            project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            title TEXT NOT NULL,
+            is_user_named INTEGER NOT NULL CHECK (is_user_named IN (0, 1)),
+            shortcut_id TEXT REFERENCES session_shortcuts(id) ON DELETE SET NULL,
+            created_at REAL NOT NULL,
+            last_activated_at REAL NOT NULL
+        );
+        CREATE TABLE tabs (
+            id TEXT PRIMARY KEY NOT NULL,
+            session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+            working_directory TEXT NOT NULL,
+            launch_command TEXT,
+            launch_arguments_json TEXT,
+            ordinal INTEGER NOT NULL,
+            created_at REAL NOT NULL,
+            last_activated_at REAL NOT NULL,
+            UNIQUE(session_id, ordinal)
+        );
+        CREATE TABLE restore_snapshot (
+            id INTEGER PRIMARY KEY NOT NULL CHECK (id = 1),
+            selected_project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
+            selected_session_id TEXT REFERENCES sessions(id) ON DELETE SET NULL,
+            selected_tab_id TEXT REFERENCES tabs(id) ON DELETE SET NULL,
+            tab_order_json TEXT NOT NULL,
+            updated_at REAL NOT NULL
+        );
+        INSERT INTO projects (id, path, bookmark_data, display_name, created_at, last_opened_at, sort_index)
+        VALUES ('\(fixture.project.id.uuidString)', '\(fixture.project.path)', NULL, '\(fixture.project.displayName)', 10, 20, \(fixture.project.sortIndex));
+        INSERT INTO session_shortcuts (id, label, launch_command, launch_arguments_json, secret_ref, is_built_in)
+        VALUES ('\(fixture.shortcut.id.uuidString)', '\(fixture.shortcut.label)', '\(fixture.shortcut.launchCommand)', '\(fixture.shortcut.launchArgumentsJSON!)', '\(fixture.shortcut.secretRef!)', 1);
+        INSERT INTO sessions (id, project_id, title, is_user_named, shortcut_id, created_at, last_activated_at)
+        VALUES ('\(fixture.session.id.uuidString)', '\(fixture.project.id.uuidString)', '\(fixture.session.title)', 1, '\(fixture.shortcut.id.uuidString)', 30, 40);
+        INSERT INTO tabs (id, session_id, working_directory, launch_command, launch_arguments_json, ordinal, created_at, last_activated_at)
+        VALUES ('\(fixture.tab.id.uuidString)', '\(fixture.session.id.uuidString)', '\(fixture.tab.workingDirectory)', '\(fixture.tab.launchCommand!)', '\(fixture.tab.launchArgumentsJSON!)', \(fixture.tab.ordinal), 50, 60);
+        INSERT INTO restore_snapshot (id, selected_project_id, selected_session_id, selected_tab_id, tab_order_json, updated_at)
+        VALUES (1, '\(fixture.project.id.uuidString)', '\(fixture.session.id.uuidString)', '\(fixture.tab.id.uuidString)', '[\"\(fixture.tab.id.uuidString)\"]', 70);
+        PRAGMA user_version = 1;
+        """)
+
+        return fixture
+    }
+
+    private func execute(_ database: OpaquePointer?, _ sql: String) throws {
+        var error: UnsafeMutablePointer<CChar>?
+        guard sqlite3_exec(database, sql, nil, nil, &error) == SQLITE_OK else {
+            let message = error.map { String(cString: $0) } ?? "Unknown SQLite error"
+            sqlite3_free(error)
+            throw SQLiteWorkspaceMetadataStoreError.stepFailed(message)
+        }
+    }
+
     private func inspect<T>(path: String, sql: String, map: (OpaquePointer?) throws -> T?) throws -> Set<T> where T: Hashable {
         var database: OpaquePointer?
         guard sqlite3_open_v2(path, &database, SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK else {
@@ -290,5 +513,53 @@ struct SQLiteWorkspaceMetadataStoreTests {
             }
         }
         return values
+    }
+}
+
+private struct VersionOneFixture {
+    let project = WorkspaceProject(
+        id: UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")!,
+        path: "/Users/example/v1-project",
+        displayName: "v1-project",
+        createdAt: Date(timeIntervalSince1970: 10),
+        lastOpenedAt: Date(timeIntervalSince1970: 20),
+        sortIndex: 3
+    )
+    let shortcut = SessionShortcut(
+        id: UUID(uuidString: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")!,
+        label: "Codex",
+        launchCommand: "codex",
+        launchArgumentsJSON: "[]",
+        secretRef: "keychain://native-mac-ade/codex",
+        isBuiltIn: true
+    )
+    let session = WorkspaceSession(
+        id: UUID(uuidString: "cccccccc-cccc-4ccc-8ccc-cccccccccccc")!,
+        projectID: UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")!,
+        title: "Restored v1",
+        isUserNamed: true,
+        shortcutID: UUID(uuidString: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")!,
+        createdAt: Date(timeIntervalSince1970: 30),
+        lastActivatedAt: Date(timeIntervalSince1970: 40)
+    )
+    let tab = WorkspaceTab(
+        id: UUID(uuidString: "dddddddd-dddd-4ddd-8ddd-dddddddddddd")!,
+        sessionID: UUID(uuidString: "cccccccc-cccc-4ccc-8ccc-cccccccccccc")!,
+        workingDirectory: "/Users/example/v1-project",
+        launchCommand: "codex",
+        launchArgumentsJSON: "[]",
+        ordinal: 0,
+        createdAt: Date(timeIntervalSince1970: 50),
+        lastActivatedAt: Date(timeIntervalSince1970: 60)
+    )
+
+    var restoreSnapshot: RestoreSnapshot {
+        RestoreSnapshot(
+            selectedProjectID: project.id,
+            selectedSessionID: session.id,
+            selectedTabID: tab.id,
+            tabOrder: [tab.id],
+            updatedAt: Date(timeIntervalSince1970: 70)
+        )
     }
 }
