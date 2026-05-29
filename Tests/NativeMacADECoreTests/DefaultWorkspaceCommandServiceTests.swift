@@ -423,7 +423,7 @@ struct DefaultWorkspaceCommandServiceTests {
         #expect(configuration.workingDirectory == "/Users/example/project")
         #expect(configuration.command == "claude")
         #expect(configuration.arguments == ["--dangerously-skip-permissions"])
-        #expect(configuration.appearance == .nordDefault)
+        #expect(configuration.appearance == AppTheme.defaultTheme.terminalAppearance)
     }
 
     @Test

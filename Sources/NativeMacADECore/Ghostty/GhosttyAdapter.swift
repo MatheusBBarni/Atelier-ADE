@@ -12,7 +12,7 @@ public struct GhosttyLaunchConfiguration: Equatable, Sendable {
         command: String? = nil,
         arguments: [String] = [],
         inheritedSurfaceID: UUID? = nil,
-        appearance: TerminalAppearance = .nordDefault
+        appearance: TerminalAppearance = .cursorDefault
     ) {
         self.workingDirectory = workingDirectory
         self.command = command
@@ -21,7 +21,7 @@ public struct GhosttyLaunchConfiguration: Equatable, Sendable {
         self.appearance = appearance
     }
 
-    public init(tab: WorkspaceTab, appearance: TerminalAppearance = .nordDefault) {
+    public init(tab: WorkspaceTab, appearance: TerminalAppearance = .cursorDefault) {
         self.init(
             workingDirectory: tab.workingDirectory,
             command: tab.launchCommand,
@@ -34,13 +34,15 @@ public struct GhosttyLaunchConfiguration: Equatable, Sendable {
         from parent: GhosttySurfaceHandle,
         workingDirectory: String,
         command: String? = nil,
-        arguments: [String] = []
+        arguments: [String] = [],
+        appearance: TerminalAppearance = .cursorDefault
     ) -> GhosttyLaunchConfiguration {
         GhosttyLaunchConfiguration(
             workingDirectory: workingDirectory,
             command: command,
             arguments: arguments,
-            inheritedSurfaceID: parent.id
+            inheritedSurfaceID: parent.id,
+            appearance: appearance
         )
     }
 
@@ -76,6 +78,13 @@ public struct TerminalAppearance: Equatable, Sendable {
         self.fontName = fontName
         self.fontSize = fontSize
     }
+
+    public static let cursorDefault = TerminalAppearance(
+        backgroundHex: "#0D1117",
+        foregroundHex: "#E6EDF3",
+        cursorHex: "#58A6FF",
+        selectionHex: "#30363D"
+    )
 
     public static let nordDefault = TerminalAppearance(
         backgroundHex: NordTheme.polarNight0.hex,

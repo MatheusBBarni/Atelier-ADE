@@ -10,17 +10,22 @@ public final class TerminalHostController: WorkspaceTerminalSurfaceManaging {
     private var hostViewsByTabID: [UUID: TerminalSurfaceHostNSView] = [:]
     private var exitMonitorsByTabID: [UUID: Task<Void, Never>] = [:]
     private var sessionDriversByTabID: [UUID: TerminalSessionDriver] = [:]
+    private var currentAppearance: TerminalAppearance
     public var onSurfaceExited: ((UUID, Int32?) -> Void)?
 
-    public init(adapter: any GhosttyAdapter = LiveGhosttyAdapter()) {
+    public init(
+        adapter: any GhosttyAdapter = LiveGhosttyAdapter(),
+        appearance: TerminalAppearance = .cursorDefault
+    ) {
         self.adapter = adapter
+        self.currentAppearance = appearance
     }
 
     @discardableResult
     public func createSurface(for tab: WorkspaceTab) async throws -> GhosttySurfaceHandle {
         if let existing = surfacesByTabID[tab.id] { return existing }
 
-        let configuration = GhosttyLaunchConfiguration(tab: tab)
+        let configuration = GhosttyLaunchConfiguration(tab: tab, appearance: currentAppearance)
         let surface: GhosttySurfaceHandle
         let driver: TerminalSessionDriver?
 
@@ -50,6 +55,23 @@ public final class TerminalHostController: WorkspaceTerminalSurfaceManaging {
             startExitMonitoring(tabID: tab.id)
         }
         return surface
+    }
+
+    public func updateAppearance(_ appearance: TerminalAppearance) {
+        guard currentAppearance != appearance else { return }
+        currentAppearance = appearance
+
+        for (tabID, driver) in sessionDriversByTabID {
+            driver.update(tabID: tabID, appearance: appearance)
+        }
+
+        for (tabID, hostView) in hostViewsByTabID {
+            if let driver = sessionDriversByTabID[tabID] {
+                hostView.attach(driver: driver, appearance: appearance)
+            } else {
+                hostView.updateAppearance(appearance)
+            }
+        }
     }
 
     public func surface(for tabID: UUID) -> GhosttySurfaceHandle? {
@@ -106,13 +128,13 @@ public final class TerminalHostController: WorkspaceTerminalSurfaceManaging {
         let hostView = hostViewsByTabID[tab.id] ?? TerminalSurfaceHostNSView()
         removeStaleHostMappings(for: hostView, keeping: tab.id)
         hostViewsByTabID[tab.id] = hostView
-        hostView.configure(tab: tab, appearance: .nordDefault, isActive: isActive)
+        hostView.configure(tab: tab, appearance: currentAppearance, isActive: isActive)
         configureResizeCallback(for: hostView, tabID: tab.id)
         if let driver = sessionDriversByTabID[tab.id] {
-            hostView.attach(driver: driver, appearance: .nordDefault)
+            hostView.attach(driver: driver, appearance: currentAppearance)
         }
         if let surface = surfacesByTabID[tab.id] {
-            hostView.attach(surface: surface, tab: tab, appearance: .nordDefault, driver: sessionDriversByTabID[tab.id])
+            hostView.attach(surface: surface, tab: tab, appearance: currentAppearance, driver: sessionDriversByTabID[tab.id])
         }
         return hostView
     }
@@ -121,13 +143,13 @@ public final class TerminalHostController: WorkspaceTerminalSurfaceManaging {
         guard let hostView = view as? TerminalSurfaceHostNSView else { return }
         removeStaleHostMappings(for: hostView, keeping: tab.id)
         hostViewsByTabID[tab.id] = hostView
-        hostView.configure(tab: tab, appearance: .nordDefault, isActive: isActive)
+        hostView.configure(tab: tab, appearance: currentAppearance, isActive: isActive)
         configureResizeCallback(for: hostView, tabID: tab.id)
         if let driver = sessionDriversByTabID[tab.id] {
-            hostView.attach(driver: driver, appearance: .nordDefault)
+            hostView.attach(driver: driver, appearance: currentAppearance)
         }
         if let surface = surfacesByTabID[tab.id] {
-            hostView.attach(surface: surface, tab: tab, appearance: .nordDefault, driver: sessionDriversByTabID[tab.id])
+            hostView.attach(surface: surface, tab: tab, appearance: currentAppearance, driver: sessionDriversByTabID[tab.id])
             resizeToCurrentBounds(tabID: tab.id, hostView: hostView)
         }
     }
@@ -205,7 +227,7 @@ public final class TerminalSurfaceHostNSView: NSView {
     private static let contentInsets = NSEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
     public private(set) var tabID: UUID?
     public private(set) var attachedSurface: GhosttySurfaceHandle?
-    public private(set) var terminalAppearance: TerminalAppearance = .nordDefault
+    public private(set) var terminalAppearance: TerminalAppearance = .cursorDefault
     public private(set) var embeddedSurfaceView: NSView?
     public private(set) var localProcessTerminalView: LocalProcessTerminalView?
     public var onResize: ((CGSize) -> Void)?
@@ -234,6 +256,11 @@ public final class TerminalSurfaceHostNSView: NSView {
         self.terminalAppearance = appearance
         isActiveTerminalHost = isActive
         toolTip = tab.workingDirectory
+        updateLayerStyle()
+    }
+
+    public func updateAppearance(_ appearance: TerminalAppearance) {
+        terminalAppearance = appearance
         updateLayerStyle()
     }
 
@@ -295,7 +322,7 @@ public final class TerminalSurfaceHostNSView: NSView {
     private func updateLayerStyle() {
         layer?.backgroundColor = NSColor(hex: terminalAppearance.backgroundHex).cgColor
         layer?.borderWidth = isActiveTerminalHost ? 1 : 0
-        layer?.borderColor = NSColor(hex: NordTheme.activeBorder.hex).cgColor
+        layer?.borderColor = NSColor(hex: terminalAppearance.cursorHex).cgColor
     }
 
     private func layoutEmbeddedSurfaceView() {

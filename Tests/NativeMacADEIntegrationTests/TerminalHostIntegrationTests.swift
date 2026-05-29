@@ -7,7 +7,7 @@ import Testing
 @MainActor
 struct TerminalHostIntegrationTests {
     @Test
-    func newTabCreatesExactlyOneGhosttySurfaceWithSelectedWorkingDirectoryAndNordAppearance() async throws {
+    func newTabCreatesExactlyOneGhosttySurfaceWithSelectedWorkingDirectoryAndDefaultAppearance() async throws {
         let adapter = RecordingGhosttyAdapter()
         let controller = TerminalHostController(adapter: adapter)
         let tab = WorkspaceTab(sessionID: UUID(), workingDirectory: "/tmp/native-mac-ade-host", ordinal: 0)
@@ -18,7 +18,7 @@ struct TerminalHostIntegrationTests {
         #expect(firstSurface == secondSurface)
         #expect(adapter.createdConfigurations.count == 1)
         #expect(adapter.createdConfigurations.first?.workingDirectory == tab.workingDirectory)
-        #expect(adapter.createdConfigurations.first?.appearance == .nordDefault)
+        #expect(adapter.createdConfigurations.first?.appearance == AppTheme.defaultTheme.terminalAppearance)
     }
 
     @Test
@@ -42,19 +42,55 @@ struct TerminalHostIntegrationTests {
     }
 
     @Test
-    func terminalHostViewAppliesNordAppearanceToAppKitContainer() async throws {
+    func terminalHostViewAppliesDefaultAppearanceToAppKitContainer() async throws {
         let adapter = RecordingGhosttyAdapter()
         let controller = TerminalHostController(adapter: adapter)
-        let tab = WorkspaceTab(sessionID: UUID(), workingDirectory: "/tmp/native-mac-ade-nord", ordinal: 0)
+        let tab = WorkspaceTab(sessionID: UUID(), workingDirectory: "/tmp/native-mac-ade-theme-default", ordinal: 0)
 
         let view = try #require(controller.makeHostView(for: tab, isActive: true) as? TerminalSurfaceHostNSView)
         _ = try await controller.createSurface(for: tab)
 
-        #expect(view.terminalAppearance == .nordDefault)
+        #expect(view.terminalAppearance == AppTheme.defaultTheme.terminalAppearance)
         #expect(view.attachedSurface != nil)
         #expect(view.embeddedSurfaceView != nil)
         #expect(view.subviews.contains(where: { $0 === view.embeddedSurfaceView }))
-        #expect(view.layer?.backgroundColor == NSColor(hex: TerminalAppearance.nordDefault.backgroundHex).cgColor)
+        #expect(view.layer?.backgroundColor == NSColor(hex: AppTheme.defaultTheme.terminalAppearance.backgroundHex).cgColor)
+    }
+
+    @Test
+    func changingThemeAfterHostViewExistsUpdatesHostWithoutDuplicateSurface() async throws {
+        let adapter = RecordingGhosttyAdapter()
+        let controller = TerminalHostController(adapter: adapter)
+        let tab = WorkspaceTab(sessionID: UUID(), workingDirectory: "/tmp/native-mac-ade-live-theme", ordinal: 0)
+        let view = try #require(controller.makeHostView(for: tab, isActive: true) as? TerminalSurfaceHostNSView)
+        let surface = try await controller.createSurface(for: tab)
+
+        controller.updateAppearance(AppTheme.catppuccin.terminalAppearance)
+        let reusedSurface = try await controller.createSurface(for: tab)
+
+        #expect(surface == reusedSurface)
+        #expect(adapter.createdConfigurations.count == 1)
+        #expect(controller.surface(for: tab.id) == surface)
+        #expect(view.terminalAppearance == AppTheme.catppuccin.terminalAppearance)
+        #expect(view.layer?.backgroundColor == NSColor(hex: AppTheme.catppuccin.terminalAppearance.backgroundHex).cgColor)
+    }
+
+    @Test
+    func creatingNewTabAfterThemeChangePassesUpdatedAppearanceToAdapter() async throws {
+        let adapter = RecordingGhosttyAdapter()
+        let controller = TerminalHostController(adapter: adapter)
+        let sessionID = UUID()
+        let firstTab = WorkspaceTab(sessionID: sessionID, workingDirectory: "/tmp/native-mac-ade-first-theme", ordinal: 0)
+        let secondTab = WorkspaceTab(sessionID: sessionID, workingDirectory: "/tmp/native-mac-ade-second-theme", ordinal: 1)
+
+        _ = try await controller.createSurface(for: firstTab)
+        controller.updateAppearance(AppTheme.dracula.terminalAppearance)
+        _ = try await controller.createSurface(for: secondTab)
+
+        #expect(adapter.createdConfigurations.map(\.appearance) == [
+            AppTheme.defaultTheme.terminalAppearance,
+            AppTheme.dracula.terminalAppearance
+        ])
     }
 
     @Test
@@ -148,6 +184,26 @@ struct TerminalHostIntegrationTests {
         #expect(terminalView.frame.width > 0)
         #expect(terminalView.frame.height > 0)
         #expect(terminalView.process.running)
+
+        controller.releaseSurface(for: tab.id)
+    }
+
+    @Test
+    func liveEmbeddedTerminalHostRefreshesAttachedViewAppearance() async throws {
+        let controller = TerminalHostController()
+        let workingDirectory = try makeTemporaryDirectory()
+        let tab = WorkspaceTab(sessionID: UUID(), workingDirectory: workingDirectory, ordinal: 0)
+        let view = try #require(controller.makeHostView(for: tab, isActive: true) as? TerminalSurfaceHostNSView)
+
+        _ = try await controller.createSurface(for: tab)
+        try await waitUntil("swiftterm view attachment") {
+            view.localProcessTerminalView?.process.running == true
+        }
+
+        controller.updateAppearance(AppTheme.dracula.terminalAppearance)
+
+        #expect(view.terminalAppearance == AppTheme.dracula.terminalAppearance)
+        #expect(view.layer?.backgroundColor == NSColor(hex: AppTheme.dracula.terminalAppearance.backgroundHex).cgColor)
 
         controller.releaseSurface(for: tab.id)
     }

@@ -133,6 +133,25 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
     }
 
     @Test
+    func loadingSavedNonDefaultThemesUpdatesObservedStoreActiveTheme() async throws {
+        let harness = try makeHarness()
+        var observedSchemes: Set<ThemeColorScheme> = []
+
+        for theme in AppTheme.catalog where theme.id != AppTheme.defaultID {
+            try await harness.persistence.save(appPreferences: AppPreferences(themeID: theme.id))
+
+            let loadedPreferences = try await harness.service.loadAppPreferences()
+
+            #expect(loadedPreferences.themeID == theme.id)
+            #expect(harness.store.activeTheme == theme)
+            observedSchemes.insert(harness.store.activeTheme.colorScheme)
+        }
+
+        #expect(observedSchemes.contains(.dark))
+        #expect(observedSchemes.contains(.light))
+    }
+
+    @Test
     func savingBuiltInDefaultPreferenceSeedsSQLiteProfileReference() async throws {
         let harness = try makeHarness()
         let openCode = try #require(SessionShortcut.builtInDefaults.first { $0.label == "OpenCode" })
@@ -230,6 +249,34 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
         #expect(tab.launchArgumentsJSON == "[\"--continue\"]")
         #expect(persistedTab.launchCommand == "claude")
         #expect(persistedTab.launchArgumentsJSON == "[\"--continue\"]")
+    }
+
+    @Test
+    func savingThemePreferenceDoesNotMutatePersistedSessionOrTabLaunchIntent() async throws {
+        let harness = try makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+        let project = try await harness.service.openProject(path: projectPath)
+        let shortcut = SessionShortcut(
+            label: "Codex Exec",
+            launchCommand: "codex",
+            launchArgumentsJSON: "[\"exec\"]",
+            isBuiltIn: true
+        )
+        try await harness.persistence.save(shortcut: shortcut)
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: shortcut.id)
+        let originalSession = try #require(try await harness.persistence.loadSessions().first { $0.id == session.id })
+        let originalTab = try #require(try await harness.persistence.loadTabs().first { $0.sessionID == session.id })
+
+        try await harness.service.saveAppPreferences(AppPreferences(themeID: "catppuccin"))
+
+        let updatedSession = try #require(try await harness.persistence.loadSessions().first { $0.id == session.id })
+        let updatedTab = try #require(try await harness.persistence.loadTabs().first { $0.id == originalTab.id })
+
+        #expect(updatedSession.shortcutID == originalSession.shortcutID)
+        #expect(updatedSession.title == originalSession.title)
+        #expect(updatedTab.launchCommand == originalTab.launchCommand)
+        #expect(updatedTab.launchArgumentsJSON == originalTab.launchArgumentsJSON)
+        #expect(updatedTab.workingDirectory == originalTab.workingDirectory)
     }
 
     @Test

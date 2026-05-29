@@ -2,13 +2,8 @@ import Foundation
 
 public struct AppPreferences: Equatable, Sendable {
     public static let fixedID = 1
-    public static let defaultThemeID = "cursor"
-    public static let supportedThemeIDs: Set<String> = [
-        "dracula",
-        "onedark",
-        "catppuccin",
-        "cursor"
-    ]
+    public static let defaultThemeID = AppTheme.defaultID
+    public static let supportedThemeIDs: Set<String> = AppTheme.supportedIDs
 
     public var id: Int
     public var themeID: String

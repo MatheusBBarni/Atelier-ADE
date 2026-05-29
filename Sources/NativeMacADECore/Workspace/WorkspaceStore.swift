@@ -16,6 +16,10 @@ public final class WorkspaceStore {
         WorkspaceSelection(projectID: selectedProjectID, sessionID: selectedSessionID, tabID: selectedTabID)
     }
 
+    public var activeTheme: AppTheme {
+        AppTheme.resolve(id: appPreferences.themeID)
+    }
+
     public init(
         projects: [WorkspaceProject] = [],
         sessions: [WorkspaceSession] = [],

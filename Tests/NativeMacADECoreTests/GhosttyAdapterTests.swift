@@ -20,6 +20,25 @@ struct GhosttyAdapterTests {
     }
 
     @Test
+    func launchConfigurationPreservesLaunchMetadataWithInjectedAppearance() {
+        let tab = WorkspaceTab(
+            sessionID: UUID(),
+            workingDirectory: "/tmp/native-mac-ade-themed",
+            launchCommand: "claude",
+            launchArgumentsJSON: "[\"--continue\"]",
+            ordinal: 0
+        )
+
+        let configuration = GhosttyLaunchConfiguration(tab: tab, appearance: AppTheme.dracula.terminalAppearance)
+
+        #expect(configuration.workingDirectory == "/tmp/native-mac-ade-themed")
+        #expect(configuration.command == "claude")
+        #expect(configuration.arguments == ["--continue"])
+        #expect(configuration.inheritedSurfaceID == nil)
+        #expect(configuration.appearance == AppTheme.dracula.terminalAppearance)
+    }
+
+    @Test
     func adapterErrorMappingConvertsInitAndSurfaceFailuresToTypedUserVisibleErrors() async throws {
         let initFailingAdapter = LiveGhosttyAdapter(
             runtime: CGhosttyRuntime(forceInitializationFailure: true)
@@ -57,6 +76,7 @@ struct GhosttyAdapterTests {
         #expect(inherited.workingDirectory == "/tmp/native-mac-ade-child")
         #expect(inherited.command == "zsh")
         #expect(inherited.arguments == ["-l"])
+        #expect(inherited.appearance == AppTheme.defaultTheme.terminalAppearance)
     }
 
     @Test

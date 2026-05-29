@@ -2,6 +2,28 @@ import AppKit
 import NativeMacADECore
 import SwiftUI
 
+private struct ShellThemePaletteKey: EnvironmentKey {
+    static let defaultValue = AppTheme.defaultTheme.shellPalette
+}
+
+private extension EnvironmentValues {
+    var shellThemePalette: ShellThemePalette {
+        get { self[ShellThemePaletteKey.self] }
+        set { self[ShellThemePaletteKey.self] = newValue }
+    }
+}
+
+private extension ThemeColorScheme {
+    var swiftUIColorScheme: ColorScheme {
+        switch self {
+        case .dark:
+            return .dark
+        case .light:
+            return .light
+        }
+    }
+}
+
 struct ContentView: View {
     let store: WorkspaceStore
     let commandService: any WorkspaceCommandService
@@ -32,8 +54,8 @@ struct ContentView: View {
             if isRestoring {
                 ProgressView("Restoring workspace…")
                     .padding(20)
-                    .background(NordTheme.elevatedBackground.color, in: RoundedRectangle(cornerRadius: 14))
-                    .foregroundStyle(NordTheme.primaryText.color)
+                    .background(theme.elevatedBackground.color, in: RoundedRectangle(cornerRadius: 14))
+                    .foregroundStyle(theme.primaryText.color)
             }
 
             if !isRestoring, let restoreResult, restoreResult.hasRecoveryItems {
@@ -72,9 +94,12 @@ struct ContentView: View {
             }
         }
         .frame(minWidth: 1_040, minHeight: 680)
-        .background(NordTheme.shellBackground.color)
-        .preferredColorScheme(.dark)
-        .tint(NordTheme.frost1.color)
+        .background(theme.shellBackground.color)
+        .preferredColorScheme(activeTheme.colorScheme.swiftUIColorScheme)
+        .tint(theme.accent.color)
+        .environment(\.shellThemePalette, theme)
+        .onAppear(perform: applyActiveTheme)
+        .onChange(of: activeTheme) { _, _ in applyActiveTheme() }
         .task {
             guard !didRequestRestore else { return }
             didRequestRestore = true
@@ -99,8 +124,20 @@ struct ContentView: View {
         }
     }
 
+    private var activeTheme: AppTheme {
+        store.activeTheme
+    }
+
+    private var theme: ShellThemePalette {
+        activeTheme.shellPalette
+    }
+
     private var userMessagePresented: Binding<Bool> {
         Binding(get: { userMessage != nil }, set: { if !$0 { userMessage = nil } })
+    }
+
+    private func applyActiveTheme() {
+        terminalHostController.updateAppearance(activeTheme.terminalAppearance)
     }
 
     private func toggleSidebar() {
@@ -184,24 +221,25 @@ struct ContentView: View {
 
 struct PilotDiagnosticsView: View {
     let diagnostics: PilotDiagnostics
+    @Environment(\.shellThemePalette) private var theme
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Label("Pilot diagnostics need attention", systemImage: "waveform.path.ecg.rectangle")
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(NordTheme.auroraYellow.color)
+                .foregroundStyle(theme.warning.color)
             Text(diagnostics.releaseBlockingReasons.joined(separator: " • "))
                 .font(.caption)
-                .foregroundStyle(NordTheme.secondaryText.color)
+                .foregroundStyle(theme.secondaryText.color)
             Text("Restore failures: \(percent(diagnostics.restoreFailureRate)) · Terminal failures: \(percent(diagnostics.terminalSurfaceFailureRate))")
                 .font(.caption2.monospacedDigit())
-                .foregroundStyle(NordTheme.mutedText.color)
+                .foregroundStyle(theme.mutedText.color)
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(NordTheme.elevatedBackground.color.opacity(0.96), in: RoundedRectangle(cornerRadius: 12))
+        .background(theme.elevatedBackground.color.opacity(0.96), in: RoundedRectangle(cornerRadius: 12))
         .overlay {
-            RoundedRectangle(cornerRadius: 12).stroke(NordTheme.activeBorder.color.opacity(0.35), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 12).stroke(theme.activeBorder.color.opacity(0.35), lineWidth: 1)
         }
         .accessibilityElement(children: .combine)
     }
@@ -216,19 +254,20 @@ struct RestoreRecoveryView: View {
     let commandService: any WorkspaceCommandService
     @Binding var userMessage: UserMessage?
     let dismiss: () -> Void
+    @Environment(\.shellThemePalette) private var theme
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(NordTheme.auroraYellow.color)
+                    .foregroundStyle(theme.warning.color)
                 VStack(alignment: .leading, spacing: 5) {
                     Text("Workspace restored with recovery notes")
                         .font(.headline)
-                        .foregroundStyle(NordTheme.primaryText.color)
+                        .foregroundStyle(theme.primaryText.color)
                     Text(summary)
                         .font(.callout)
-                        .foregroundStyle(NordTheme.secondaryText.color)
+                        .foregroundStyle(theme.secondaryText.color)
                 }
                 Spacer(minLength: 12)
                 Button("Dismiss", action: dismiss)
@@ -239,14 +278,14 @@ struct RestoreRecoveryView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Skipped \(project.displayName)")
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(NordTheme.primaryText.color)
+                        .foregroundStyle(theme.primaryText.color)
                     Text(project.path)
                         .font(.caption.monospaced())
-                        .foregroundStyle(NordTheme.mutedText.color)
+                        .foregroundStyle(theme.mutedText.color)
                         .lineLimit(1)
                     Text(project.reason)
                         .font(.caption)
-                        .foregroundStyle(NordTheme.secondaryText.color)
+                        .foregroundStyle(theme.secondaryText.color)
                     HStack {
                         Button("Forget this project") {
                             forget(project)
@@ -254,18 +293,18 @@ struct RestoreRecoveryView: View {
                         .buttonStyle(.bordered)
                         Text("To restore it later, choose Open Project again after the folder is available.")
                             .font(.caption2)
-                            .foregroundStyle(NordTheme.mutedText.color)
+                            .foregroundStyle(theme.mutedText.color)
                     }
                 }
                 .padding(10)
-                .background(NordTheme.shellBackground.color.opacity(0.55), in: RoundedRectangle(cornerRadius: 10))
+                .background(theme.shellBackground.color.opacity(0.55), in: RoundedRectangle(cornerRadius: 10))
             }
         }
         .padding(14)
-        .background(NordTheme.elevatedBackground.color.opacity(0.96), in: RoundedRectangle(cornerRadius: 16))
+        .background(theme.elevatedBackground.color.opacity(0.96), in: RoundedRectangle(cornerRadius: 16))
         .overlay {
             RoundedRectangle(cornerRadius: 16)
-                .stroke(NordTheme.auroraYellow.color.opacity(0.65), lineWidth: 1)
+                .stroke(theme.warning.color.opacity(0.65), lineWidth: 1)
         }
         .shadow(color: .black.opacity(0.28), radius: 16, y: 8)
         .accessibilityElement(children: .contain)
@@ -296,6 +335,7 @@ struct ProjectSidebarView: View {
     let store: WorkspaceStore
     let commandService: any WorkspaceCommandService
     @Binding var userMessage: UserMessage?
+    @Environment(\.shellThemePalette) private var theme
     @State private var pendingRemoval: WorkspaceProject?
     @State private var renameDraft: SessionRenameDraft?
     @State private var expandedProjectIDs: Set<UUID> = []
@@ -377,7 +417,7 @@ struct ProjectSidebarView: View {
                                                     }
                                                     if session.id != projectSessions.last?.id {
                                                         Divider()
-                                                            .overlay(NordTheme.polarNight3.color.opacity(0.65))
+                                                            .overlay(theme.border.color.opacity(0.65))
                                                     }
                                                 }
                                             }
@@ -387,10 +427,10 @@ struct ProjectSidebarView: View {
                                 }
                             }
                             .padding(12)
-                            .background(NordTheme.elevatedBackground.color.opacity(0.82), in: RoundedRectangle(cornerRadius: 18))
+                            .background(theme.elevatedBackground.color.opacity(0.82), in: RoundedRectangle(cornerRadius: 18))
                             .overlay {
                                 RoundedRectangle(cornerRadius: 18)
-                                    .stroke(project.id == store.selectedProjectID ? NordTheme.activeBorder.color.opacity(0.85) : NordTheme.polarNight3.color.opacity(0.65), lineWidth: 1)
+                                    .stroke(project.id == store.selectedProjectID ? theme.activeBorder.color.opacity(0.85) : theme.border.color.opacity(0.65), lineWidth: 1)
                             }
                         }
                     }
@@ -398,7 +438,7 @@ struct ProjectSidebarView: View {
                 }
             }
         }
-        .background(NordTheme.sidebarBackground.color)
+        .background(theme.sidebarBackground.color)
         .navigationSplitViewColumnWidth(min: 280, ideal: 360)
         .confirmationDialog("Remove project?", isPresented: removalDialogBinding, titleVisibility: .visible) {
             Button("Remove Project", role: .destructive) {
@@ -532,13 +572,14 @@ struct ProjectRowView: View {
     let onToggleDisclosure: () -> Void
     let onSelectProject: () -> Void
     let onRemove: () -> Void
+    @Environment(\.shellThemePalette) private var theme
 
     var body: some View {
         HStack(spacing: 10) {
             Button(action: onToggleDisclosure) {
                 Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(NordTheme.mutedText.color)
+                    .foregroundStyle(theme.mutedText.color)
                     .frame(width: 12)
             }
             .buttonStyle(.plain)
@@ -547,16 +588,16 @@ struct ProjectRowView: View {
             Button(action: onSelectProject) {
                 HStack(spacing: 10) {
                     Image(systemName: isActive ? "folder.fill" : "folder")
-                        .foregroundStyle(isActive ? NordTheme.snowStorm2.color : NordTheme.frost1.color)
+                        .foregroundStyle(isActive ? theme.selectedText.color : theme.accent.color)
                         .frame(width: 20)
                     VStack(alignment: .leading, spacing: 4) {
                         Text(project.displayName)
                             .font(.headline)
-                            .foregroundStyle(NordTheme.primaryText.color)
+                            .foregroundStyle(theme.primaryText.color)
                             .lineLimit(1)
                         Text(project.path)
                             .font(.caption.monospaced())
-                            .foregroundStyle(NordTheme.mutedText.color)
+                            .foregroundStyle(theme.mutedText.color)
                             .lineLimit(1)
                     }
                     Spacer(minLength: 8)
@@ -572,16 +613,16 @@ struct ProjectRowView: View {
                 Button("Remove", systemImage: "trash", role: .destructive, action: onRemove)
                     .labelStyle(.iconOnly)
                     .buttonStyle(.borderless)
-                    .foregroundStyle(NordTheme.destructive.color)
+                    .foregroundStyle(theme.destructive.color)
                     .help("Remove selected project")
             }
         }
         .padding(.vertical, 8)
         .padding(.horizontal, 6)
-        .background(isActive ? NordTheme.activeBackground.color.opacity(0.42) : Color.clear, in: RoundedRectangle(cornerRadius: 10))
+        .background(isActive ? theme.activeBackground.color.opacity(0.42) : Color.clear, in: RoundedRectangle(cornerRadius: 10))
         .overlay {
             RoundedRectangle(cornerRadius: 10)
-                .stroke(isActive ? NordTheme.activeBorder.color : Color.clear, lineWidth: 1)
+                .stroke(isActive ? theme.activeBorder.color : Color.clear, lineWidth: 1)
         }
     }
 
@@ -603,6 +644,7 @@ struct SessionListView: View {
     let store: WorkspaceStore
     let commandService: any WorkspaceCommandService
     @Binding var userMessage: UserMessage?
+    @Environment(\.shellThemePalette) private var theme
     @State private var renameDraft: SessionRenameDraft?
 
     var body: some View {
@@ -649,7 +691,7 @@ struct SessionListView: View {
                 .scrollContentBackground(.hidden)
             }
         }
-        .background(NordTheme.shellBackground.color)
+        .background(theme.shellBackground.color)
         .navigationSplitViewColumnWidth(min: 240, ideal: 300)
         .sheet(item: $renameDraft) { draft in
             SessionRenameView(draft: draft) { sessionID, title in
@@ -702,22 +744,23 @@ struct SidebarInlineEmptyState: View {
     let message: String
     let actionTitle: String
     let action: () -> Void
+    @Environment(\.shellThemePalette) private var theme
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title)
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(NordTheme.primaryText.color)
+                .foregroundStyle(theme.primaryText.color)
             Text(message)
                 .font(.caption)
-                .foregroundStyle(NordTheme.secondaryText.color)
+                .foregroundStyle(theme.secondaryText.color)
             Button(actionTitle, action: action)
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(NordTheme.shellBackground.color.opacity(0.6), in: RoundedRectangle(cornerRadius: 12))
+        .background(theme.shellBackground.color.opacity(0.6), in: RoundedRectangle(cornerRadius: 12))
     }
 }
 
@@ -750,6 +793,7 @@ struct SessionCommandPaletteOverlay: View {
     let state: SessionCommandPaletteState
     let onClose: () -> Void
     let onSelect: (SessionCommandOption) -> Void
+    @Environment(\.shellThemePalette) private var theme
     @State private var query = ""
     @FocusState private var isSearchFocused: Bool
 
@@ -771,11 +815,11 @@ struct SessionCommandPaletteOverlay: View {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 12) {
                     Image(systemName: "magnifyingglass")
-                        .foregroundStyle(NordTheme.mutedText.color)
+                        .foregroundStyle(theme.mutedText.color)
                     TextField("Start session…", text: $query)
                         .textFieldStyle(.plain)
                         .font(.title3)
-                        .foregroundStyle(NordTheme.primaryText.color)
+                        .foregroundStyle(theme.primaryText.color)
                         .focused($isSearchFocused)
                         .onSubmit {
                             if let first = filteredOptions.first {
@@ -786,23 +830,23 @@ struct SessionCommandPaletteOverlay: View {
                 .padding(.horizontal, 20)
                 .padding(.vertical, 18)
 
-                Divider().overlay(NordTheme.polarNight3.color)
+                Divider().overlay(theme.border.color)
 
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Commands for \(state.projectName)")
                         .font(.caption)
-                        .foregroundStyle(NordTheme.mutedText.color)
+                        .foregroundStyle(theme.mutedText.color)
 
                     if state.isLoading {
                         HStack(spacing: 10) {
                             ProgressView()
                             Text("Loading session commands…")
-                                .foregroundStyle(NordTheme.secondaryText.color)
+                                .foregroundStyle(theme.secondaryText.color)
                         }
                         .padding(.vertical, 16)
                     } else if filteredOptions.isEmpty {
                         Text("No matching commands")
-                            .foregroundStyle(NordTheme.secondaryText.color)
+                            .foregroundStyle(theme.secondaryText.color)
                             .padding(.vertical, 16)
                     } else {
                         ForEach(filteredOptions) { option in
@@ -815,26 +859,26 @@ struct SessionCommandPaletteOverlay: View {
                 }
                 .padding(16)
 
-                Divider().overlay(NordTheme.polarNight3.color)
+                Divider().overlay(theme.border.color)
 
                 HStack {
                     Text("↩︎ Start first match")
                         .font(.caption2)
-                        .foregroundStyle(NordTheme.mutedText.color)
+                        .foregroundStyle(theme.mutedText.color)
                     Spacer()
                     Button("Cancel", action: onClose)
                         .buttonStyle(.plain)
                         .keyboardShortcut(.cancelAction)
-                        .foregroundStyle(NordTheme.secondaryText.color)
+                        .foregroundStyle(theme.secondaryText.color)
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
             }
             .frame(width: 720)
-            .background(NordTheme.shellBackground.color, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .background(theme.shellBackground.color, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(NordTheme.polarNight3.color, lineWidth: 1)
+                    .stroke(theme.border.color, lineWidth: 1)
             }
             .shadow(color: .black.opacity(0.35), radius: 30, y: 12)
         }
@@ -846,35 +890,36 @@ struct SessionCommandPaletteOverlay: View {
 
 struct SessionCommandPaletteRow: View {
     let option: SessionCommandOption
+    @Environment(\.shellThemePalette) private var theme
 
     var body: some View {
         HStack(spacing: 14) {
             Image(systemName: option.systemImage)
                 .font(.headline)
-                .foregroundStyle(NordTheme.snowStorm2.color)
+                .foregroundStyle(theme.selectedText.color)
                 .frame(width: 18)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(option.title)
                     .font(.headline)
-                    .foregroundStyle(NordTheme.primaryText.color)
+                    .foregroundStyle(theme.primaryText.color)
                 Text(option.subtitle)
                     .font(.callout)
-                    .foregroundStyle(NordTheme.secondaryText.color)
+                    .foregroundStyle(theme.secondaryText.color)
             }
 
             Spacer(minLength: 12)
             Image(systemName: "arrow.turn.down.left")
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(NordTheme.mutedText.color)
+                .foregroundStyle(theme.mutedText.color)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(NordTheme.elevatedBackground.color.opacity(0.92), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(theme.elevatedBackground.color.opacity(0.92), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(NordTheme.polarNight3.color, lineWidth: 1)
+                .stroke(theme.border.color, lineWidth: 1)
         }
     }
 }
@@ -886,18 +931,19 @@ struct SessionRowView: View {
     let onSelect: () -> Void
     let onRename: () -> Void
     let onDelete: () -> Void
+    @Environment(\.shellThemePalette) private var theme
 
     var body: some View {
         HStack(spacing: 10) {
             Button(action: onSelect) {
                 HStack(spacing: 10) {
                     Image(systemName: isActive ? "rectangle.stack.fill" : "rectangle.stack")
-                        .foregroundStyle(isActive ? NordTheme.snowStorm2.color : NordTheme.frost0.color)
+                        .foregroundStyle(isActive ? theme.selectedText.color : theme.secondaryAccent.color)
                         .frame(width: 20)
                     VStack(alignment: .leading, spacing: 0) {
                         Text(session.title)
                             .font(.headline)
-                            .foregroundStyle(NordTheme.primaryText.color)
+                            .foregroundStyle(theme.primaryText.color)
                             .lineLimit(1)
                     }
                     Spacer(minLength: 8)
@@ -915,7 +961,7 @@ struct SessionRowView: View {
                     Image(systemName: "ellipsis")
                         .font(.callout.weight(.semibold))
                         .frame(width: 28, height: 28)
-                        .background(NordTheme.shellBackground.color.opacity(0.85), in: Circle())
+                        .background(theme.shellBackground.color.opacity(0.85), in: Circle())
                 }
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
@@ -925,10 +971,10 @@ struct SessionRowView: View {
         }
         .padding(.vertical, 8)
         .padding(.horizontal, 6)
-        .background(isActive ? NordTheme.activeBackground.color.opacity(0.32) : Color.clear, in: RoundedRectangle(cornerRadius: 10))
+        .background(isActive ? theme.activeBackground.color.opacity(0.32) : Color.clear, in: RoundedRectangle(cornerRadius: 10))
         .overlay {
             RoundedRectangle(cornerRadius: 10)
-                .stroke(isActive ? NordTheme.activeBorder.color : Color.clear, lineWidth: 1)
+                .stroke(isActive ? theme.activeBorder.color : Color.clear, lineWidth: 1)
         }
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
@@ -941,6 +987,7 @@ struct SessionRenameView: View {
     let draft: SessionRenameDraft
     let onSave: (UUID, String) -> Void
     let onCancel: () -> Void
+    @Environment(\.shellThemePalette) private var theme
     @State private var title: String
     @FocusState private var focusedField: Bool
 
@@ -955,9 +1002,9 @@ struct SessionRenameView: View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Rename Session")
                 .font(.title2.weight(.semibold))
-                .foregroundStyle(NordTheme.primaryText.color)
+                .foregroundStyle(theme.primaryText.color)
             Text("Give this project session a clear purpose so it is easy to resume later.")
-                .foregroundStyle(NordTheme.secondaryText.color)
+                .foregroundStyle(theme.secondaryText.color)
             TextField("Session title", text: $title)
                 .textFieldStyle(.roundedBorder)
                 .focused($focusedField)
@@ -973,7 +1020,7 @@ struct SessionRenameView: View {
         }
         .padding(24)
         .frame(width: 420)
-        .background(NordTheme.elevatedBackground.color)
+        .background(theme.elevatedBackground.color)
         .onAppear { focusedField = true }
     }
 
@@ -988,6 +1035,7 @@ struct WorkspaceDetailView: View {
     let terminalHostController: TerminalHostController
     @Binding var userMessage: UserMessage?
     let isSidebarCollapsed: Bool
+    @Environment(\.shellThemePalette) private var theme
 
     var body: some View {
         VStack(spacing: 0) {
@@ -998,7 +1046,7 @@ struct WorkspaceDetailView: View {
                 isSidebarCollapsed: isSidebarCollapsed
             )
             TabChromeView(store: store, commandService: commandService, userMessage: $userMessage)
-            Divider().overlay(NordTheme.polarNight3.color)
+            Divider().overlay(theme.border.color)
             TerminalHostAreaView(
                 store: store,
                 commandService: commandService,
@@ -1006,7 +1054,7 @@ struct WorkspaceDetailView: View {
                 userMessage: $userMessage
             )
         }
-        .background(NordTheme.contentBackground.color)
+        .background(theme.contentBackground.color)
         .ignoresSafeArea(.container, edges: .top)
     }
 
@@ -1020,35 +1068,36 @@ struct ActiveContextBanner: View {
     let session: WorkspaceSession?
     let onShowSessionCommands: () -> Void
     let isSidebarCollapsed: Bool
+    @Environment(\.shellThemePalette) private var theme
 
     var body: some View {
         HStack(spacing: 12) {
             Label(project?.displayName ?? "No project selected", systemImage: project == nil ? "exclamationmark.triangle" : "folder.fill")
                 .font(.headline)
             Image(systemName: "chevron.right")
-                .foregroundStyle(NordTheme.mutedText.color)
+                .foregroundStyle(theme.mutedText.color)
             Label(session?.title ?? "No session selected", systemImage: session == nil ? "rectangle.stack" : "rectangle.stack.fill")
                 .font(.subheadline.weight(.semibold))
             Spacer()
             Text("⌘T opens a plain shell • ⌘⇧P starts session commands")
                 .font(.caption.weight(.medium))
-                .foregroundStyle(NordTheme.mutedText.color)
+                .foregroundStyle(theme.mutedText.color)
                 .lineLimit(1)
             Button(action: onShowSessionCommands) {
                 Image(systemName: "plus")
                     .font(.system(size: 13, weight: .semibold))
                     .frame(width: 30, height: 30)
-                    .background(NordTheme.shellBackground.color.opacity(0.7), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .background(theme.shellBackground.color.opacity(0.7), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
             }
             .buttonStyle(.plain)
-            .foregroundStyle(NordTheme.primaryText.color)
+            .foregroundStyle(theme.primaryText.color)
             .help("Start session commands (⌘⇧P)")
         }
         .padding(.leading, isSidebarCollapsed ? 150 : 16)
         .padding(.trailing, 16)
         .padding(.vertical, 12)
-        .foregroundStyle(NordTheme.primaryText.color)
-        .background(NordTheme.elevatedBackground.color)
+        .foregroundStyle(theme.primaryText.color)
+        .background(theme.elevatedBackground.color)
     }
 }
 
@@ -1056,6 +1105,7 @@ struct TabChromeView: View {
     let store: WorkspaceStore
     let commandService: any WorkspaceCommandService
     @Binding var userMessage: UserMessage?
+    @Environment(\.shellThemePalette) private var theme
 
     var body: some View {
         ScrollView(.horizontal) {
@@ -1063,7 +1113,7 @@ struct TabChromeView: View {
                 if store.tabsForSelectedSession.isEmpty {
                     Text(store.selectedSessionID == nil ? "Select a session to see tabs" : "No tabs in this session yet")
                         .font(.callout)
-                        .foregroundStyle(NordTheme.mutedText.color)
+                        .foregroundStyle(theme.mutedText.color)
                 } else {
                     ForEach(store.tabsForSelectedSession) { tab in
                         TabItemView(
@@ -1079,10 +1129,10 @@ struct TabChromeView: View {
                     Image(systemName: "plus")
                         .font(.system(size: 12, weight: .semibold))
                         .frame(width: 24, height: 24)
-                        .background(NordTheme.elevatedBackground.color.opacity(store.selectedSessionID == nil ? 0.38 : 0.9), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        .background(theme.elevatedBackground.color.opacity(store.selectedSessionID == nil ? 0.38 : 0.9), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
                         .overlay {
                             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                .stroke(NordTheme.polarNight3.color, lineWidth: 1)
+                                .stroke(theme.border.color, lineWidth: 1)
                         }
                 }
                 .buttonStyle(.plain)
@@ -1093,7 +1143,7 @@ struct TabChromeView: View {
             .padding(.vertical, 5)
         }
         .frame(height: 38)
-        .background(NordTheme.polarNight1.color)
+        .background(theme.tabBarBackground.color)
     }
 
     private func selectTab(_ id: UUID?) {
@@ -1135,6 +1185,7 @@ struct TabItemView: View {
     let isActive: Bool
     let onSelect: () -> Void
     let onClose: () -> Void
+    @Environment(\.shellThemePalette) private var theme
 
     var body: some View {
         HStack(spacing: 6) {
@@ -1144,21 +1195,21 @@ struct TabItemView: View {
                     .lineLimit(1)
             }
             .buttonStyle(.plain)
-            .foregroundStyle(isActive ? NordTheme.primaryText.color : NordTheme.secondaryText.color)
+            .foregroundStyle(isActive ? theme.primaryText.color : theme.secondaryText.color)
 
             Button("Close tab", systemImage: "xmark", action: onClose)
                 .labelStyle(.iconOnly)
                 .buttonStyle(.borderless)
-                .foregroundStyle(isActive ? NordTheme.snowStorm2.color : NordTheme.mutedText.color)
+                .foregroundStyle(isActive ? theme.selectedText.color : theme.mutedText.color)
                 .help("Close terminal tab")
         }
         .padding(.leading, 10)
         .padding(.trailing, 6)
         .padding(.vertical, 6)
-        .background(isActive ? NordTheme.contentBackground.color : NordTheme.elevatedBackground.color.opacity(0.8), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .background(isActive ? theme.contentBackground.color : theme.elevatedBackground.color.opacity(0.8), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .stroke(isActive ? NordTheme.activeBorder.color : NordTheme.polarNight3.color, lineWidth: 1)
+                .stroke(isActive ? theme.activeBorder.color : theme.border.color, lineWidth: 1)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Terminal tab in \(tab.workingDirectory)")
@@ -1176,10 +1227,11 @@ struct TerminalHostAreaView: View {
     let commandService: any WorkspaceCommandService
     let terminalHostController: TerminalHostController
     @Binding var userMessage: UserMessage?
+    @Environment(\.shellThemePalette) private var theme
 
     var body: some View {
         ZStack {
-            NordTheme.contentBackground.color
+            theme.contentBackground.color
             if let selectedTab = store.selectedTab {
                 TerminalHostView(
                     tab: selectedTab,
@@ -1236,27 +1288,28 @@ struct TerminalHostView: NSViewRepresentable {
 struct TerminalPlaceholderView: View {
     let selectedProject: WorkspaceProject?
     let selectedSession: WorkspaceSession?
+    @Environment(\.shellThemePalette) private var theme
 
     var body: some View {
         ZStack {
-            NordTheme.contentBackground.color
+            theme.contentBackground.color
             VStack(spacing: 12) {
                 Image(systemName: "terminal")
                     .font(.system(size: 44))
-                    .foregroundStyle(NordTheme.frost1.color)
+                    .foregroundStyle(theme.accent.color)
                 Text(title)
                     .font(.title3.weight(.semibold))
-                    .foregroundStyle(NordTheme.primaryText.color)
+                    .foregroundStyle(theme.primaryText.color)
                 Text(message)
                     .font(.callout.monospaced())
-                    .foregroundStyle(NordTheme.secondaryText.color)
+                    .foregroundStyle(theme.secondaryText.color)
                     .multilineTextAlignment(.center)
             }
             .padding(28)
-            .background(NordTheme.elevatedBackground.color.opacity(0.72), in: RoundedRectangle(cornerRadius: 18))
+            .background(theme.elevatedBackground.color.opacity(0.72), in: RoundedRectangle(cornerRadius: 18))
             .overlay {
                 RoundedRectangle(cornerRadius: 18)
-                    .stroke(NordTheme.polarNight3.color, lineWidth: 1)
+                    .stroke(theme.border.color, lineWidth: 1)
             }
         }
     }
@@ -1279,17 +1332,18 @@ struct SidebarHeader: View {
     let actionTitle: String
     let systemImage: String
     let action: () -> Void
+    @Environment(\.shellThemePalette) private var theme
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
                     .font(.title3.weight(.bold))
-                    .foregroundStyle(NordTheme.primaryText.color)
+                    .foregroundStyle(theme.primaryText.color)
                     .lineLimit(1)
                 Text(subtitle)
                     .font(.caption)
-                    .foregroundStyle(NordTheme.mutedText.color)
+                    .foregroundStyle(theme.mutedText.color)
                     .lineLimit(2)
             }
             Spacer()
@@ -1302,7 +1356,7 @@ struct SidebarHeader: View {
         .padding(.horizontal, 16)
         .padding(.top, 0)
         .padding(.bottom, 10)
-        .background(NordTheme.polarNight1.color)
+        .background(theme.tabBarBackground.color)
     }
 }
 
@@ -1312,18 +1366,19 @@ struct EmptyStateView: View {
     let message: String
     var actionTitle: String?
     var action: (() -> Void)?
+    @Environment(\.shellThemePalette) private var theme
 
     var body: some View {
         VStack(spacing: 14) {
             Image(systemName: systemImage)
                 .font(.system(size: 34))
-                .foregroundStyle(NordTheme.frost1.color)
+                .foregroundStyle(theme.accent.color)
             Text(title)
                 .font(.headline)
-                .foregroundStyle(NordTheme.primaryText.color)
+                .foregroundStyle(theme.primaryText.color)
             Text(message)
                 .font(.callout)
-                .foregroundStyle(NordTheme.secondaryText.color)
+                .foregroundStyle(theme.secondaryText.color)
                 .multilineTextAlignment(.center)
             if let actionTitle, let action {
                 Button(actionTitle, action: action)
@@ -1332,7 +1387,7 @@ struct EmptyStateView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(24)
-        .background(NordTheme.shellBackground.color)
+        .background(theme.shellBackground.color)
     }
 }
 
