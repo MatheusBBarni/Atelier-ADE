@@ -22,6 +22,7 @@ public protocol WorkspaceCommandService {
     func createSession(projectID: UUID, shortcutID: UUID?) async throws -> WorkspaceSession
     func renameSession(sessionID: UUID, title: String) async throws
     func createTab(sessionID: UUID) async throws -> WorkspaceTab
-    func restoreWorkspace() async throws
+    @discardableResult
+    func restoreWorkspace() async throws -> RestoreWorkspaceResult
     func closeTab(tabID: UUID, force: Bool) async throws
 }

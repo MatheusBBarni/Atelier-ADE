@@ -48,6 +48,9 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
         if var existing = store.project(matchingPath: standardizedPath) {
             existing.lastOpenedAt = timestamp
             project = existing
+        } else if var persistedProject = try await persistedProject(matchingPath: standardizedPath) {
+            persistedProject.lastOpenedAt = timestamp
+            project = persistedProject
         } else {
             project = WorkspaceProject(
                 path: standardizedPath,
@@ -66,7 +69,13 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
 
     public func removeProject(id: UUID) async throws {
         guard store.projects.contains(where: { $0.id == id }) else {
-            throw WorkspaceCommandError.missingProject(id)
+            let persistedProjects = try await persist { try await persistenceStore.loadProjects() }
+            guard persistedProjects.contains(where: { $0.id == id }) else {
+                throw WorkspaceCommandError.missingProject(id)
+            }
+            try await persist { try await persistenceStore.deleteProject(id: id) }
+            try await persistSnapshot()
+            return
         }
 
         let removedSessionIDs = Set(store.sessions.filter { $0.projectID == id }.map(\.id))
@@ -181,8 +190,10 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
         return tab
     }
 
-    public func restoreWorkspace() async throws {
-        let restoredStore = try await persist { try await restoreCoordinator.restoreStore() }
+    @discardableResult
+    public func restoreWorkspace() async throws -> RestoreWorkspaceResult {
+        var restoreResult = try await persist { try await restoreCoordinator.restoreWorkspace() }
+        let restoredStore = restoreResult.store
         store.restore(
             projects: restoredStore.projects,
             sessions: restoredStore.sessions,
@@ -190,6 +201,18 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
             selection: restoredStore.selection
         )
         surfacesByTabID.removeAll()
+        for tab in store.tabs {
+            do {
+                let surface = try await createSurface(for: tab)
+                surfacesByTabID[tab.id] = surface
+            } catch {
+                restoreResult.diagnostics.append(RestoreDiagnostic(
+                    severity: .failure,
+                    message: "Terminal for restored tab \(tab.id.uuidString) could not be recreated: \(String(describing: error))"
+                ))
+            }
+        }
+        return restoreResult
     }
 
     public func closeTab(tabID: UUID, force: Bool) async throws {
@@ -212,6 +235,14 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
     private func directoryExists(at path: String) -> Bool {
         var isDirectory: ObjCBool = false
         return fileManager.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue
+    }
+
+    private func persistedProject(matchingPath path: String) async throws -> WorkspaceProject? {
+        let standardizedPath = URL(fileURLWithPath: path).standardizedFileURL.path
+        let persistedProjects = try await persist { try await persistenceStore.loadProjects() }
+        return persistedProjects.first {
+            URL(fileURLWithPath: $0.path).standardizedFileURL.path == standardizedPath
+        }
     }
 
     private func createSurface(for tab: WorkspaceTab) async throws -> GhosttySurfaceHandle {

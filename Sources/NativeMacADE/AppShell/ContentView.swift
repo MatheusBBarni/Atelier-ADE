@@ -8,6 +8,7 @@ struct ContentView: View {
     let terminalHostController: TerminalHostController
     @State private var didRequestRestore = false
     @State private var isRestoring = true
+    @State private var restoreResult: RestoreWorkspaceResult?
     @State private var userMessage: UserMessage?
 
     var body: some View {
@@ -27,6 +28,22 @@ struct ContentView: View {
                     .background(NordTheme.elevatedBackground.color, in: RoundedRectangle(cornerRadius: 14))
                     .foregroundStyle(NordTheme.primaryText.color)
             }
+
+            if !isRestoring, let restoreResult, restoreResult.hasRecoveryItems {
+                VStack {
+                    RestoreRecoveryView(
+                        result: restoreResult,
+                        commandService: commandService,
+                        userMessage: $userMessage
+                    ) {
+                        self.restoreResult = nil
+                    }
+                    .padding(.top, 18)
+                    .padding(.horizontal, 20)
+                    Spacer()
+                }
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
         }
         .navigationTitle("Native Mac ADE")
         .frame(minWidth: 1_040, minHeight: 680)
@@ -37,7 +54,7 @@ struct ContentView: View {
             guard !didRequestRestore else { return }
             didRequestRestore = true
             do {
-                try await commandService.restoreWorkspace()
+                restoreResult = try await commandService.restoreWorkspace()
             } catch {
                 userMessage = UserMessage(title: "Restore unavailable", detail: String(describing: error))
             }
@@ -52,6 +69,87 @@ struct ContentView: View {
 
     private var userMessagePresented: Binding<Bool> {
         Binding(get: { userMessage != nil }, set: { if !$0 { userMessage = nil } })
+    }
+}
+
+struct RestoreRecoveryView: View {
+    let result: RestoreWorkspaceResult
+    let commandService: any WorkspaceCommandService
+    @Binding var userMessage: UserMessage?
+    let dismiss: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(NordTheme.auroraYellow.color)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Workspace restored with recovery notes")
+                        .font(.headline)
+                        .foregroundStyle(NordTheme.primaryText.color)
+                    Text(summary)
+                        .font(.callout)
+                        .foregroundStyle(NordTheme.secondaryText.color)
+                }
+                Spacer(minLength: 12)
+                Button("Dismiss", action: dismiss)
+                    .buttonStyle(.bordered)
+            }
+
+            ForEach(result.skippedProjects) { project in
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Skipped \(project.displayName)")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(NordTheme.primaryText.color)
+                    Text(project.path)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(NordTheme.mutedText.color)
+                        .lineLimit(1)
+                    Text(project.reason)
+                        .font(.caption)
+                        .foregroundStyle(NordTheme.secondaryText.color)
+                    HStack {
+                        Button("Forget this project") {
+                            forget(project)
+                        }
+                        .buttonStyle(.bordered)
+                        Text("To restore it later, choose Open Project again after the folder is available.")
+                            .font(.caption2)
+                            .foregroundStyle(NordTheme.mutedText.color)
+                    }
+                }
+                .padding(10)
+                .background(NordTheme.shellBackground.color.opacity(0.55), in: RoundedRectangle(cornerRadius: 10))
+            }
+        }
+        .padding(14)
+        .background(NordTheme.elevatedBackground.color.opacity(0.96), in: RoundedRectangle(cornerRadius: 16))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(NordTheme.auroraYellow.color.opacity(0.65), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.28), radius: 16, y: 8)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Workspace restore recovery")
+    }
+
+    private var summary: String {
+        if result.skippedProjects.isEmpty {
+            return "Some restored terminal surfaces could not be reopened. The workspace metadata remains available."
+        }
+        return "\(result.skippedProjects.count) project folder(s) could not be accessed. Reopen them from the Projects sidebar when available."
+    }
+
+    private func forget(_ project: SkippedRestoredProject) {
+        Task {
+            do {
+                try await commandService.removeProject(id: project.id)
+                userMessage = UserMessage(title: "Project forgotten", detail: "Removed \(project.displayName) from restore metadata.")
+                dismiss()
+            } catch {
+                userMessage = UserMessage(title: "Project could not be forgotten", detail: String(describing: error))
+            }
+        }
     }
 }
 

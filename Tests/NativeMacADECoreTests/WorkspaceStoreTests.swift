@@ -97,7 +97,10 @@ struct WorkspaceStoreTests {
         let projectID = UUID()
         let sessionID = UUID()
         let tabID = UUID()
-        let project = WorkspaceProject(id: projectID, path: "/tmp/ade", displayName: "ade")
+        let projectURL = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("native-mac-ade-store-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: projectURL, withIntermediateDirectories: true)
+        let project = WorkspaceProject(id: projectID, path: projectURL.path, displayName: "ade")
         let session = WorkspaceSession(id: sessionID, projectID: projectID, title: "05-28 10:00")
         let tab = WorkspaceTab(id: tabID, sessionID: sessionID, workingDirectory: project.path, ordinal: 0)
         let persistence = InMemoryWorkspacePersistenceStore(
@@ -118,6 +121,6 @@ struct WorkspaceStoreTests {
         #expect(store.selectedProjectID == projectID)
         #expect(store.selectedSessionID == sessionID)
         #expect(store.selectedTabID == tabID)
-        #expect(store.selectedTab?.workingDirectory == "/tmp/ade")
+        #expect(store.selectedTab?.workingDirectory == projectURL.path)
     }
 }
