@@ -74,6 +74,14 @@ public final class TerminalHostController: WorkspaceTerminalSurfaceManaging {
         }
     }
 
+    public func zoomIn() {
+        adjustFontSize(by: 1)
+    }
+
+    public func zoomOut() {
+        adjustFontSize(by: -1)
+    }
+
     public func surface(for tabID: UUID) -> GhosttySurfaceHandle? {
         surfacesByTabID[tabID]
     }
@@ -219,6 +227,12 @@ public final class TerminalHostController: WorkspaceTerminalSurfaceManaging {
     private func sessionDriversBySurface(_ surface: GhosttySurfaceHandle) -> TerminalSessionDriver? {
         guard let tabID = surfacesByTabID.first(where: { $0.value == surface })?.key else { return nil }
         return sessionDriversByTabID[tabID]
+    }
+
+    private func adjustFontSize(by delta: Double) {
+        var appearance = currentAppearance
+        appearance.fontSize = min(max(appearance.fontSize + delta, 9), 28)
+        updateAppearance(appearance)
     }
 }
 

@@ -76,6 +76,20 @@ struct TerminalHostIntegrationTests {
     }
 
     @Test
+    func terminalZoomCommandsAdjustAttachedHostFontSize() throws {
+        let controller = TerminalHostController()
+        let tab = WorkspaceTab(sessionID: UUID(), workingDirectory: "/tmp/native-mac-ade-zoom", ordinal: 0)
+        let view = try #require(controller.makeHostView(for: tab, isActive: true) as? TerminalSurfaceHostNSView)
+        let defaultFontSize = view.terminalAppearance.fontSize
+
+        controller.zoomIn()
+        #expect(view.terminalAppearance.fontSize == defaultFontSize + 1)
+
+        controller.zoomOut()
+        #expect(view.terminalAppearance.fontSize == defaultFontSize)
+    }
+
+    @Test
     func creatingNewTabAfterThemeChangePassesUpdatedAppearanceToAdapter() async throws {
         let adapter = RecordingGhosttyAdapter()
         let controller = TerminalHostController(adapter: adapter)
@@ -91,6 +105,44 @@ struct TerminalHostIntegrationTests {
             AppTheme.defaultTheme.terminalAppearance,
             AppTheme.dracula.terminalAppearance
         ])
+    }
+
+    @Test
+    func startupPreferenceLoadAppliesSavedThemeBeforeRestoredTerminalSurfaceCreation() async throws {
+        let adapter = RecordingGhosttyAdapter()
+        let controller = TerminalHostController(adapter: adapter)
+        let store = WorkspaceStore()
+        let persistence = InMemoryWorkspacePersistenceStore()
+        let projectPath = try makeTemporaryDirectory()
+        let project = WorkspaceProject(path: projectPath, displayName: "Themed Restore")
+        let session = WorkspaceSession(projectID: project.id, title: "Restored")
+        let tab = WorkspaceTab(sessionID: session.id, workingDirectory: projectPath, ordinal: 0)
+        let service = DefaultWorkspaceCommandService(
+            store: store,
+            persistenceStore: persistence,
+            restoreCoordinator: RestoreCoordinator(persistenceStore: persistence),
+            terminalSurfaceManager: controller
+        )
+
+        try await persistence.save(project: project)
+        try await persistence.save(session: session)
+        try await persistence.save(tab: tab)
+        try await persistence.save(snapshot: RestoreSnapshot(
+            selectedProjectID: project.id,
+            selectedSessionID: session.id,
+            selectedTabID: tab.id,
+            openTabIDs: [tab.id]
+        ))
+        try await persistence.save(appPreferences: AppPreferences(themeID: "catppuccin"))
+
+        let startupResult = await AppShellStartupCoordinator.run(commandService: service, store: store) {
+            controller.updateAppearance(store.activeTheme.terminalAppearance)
+        }
+
+        #expect(startupResult.preferenceLoadErrorDescription == nil)
+        #expect(startupResult.restoreErrorDescription == nil)
+        #expect(adapter.createdConfigurations.map(\.appearance) == [AppTheme.catppuccin.terminalAppearance])
+        #expect(store.activeTheme == AppTheme.catppuccin)
     }
 
     @Test

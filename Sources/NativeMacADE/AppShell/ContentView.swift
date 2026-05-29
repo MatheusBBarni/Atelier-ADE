@@ -2,11 +2,11 @@ import AppKit
 import NativeMacADECore
 import SwiftUI
 
-private struct ShellThemePaletteKey: EnvironmentKey {
+struct ShellThemePaletteKey: EnvironmentKey {
     static let defaultValue = AppTheme.defaultTheme.shellPalette
 }
 
-private extension EnvironmentValues {
+extension EnvironmentValues {
     var shellThemePalette: ShellThemePalette {
         get { self[ShellThemePaletteKey.self] }
         set { self[ShellThemePaletteKey.self] = newValue }
@@ -25,6 +25,7 @@ private extension ThemeColorScheme {
 }
 
 struct ContentView: View {
+    @Bindable var shellState: AppShellState
     let store: WorkspaceStore
     let commandService: any WorkspaceCommandService
     let terminalHostController: TerminalHostController
@@ -46,6 +47,7 @@ struct ContentView: View {
                     commandService: commandService,
                     terminalHostController: terminalHostController,
                     userMessage: $userMessage,
+                    onOpenSettings: { shellState.presentSettings(source: .visibleEntryPoint) },
                     isSidebarCollapsed: splitViewVisibility == .detailOnly
                 )
             }
@@ -103,13 +105,27 @@ struct ContentView: View {
         .task {
             guard !didRequestRestore else { return }
             didRequestRestore = true
-            do {
-                restoreResult = try await commandService.restoreWorkspace()
-            } catch {
-                userMessage = UserMessage(title: "Restore unavailable", detail: String(describing: error))
+            let startupResult = await AppShellStartupCoordinator.run(
+                commandService: commandService,
+                store: store,
+                afterPreferencesLoaded: applyActiveTheme
+            )
+            restoreResult = startupResult.restoreResult
+            pilotDiagnostics = startupResult.pilotDiagnostics
+            if let restoreErrorDescription = startupResult.restoreErrorDescription {
+                userMessage = UserMessage(title: "Restore unavailable", detail: restoreErrorDescription)
+            } else if let preferenceLoadErrorDescription = startupResult.preferenceLoadErrorDescription {
+                userMessage = UserMessage(title: "Settings unavailable", detail: preferenceLoadErrorDescription)
             }
-            pilotDiagnostics = commandService.pilotDiagnostics()
             isRestoring = false
+        }
+        .sheet(isPresented: $shellState.isSettingsPresented, onDismiss: shellState.dismissSettings) {
+            ConfigModalView(
+                store: store,
+                commandService: commandService,
+                onDismiss: shellState.dismissSettings
+            )
+            .environment(\.shellThemePalette, theme)
         }
         .alert(userMessage?.title ?? "Workspace message", isPresented: userMessagePresented) {
             Button("OK") { userMessage = nil }
@@ -1034,6 +1050,7 @@ struct WorkspaceDetailView: View {
     let commandService: any WorkspaceCommandService
     let terminalHostController: TerminalHostController
     @Binding var userMessage: UserMessage?
+    let onOpenSettings: () -> Void
     let isSidebarCollapsed: Bool
     @Environment(\.shellThemePalette) private var theme
 
@@ -1043,6 +1060,7 @@ struct WorkspaceDetailView: View {
                 project: store.selectedProject,
                 session: store.selectedSession,
                 onShowSessionCommands: showSessionCommandPalette,
+                onOpenSettings: onOpenSettings,
                 isSidebarCollapsed: isSidebarCollapsed
             )
             TabChromeView(store: store, commandService: commandService, userMessage: $userMessage)
@@ -1067,6 +1085,7 @@ struct ActiveContextBanner: View {
     let project: WorkspaceProject?
     let session: WorkspaceSession?
     let onShowSessionCommands: () -> Void
+    let onOpenSettings: () -> Void
     let isSidebarCollapsed: Bool
     @Environment(\.shellThemePalette) private var theme
 
@@ -1079,10 +1098,6 @@ struct ActiveContextBanner: View {
             Label(session?.title ?? "No session selected", systemImage: session == nil ? "rectangle.stack" : "rectangle.stack.fill")
                 .font(.subheadline.weight(.semibold))
             Spacer()
-            Text("⌘T opens a plain shell • ⌘⇧P starts session commands")
-                .font(.caption.weight(.medium))
-                .foregroundStyle(theme.mutedText.color)
-                .lineLimit(1)
             Button(action: onShowSessionCommands) {
                 Image(systemName: "plus")
                     .font(.system(size: 13, weight: .semibold))
@@ -1091,7 +1106,17 @@ struct ActiveContextBanner: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(theme.primaryText.color)
-            .help("Start session commands (⌘⇧P)")
+            .help("Start session commands")
+
+            Button(action: onOpenSettings) {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 13, weight: .semibold))
+                    .frame(width: 30, height: 30)
+                    .background(theme.shellBackground.color.opacity(0.7), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(theme.primaryText.color)
+            .help("Settings")
         }
         .padding(.leading, isSidebarCollapsed ? 150 : 16)
         .padding(.trailing, 16)
@@ -1420,7 +1445,7 @@ enum ProjectDirectoryPicker {
     }
 }
 
-private extension NordColorToken {
+extension NordColorToken {
     var color: Color {
         Color(red: red, green: green, blue: blue, opacity: opacity)
     }
@@ -1432,6 +1457,7 @@ private extension NordColorToken {
     let restoreCoordinator = RestoreCoordinator(persistenceStore: persistence)
     let terminalHostController = TerminalHostController()
     ContentView(
+        shellState: AppShellState(),
         store: store,
         commandService: DefaultWorkspaceCommandService(
             store: store,

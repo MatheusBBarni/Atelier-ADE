@@ -133,6 +133,24 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
     }
 
     @Test
+    func loadedKeybindingOverridesResolveAtRuntimeAndResetToDefaults() async throws {
+        let harness = try makeHarness()
+        let override = KeybindingOverride(commandID: .openSettings, keyEquivalent: ",", modifiers: [.command, .shift])
+
+        try await harness.service.saveAppPreferences(AppPreferences(keybindings: [.openSettings: override]))
+
+        let loadedPreferences = try await harness.service.loadAppPreferences()
+        #expect(AppCommandRegistry.resolvedKeybinding(for: .openSettings, preferences: loadedPreferences) == override)
+
+        let resetPreferences = AppCommandRegistry.resettingOverride(for: .openSettings, in: loadedPreferences)
+        try await harness.service.saveAppPreferences(resetPreferences)
+        let reloadedPreferences = try await harness.service.loadAppPreferences()
+
+        #expect(reloadedPreferences.keybindings[.openSettings] == nil)
+        #expect(AppCommandRegistry.resolvedKeybinding(for: .openSettings, preferences: reloadedPreferences) == AppCommandRegistry.defaultKeybinding(for: .openSettings))
+    }
+
+    @Test
     func loadingSavedNonDefaultThemesUpdatesObservedStoreActiveTheme() async throws {
         let harness = try makeHarness()
         var observedSchemes: Set<ThemeColorScheme> = []
@@ -149,6 +167,37 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
 
         #expect(observedSchemes.contains(.dark))
         #expect(observedSchemes.contains(.light))
+    }
+
+    @Test
+    func startupWithUnknownThemeAndStaleDefaultProfileRestoresExistingTabsWithoutDuplication() async throws {
+        let harness = try makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+        let project = WorkspaceProject(path: projectPath, displayName: "Startup")
+        let session = WorkspaceSession(projectID: project.id, title: "Restored")
+        let tab = WorkspaceTab(sessionID: session.id, workingDirectory: projectPath, ordinal: 0)
+        let staleShortcutID = UUID()
+
+        try await harness.persistence.save(project: project)
+        try await harness.persistence.save(session: session)
+        try await harness.persistence.save(tab: tab)
+        try await harness.persistence.save(snapshot: RestoreSnapshot(
+            selectedProjectID: project.id,
+            selectedSessionID: session.id,
+            selectedTabID: tab.id,
+            openTabIDs: [tab.id]
+        ))
+        try await harness.persistence.save(appPreferences: AppPreferences(themeID: "missing-theme"))
+        try writeStaleDefaultShortcutID(staleShortcutID, databasePath: harness.databasePath)
+
+        let startupResult = await AppShellStartupCoordinator.run(commandService: harness.service, store: harness.store)
+
+        #expect(startupResult.preferenceLoadErrorDescription == nil)
+        #expect(startupResult.restoreErrorDescription == nil)
+        #expect(harness.store.appPreferences.themeID == AppPreferences.defaultThemeID)
+        #expect(harness.store.appPreferences.defaultSessionShortcutID == nil)
+        #expect(harness.store.tabs.map(\.id) == [tab.id])
+        #expect(harness.terminal.createdTabs.map(\.id) == [tab.id])
     }
 
     @Test

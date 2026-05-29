@@ -25,7 +25,7 @@ public enum WorkspaceSettingsValidationFailure: Error, Equatable, Sendable {
 }
 
 @MainActor
-public protocol WorkspaceCommandService {
+public protocol WorkspaceCommandService: AppShellStartupServicing {
     func openProject(path: String) async throws -> WorkspaceProject
     func removeProject(id: UUID) async throws
     func removeSession(id: UUID) async throws

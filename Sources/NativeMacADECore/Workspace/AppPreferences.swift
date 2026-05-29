@@ -42,16 +42,29 @@ public struct AppPreferences: Equatable, Sendable {
     }
 
     public static func decodeKeybindingsJSON(_ json: String) throws -> [AppCommandID: KeybindingOverride] {
-        let overrides = try JSONDecoder().decode([KeybindingOverride].self, from: Data(json.utf8))
+        let overrides = try JSONDecoder().decode([PersistedKeybindingOverride].self, from: Data(json.utf8))
         var keybindings: [AppCommandID: KeybindingOverride] = [:]
         for override in overrides {
-            guard keybindings[override.commandID] == nil else {
-                throw AppPreferencesSerializationError.duplicateCommandID(override.commandID)
+            guard let commandID = AppCommandID(rawValue: override.commandID) else {
+                continue
             }
-            keybindings[override.commandID] = override
+            guard keybindings[commandID] == nil else {
+                throw AppPreferencesSerializationError.duplicateCommandID(commandID)
+            }
+            keybindings[commandID] = KeybindingOverride(
+                commandID: commandID,
+                keyEquivalent: override.keyEquivalent,
+                modifiers: override.modifiers
+            )
         }
         return keybindings
     }
+}
+
+private struct PersistedKeybindingOverride: Decodable {
+    var commandID: String
+    var keyEquivalent: String
+    var modifiers: [KeyModifier]
 }
 
 public enum AppPreferencesSerializationError: Error, Equatable, Sendable {
@@ -70,26 +83,7 @@ public enum AppCommandID: String, CaseIterable, Codable, Hashable, Sendable {
     case openSettings
 
     public var defaultKeybinding: KeybindingOverride {
-        switch self {
-        case .previousTab:
-            KeybindingOverride(commandID: self, keyEquivalent: "[")
-        case .nextTab:
-            KeybindingOverride(commandID: self, keyEquivalent: "]")
-        case .previousSession:
-            KeybindingOverride(commandID: self, keyEquivalent: "upArrow")
-        case .nextSession:
-            KeybindingOverride(commandID: self, keyEquivalent: "downArrow")
-        case .searchSessions:
-            KeybindingOverride(commandID: self, keyEquivalent: "p")
-        case .zoomInTerminal:
-            KeybindingOverride(commandID: self, keyEquivalent: "+")
-        case .zoomOutTerminal:
-            KeybindingOverride(commandID: self, keyEquivalent: "-")
-        case .toggleRightSidebar:
-            KeybindingOverride(commandID: self, keyEquivalent: "l")
-        case .openSettings:
-            KeybindingOverride(commandID: self, keyEquivalent: ",")
-        }
+        AppCommandRegistry.defaultKeybinding(for: self)
     }
 }
 

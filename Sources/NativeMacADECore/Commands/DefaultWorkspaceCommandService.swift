@@ -590,25 +590,7 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
     }
 
     private func validateManagedKeybindings(_ keybindings: [AppCommandID: KeybindingOverride]) throws {
-        for (commandID, override) in keybindings where override.commandID != commandID {
-            throw WorkspaceCommandError.settingsValidationFailed(.mismatchedKeybindingCommandID(
-                expected: commandID,
-                actual: override.commandID
-            ))
-        }
-
-        var signaturesByCommand: [KeybindingSignature: AppCommandID] = [:]
-        for commandID in AppCommandID.allCases {
-            let keybinding = keybindings[commandID] ?? commandID.defaultKeybinding
-            let signature = try KeybindingSignature(commandID: commandID, keybinding: keybinding)
-            if let conflictingCommandID = signaturesByCommand[signature] {
-                throw WorkspaceCommandError.settingsValidationFailed(.duplicateManagedKeybinding(
-                    commandID: commandID,
-                    conflictingCommandID: conflictingCommandID
-                ))
-            }
-            signaturesByCommand[signature] = commandID
-        }
+        try AppCommandRegistry.validate(keybindings)
     }
 
     private func validateLaunchArgumentsJSON(_ launchArgumentsJSON: String?, shortcutID: UUID) throws {
@@ -803,20 +785,6 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
             lhs.launchCommand == rhs.launchCommand &&
             lhs.launchArgumentsJSON == rhs.launchArgumentsJSON &&
             lhs.secretRef == rhs.secretRef
-    }
-}
-
-private struct KeybindingSignature: Hashable {
-    let keyEquivalent: String
-    let modifiers: Set<KeyModifier>
-
-    init(commandID: AppCommandID, keybinding: KeybindingOverride) throws {
-        let trimmedKeyEquivalent = keybinding.keyEquivalent.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedKeyEquivalent.isEmpty else {
-            throw WorkspaceCommandError.settingsValidationFailed(.emptyKeybinding(commandID))
-        }
-        keyEquivalent = trimmedKeyEquivalent.lowercased()
-        modifiers = Set(keybinding.modifiers)
     }
 }
 
