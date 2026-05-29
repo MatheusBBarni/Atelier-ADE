@@ -96,6 +96,40 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
     }
 
     @Test
+    func clearingOrDeletingCurrentDefaultProfileFallsBackToPlainShell() async throws {
+        let harness = try makeHarness()
+        let project = try await harness.service.openProject(path: makeTemporaryProjectDirectory())
+        let profile = try await harness.service.saveSessionShortcut(SessionShortcut(
+            label: "Default Local",
+            launchCommand: "local-agent",
+            launchArgumentsJSON: "[\"run\"]"
+        ))
+        try await harness.service.saveAppPreferences(AppPreferences(defaultSessionShortcutID: profile.id))
+
+        let defaultSession = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        try await harness.service.saveAppPreferences(AppPreferences(defaultSessionShortcutID: nil))
+        let clearedSession = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        try await harness.service.saveAppPreferences(AppPreferences(defaultSessionShortcutID: profile.id))
+        try await harness.service.deleteSessionShortcut(id: profile.id)
+        let deletedDefaultSession = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+
+        let defaultTab = try #require(harness.terminal.createdTabs.first { $0.sessionID == defaultSession.id })
+        let clearedTab = try #require(harness.terminal.createdTabs.first { $0.sessionID == clearedSession.id })
+        let deletedDefaultTab = try #require(harness.terminal.createdTabs.first { $0.sessionID == deletedDefaultSession.id })
+
+        #expect(defaultSession.shortcutID == profile.id)
+        #expect(defaultTab.launchCommand == "local-agent")
+        #expect(defaultTab.launchArgumentsJSON == "[\"run\"]")
+        #expect(clearedSession.shortcutID == nil)
+        #expect(clearedTab.launchCommand == nil)
+        #expect(clearedTab.launchArgumentsJSON == nil)
+        #expect(try await harness.persistence.loadAppPreferences().defaultSessionShortcutID == nil)
+        #expect(deletedDefaultSession.shortcutID == nil)
+        #expect(deletedDefaultTab.launchCommand == nil)
+        #expect(deletedDefaultTab.launchArgumentsJSON == nil)
+    }
+
+    @Test
     func preferencesAndBuiltInOverrideStateRoundTripThroughSQLiteCommandService() async throws {
         let harness = try makeHarness()
         let codex = try #require(SessionShortcut.builtInDefaults.first { $0.label == "Codex" })
@@ -501,6 +535,47 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
 
         #expect(restoredTab.launchCommand == "codex")
         #expect(restoredTab.launchArgumentsJSON == "[\"exec\"]")
+    }
+
+    @Test
+    func resettingCustomizedBuiltInChangesFutureBootstrapAndRestoredTabsKeepLaunchIntent() async throws {
+        let harness = try makeHarness()
+        let project = try await harness.service.openProject(path: makeTemporaryProjectDirectory())
+        let codex = try #require(SessionShortcut.builtInDefaults.first { $0.label == "Codex" })
+        var customizedCodex = codex
+        customizedCodex.launchArgumentsJSON = "[\"exec\"]"
+
+        let savedCodex = try await harness.service.saveSessionShortcut(customizedCodex)
+        try await harness.service.saveAppPreferences(AppPreferences(defaultSessionShortcutID: codex.id))
+        let customizedSession = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let customizedTab = try #require(harness.terminal.createdTabs.first { $0.sessionID == customizedSession.id })
+
+        let resetCodex = try await harness.service.resetBuiltInSessionShortcut(id: codex.id)
+        let resetSession = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let resetTab = try #require(harness.terminal.createdTabs.first { $0.sessionID == resetSession.id })
+
+        let restoredStore = WorkspaceStore()
+        let restoredTerminal = FakeIntegrationTerminalSurfaceManager()
+        let restoredService = DefaultWorkspaceCommandService(
+            store: restoredStore,
+            persistenceStore: harness.persistence,
+            restoreCoordinator: RestoreCoordinator(persistenceStore: harness.persistence),
+            terminalSurfaceManager: restoredTerminal
+        )
+        try await restoredService.restoreWorkspace()
+        let restoredCustomizedTab = try #require(restoredTerminal.createdTabs.first { $0.id == customizedTab.id })
+
+        #expect(savedCodex.hasUserOverride)
+        #expect(customizedSession.shortcutID == codex.id)
+        #expect(customizedTab.launchCommand == "codex")
+        #expect(customizedTab.launchArgumentsJSON == "[\"exec\"]")
+        #expect(resetCodex == codex)
+        #expect(resetSession.shortcutID == codex.id)
+        #expect(resetTab.launchCommand == "codex")
+        #expect(resetTab.launchArgumentsJSON == "[]")
+        #expect(restoredCustomizedTab.launchCommand == "codex")
+        #expect(restoredCustomizedTab.launchArgumentsJSON == "[\"exec\"]")
+        #expect(restoredStore.tabs.first { $0.id == customizedTab.id }?.launchArgumentsJSON == "[\"exec\"]")
     }
 
     @Test

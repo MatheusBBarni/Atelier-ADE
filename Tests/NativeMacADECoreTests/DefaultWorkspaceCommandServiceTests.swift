@@ -282,6 +282,7 @@ struct DefaultWorkspaceCommandServiceTests {
         let savedShortcut = try await harness.service.saveSessionShortcut(editedShortcut)
         let resetShortcut = try await harness.service.resetBuiltInSessionShortcut(id: canonicalShortcut.id)
 
+        #expect(savedShortcut.id == canonicalShortcut.id)
         #expect(savedShortcut.isBuiltIn == true)
         #expect(savedShortcut.hasUserOverride == true)
         #expect(savedShortcut.launchArgumentsJSON == "[\"exec\"]")
@@ -320,6 +321,36 @@ struct DefaultWorkspaceCommandServiceTests {
 
         #expect(try await harness.persistence.loadSessionShortcuts() == shortcuts)
         #expect(try await harness.persistence.loadAppPreferences() == preferences)
+    }
+
+    @Test
+    func addingEditingAndDeletingCustomProfileWorks() async throws {
+        let harness = makeHarness()
+        let createdProfile = try await harness.service.saveSessionShortcut(SessionShortcut(
+            label: "Local Reviewer",
+            launchCommand: "local-review",
+            launchArgumentsJSON: "[]",
+            isBuiltIn: true,
+            hasUserOverride: true
+        ))
+        var editedProfile = createdProfile
+        editedProfile.label = "Local Reviewer Fast"
+        editedProfile.launchArgumentsJSON = "[\"--fast\"]"
+
+        let savedEdit = try await harness.service.saveSessionShortcut(editedProfile)
+
+        #expect(createdProfile.isBuiltIn == false)
+        #expect(createdProfile.hasUserOverride == false)
+        #expect(savedEdit.id == createdProfile.id)
+        #expect(savedEdit.label == "Local Reviewer Fast")
+        #expect(savedEdit.launchArgumentsJSON == "[\"--fast\"]")
+        #expect(savedEdit.isBuiltIn == false)
+        #expect(savedEdit.hasUserOverride == false)
+        #expect(try await harness.persistence.loadSessionShortcuts() == [savedEdit])
+
+        try await harness.service.deleteSessionShortcut(id: savedEdit.id)
+
+        #expect(try await harness.persistence.loadSessionShortcuts().isEmpty)
     }
 
     @Test

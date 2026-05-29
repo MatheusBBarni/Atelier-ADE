@@ -25,24 +25,30 @@ struct ConfigModalView: View {
 
             Divider().overlay(theme.border.color)
 
-            VStack(alignment: .leading, spacing: 14) {
-                ConfigSummaryRow(
-                    systemImage: "person.2",
-                    title: "Agent Profiles",
-                    value: store.appPreferences.defaultSessionShortcutID == nil ? "Plain session" : "Saved default"
-                )
-                ConfigSummaryRow(
-                    systemImage: "paintpalette",
-                    title: "Appearance",
-                    value: store.activeTheme.displayName
-                )
-                ConfigSummaryRow(
-                    systemImage: "keyboard",
-                    title: "Shortcuts",
-                    value: "\(AppCommandRegistry.resolvedKeybindings(for: store.appPreferences).count) managed"
-                )
+            ScrollView {
+                VStack(alignment: .leading, spacing: 22) {
+                    ConfigModalAgentProfilesSection(
+                        store: store,
+                        commandService: commandService
+                    )
+
+                    Divider().overlay(theme.border.color)
+
+                    VStack(alignment: .leading, spacing: 14) {
+                        ConfigSummaryRow(
+                            systemImage: "paintpalette",
+                            title: "Appearance",
+                            value: store.activeTheme.displayName
+                        )
+                        ConfigSummaryRow(
+                            systemImage: "keyboard",
+                            title: "Shortcuts",
+                            value: "\(AppCommandRegistry.resolvedKeybindings(for: store.appPreferences).count) managed"
+                        )
+                    }
+                }
+                .padding(20)
             }
-            .padding(20)
 
             Divider().overlay(theme.border.color)
 
@@ -54,7 +60,8 @@ struct ConfigModalView: View {
             }
             .padding(20)
         }
-        .frame(width: 560)
+        .frame(width: 760)
+        .frame(minHeight: 620)
         .background(theme.elevatedBackground.color)
     }
 }
