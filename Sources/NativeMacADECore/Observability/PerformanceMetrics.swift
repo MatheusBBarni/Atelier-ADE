@@ -22,6 +22,12 @@ public final class PerformanceMetrics {
     public private(set) var closeConfirmationAcceptCount = 0
     public private(set) var closeConfirmationRejectCount = 0
     public private(set) var inaccessibleRestoredProjectCount = 0
+    public private(set) var settingsOpenedCount = 0
+    public private(set) var settingsSavedCount = 0
+    public private(set) var settingsSaveFailureCount = 0
+    public private(set) var themeChangedCount = 0
+    public private(set) var keybindingChangedCount = 0
+    public private(set) var lastSavedChangedKeybindingCount = 0
 
     public init() {}
 
@@ -66,6 +72,27 @@ public final class PerformanceMetrics {
 
     public func recordTerminalProcessExit() {
         terminalProcessExitCount += 1
+    }
+
+    public func recordSettingsOpened() {
+        settingsOpenedCount += 1
+    }
+
+    public func recordSettingsSaved(changedKeybindingCount: Int) {
+        settingsSavedCount += 1
+        lastSavedChangedKeybindingCount = changedKeybindingCount
+    }
+
+    public func recordSettingsSaveFailure() {
+        settingsSaveFailureCount += 1
+    }
+
+    public func recordThemeChanged() {
+        themeChangedCount += 1
+    }
+
+    public func recordKeybindingsChanged(changedCommandCount: Int) {
+        keybindingChangedCount += changedCommandCount
     }
 
     public func diagnostics(launchToReadyBudget: TimeInterval = 10) -> PilotDiagnostics {

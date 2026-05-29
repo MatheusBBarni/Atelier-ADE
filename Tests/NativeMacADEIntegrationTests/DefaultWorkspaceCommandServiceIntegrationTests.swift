@@ -169,19 +169,24 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
     @Test
     func loadedKeybindingOverridesResolveAtRuntimeAndResetToDefaults() async throws {
         let harness = try makeHarness()
-        let override = KeybindingOverride(commandID: .openSettings, keyEquivalent: ",", modifiers: [.command, .shift])
+        let overrides = managedKeybindingOverrides()
 
-        try await harness.service.saveAppPreferences(AppPreferences(keybindings: [.openSettings: override]))
+        try await harness.service.saveAppPreferences(AppPreferences(keybindings: overrides))
 
         let loadedPreferences = try await harness.service.loadAppPreferences()
-        #expect(AppCommandRegistry.resolvedKeybinding(for: .openSettings, preferences: loadedPreferences) == override)
+        for commandID in AppCommandRegistry.managedCommandIDs {
+            #expect(AppCommandRegistry.resolvedKeybinding(for: commandID, preferences: loadedPreferences) == overrides[commandID])
+        }
 
-        let resetPreferences = AppCommandRegistry.resettingOverride(for: .openSettings, in: loadedPreferences)
+        var resetPreferences = loadedPreferences
+        resetPreferences.keybindings = [:]
         try await harness.service.saveAppPreferences(resetPreferences)
         let reloadedPreferences = try await harness.service.loadAppPreferences()
 
-        #expect(reloadedPreferences.keybindings[.openSettings] == nil)
-        #expect(AppCommandRegistry.resolvedKeybinding(for: .openSettings, preferences: reloadedPreferences) == AppCommandRegistry.defaultKeybinding(for: .openSettings))
+        #expect(reloadedPreferences.keybindings.isEmpty)
+        for commandID in AppCommandRegistry.managedCommandIDs {
+            #expect(AppCommandRegistry.resolvedKeybinding(for: commandID, preferences: reloadedPreferences) == AppCommandRegistry.defaultKeybinding(for: commandID))
+        }
     }
 
     @Test
@@ -360,6 +365,42 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
         #expect(updatedTab.launchCommand == originalTab.launchCommand)
         #expect(updatedTab.launchArgumentsJSON == originalTab.launchArgumentsJSON)
         #expect(updatedTab.workingDirectory == originalTab.workingDirectory)
+    }
+
+    @Test
+    func failedSettingsSaveKeepsPriorPreferencesAndDoesNotBlockLaterSuccessfulSave() async throws {
+        let harness = try makeHarness()
+        let originalOverride = KeybindingOverride(commandID: .openSettings, keyEquivalent: ",", modifiers: [.command, .shift])
+        let originalPreferences = AppPreferences(themeID: "dracula", keybindings: [.openSettings: originalOverride])
+        try await harness.service.saveAppPreferences(originalPreferences)
+        harness.service.logger.clear()
+
+        await #expect(throws: WorkspaceCommandError.settingsValidationFailed(.duplicateManagedKeybinding(
+            commandID: .nextTab,
+            conflictingCommandID: .previousTab
+        ))) {
+            try await harness.service.saveAppPreferences(AppPreferences(
+                themeID: "catppuccin",
+                keybindings: [
+                    .nextTab: KeybindingOverride(commandID: .nextTab, keyEquivalent: "[")
+                ]
+            ))
+        }
+
+        let preferencesAfterFailure = try await harness.persistence.loadAppPreferences()
+        #expect(preferencesAfterFailure.themeID == "dracula")
+        #expect(preferencesAfterFailure.keybindings == [.openSettings: originalOverride])
+        #expect(harness.store.appPreferences.themeID == "dracula")
+        #expect(harness.store.appPreferences.keybindings == [.openSettings: originalOverride])
+        #expect(harness.service.metrics.settingsSaveFailureCount == 1)
+        #expect(harness.service.logger.events.contains { $0.name == "settings_save_failed" })
+
+        let laterPreferences = AppPreferences(themeID: "catppuccin", keybindings: [.previousTab: KeybindingOverride(commandID: .previousTab, keyEquivalent: "1", modifiers: [.command, .option])])
+        try await harness.service.saveAppPreferences(laterPreferences)
+
+        #expect(try await harness.persistence.loadAppPreferences().themeID == "catppuccin")
+        #expect(try await harness.persistence.loadAppPreferences().keybindings == laterPreferences.keybindings)
+        #expect(harness.store.appPreferences.themeID == "catppuccin")
     }
 
     @Test
@@ -701,6 +742,18 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
             .appendingPathComponent(name, isDirectory: true)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url.path
+    }
+
+    private func managedKeybindingOverrides() -> [AppCommandID: KeybindingOverride] {
+        AppCommandRegistry.managedCommandIDs.enumerated().reduce(into: [:]) { overrides, pair in
+            let index = pair.offset + 1
+            let commandID = pair.element
+            overrides[commandID] = KeybindingOverride(
+                commandID: commandID,
+                keyEquivalent: String(index),
+                modifiers: [.command, .option]
+            )
+        }
     }
 
     private func writeStaleDefaultShortcutID(_ shortcutID: UUID, databasePath: String) throws {

@@ -32,6 +32,7 @@ public protocol WorkspaceCommandService: AppShellStartupServicing {
     func selectProject(id: UUID?) async throws
     func selectSession(id: UUID?) async throws
     func selectTab(id: UUID?) async throws
+    func recordSettingsOpened(surface: String)
     func loadAppPreferences() async throws -> AppPreferences
     func saveAppPreferences(_ preferences: AppPreferences) async throws
     func availableSessionShortcuts() async throws -> [SessionShortcut]

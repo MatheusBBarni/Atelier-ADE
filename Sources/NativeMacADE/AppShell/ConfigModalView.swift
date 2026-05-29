@@ -34,18 +34,10 @@ struct ConfigModalView: View {
 
                     Divider().overlay(theme.border.color)
 
-                    VStack(alignment: .leading, spacing: 14) {
-                        ConfigSummaryRow(
-                            systemImage: "paintpalette",
-                            title: "Appearance",
-                            value: store.activeTheme.displayName
-                        )
-                        ConfigSummaryRow(
-                            systemImage: "keyboard",
-                            title: "Shortcuts",
-                            value: "\(AppCommandRegistry.resolvedKeybindings(for: store.appPreferences).count) managed"
-                        )
-                    }
+                    ConfigModalAppearanceAndShortcutsSection(
+                        store: store,
+                        commandService: commandService
+                    )
                 }
                 .padding(20)
             }
@@ -63,32 +55,8 @@ struct ConfigModalView: View {
         .frame(width: 760)
         .frame(minHeight: 620)
         .background(theme.elevatedBackground.color)
-    }
-}
-
-private struct ConfigSummaryRow: View {
-    let systemImage: String
-    let title: String
-    let value: String
-    @Environment(\.shellThemePalette) private var theme
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: systemImage)
-                .font(.headline)
-                .foregroundStyle(theme.accent.color)
-                .frame(width: 24)
-
-            Text(title)
-                .font(.headline)
-                .foregroundStyle(theme.primaryText.color)
-
-            Spacer(minLength: 12)
-
-            Text(value)
-                .font(.callout)
-                .foregroundStyle(theme.secondaryText.color)
+        .task {
+            commandService.recordSettingsOpened(surface: "config_modal")
         }
-        .padding(.vertical, 4)
     }
 }

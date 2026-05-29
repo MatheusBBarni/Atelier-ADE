@@ -108,6 +108,39 @@ struct TerminalHostIntegrationTests {
     }
 
     @Test
+    func switchingThemeUpdatesAttachedHostAndNewSurfaceWithoutChangingWorkspaceMetadata() async throws {
+        let adapter = RecordingGhosttyAdapter()
+        let controller = TerminalHostController(adapter: adapter)
+        let store = WorkspaceStore()
+        let persistence = InMemoryWorkspacePersistenceStore()
+        let service = DefaultWorkspaceCommandService(
+            store: store,
+            persistenceStore: persistence,
+            restoreCoordinator: RestoreCoordinator(persistenceStore: persistence),
+            terminalSurfaceManager: controller
+        )
+        let project = try await service.openProject(path: makeTemporaryDirectory())
+        let session = try await service.createSession(projectID: project.id, shortcutID: nil)
+        let firstTab = try #require(store.tabs.first)
+        let hostView = try #require(controller.makeHostView(for: firstTab, isActive: true) as? TerminalSurfaceHostNSView)
+
+        try await service.saveAppPreferences(AppPreferences(themeID: "catppuccin"))
+        controller.updateAppearance(store.activeTheme.terminalAppearance)
+        let secondTab = try await service.createTab(sessionID: session.id)
+
+        #expect(hostView.terminalAppearance == AppTheme.catppuccin.terminalAppearance)
+        #expect(adapter.createdConfigurations.map(\.appearance) == [
+            AppTheme.defaultTheme.terminalAppearance,
+            AppTheme.catppuccin.terminalAppearance
+        ])
+        #expect(store.sessions.first?.id == session.id)
+        #expect(store.sessions.first?.shortcutID == session.shortcutID)
+        #expect(store.tabs.first { $0.id == firstTab.id }?.launchCommand == firstTab.launchCommand)
+        #expect(store.tabs.first { $0.id == firstTab.id }?.launchArgumentsJSON == firstTab.launchArgumentsJSON)
+        #expect(secondTab.sessionID == session.id)
+    }
+
+    @Test
     func startupPreferenceLoadAppliesSavedThemeBeforeRestoredTerminalSurfaceCreation() async throws {
         let adapter = RecordingGhosttyAdapter()
         let controller = TerminalHostController(adapter: adapter)

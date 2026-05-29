@@ -158,6 +158,14 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
         try await activateSelection { $0.selectTab(id: id) }
     }
 
+    public func recordSettingsOpened(surface: String) {
+        metrics.recordSettingsOpened()
+        logger.emit("settings_opened", fields: [
+            "surface": surface,
+            "selected_project_id_present": String(store.selectedProjectID != nil)
+        ])
+    }
+
     public func loadAppPreferences() async throws -> AppPreferences {
         let preferences = try await loadNormalizedAppPreferences(healStaleReferences: true)
         store.updateAppPreferences(preferences)
@@ -165,19 +173,47 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
     }
 
     public func saveAppPreferences(_ preferences: AppPreferences) async throws {
-        try await validateAppPreferences(preferences)
-        var updatedPreferences = preferences
-        updatedPreferences.id = AppPreferences.fixedID
-        updatedPreferences.updatedAt = now()
+        let previousPreferences = store.appPreferences
 
-        try await persistBuiltInDefaultShortcutIfNeeded(for: updatedPreferences)
-        try await persist { try await persistenceStore.save(appPreferences: updatedPreferences) }
-        store.updateAppPreferences(updatedPreferences)
-        logger.emit("settings_saved", fields: [
-            "theme_id": updatedPreferences.themeID,
-            "default_profile_id": updatedPreferences.defaultSessionShortcutID?.uuidString ?? "none",
-            "changed_keybinding_count": String(updatedPreferences.keybindings.count)
-        ])
+        do {
+            try await validateAppPreferences(preferences)
+            var updatedPreferences = preferences
+            updatedPreferences.id = AppPreferences.fixedID
+            updatedPreferences.updatedAt = now()
+
+            try await persistBuiltInDefaultShortcutIfNeeded(for: updatedPreferences)
+            try await persist { try await persistenceStore.save(appPreferences: updatedPreferences) }
+            store.updateAppPreferences(updatedPreferences)
+
+            let changedKeybindingIDs = changedManagedKeybindingIDs(
+                from: previousPreferences,
+                to: updatedPreferences
+            )
+            metrics.recordSettingsSaved(changedKeybindingCount: updatedPreferences.keybindings.count)
+            logger.emit("settings_saved", fields: [
+                "theme_id": updatedPreferences.themeID,
+                "default_profile_id": updatedPreferences.defaultSessionShortcutID?.uuidString ?? "none",
+                "changed_keybinding_count": String(updatedPreferences.keybindings.count)
+            ])
+
+            if previousPreferences.themeID != updatedPreferences.themeID {
+                metrics.recordThemeChanged()
+                logger.emit("theme_applied", fields: [
+                    "theme_id": updatedPreferences.themeID
+                ])
+            }
+
+            if !changedKeybindingIDs.isEmpty {
+                metrics.recordKeybindingsChanged(changedCommandCount: changedKeybindingIDs.count)
+                logger.emit("keybinding_changed", fields: [
+                    "changed_keybinding_count": String(changedKeybindingIDs.count),
+                    "command_ids": changedKeybindingIDs.map(\.rawValue).joined(separator: ",")
+                ])
+            }
+        } catch {
+            recordSettingsSaveFailure(error)
+            throw error
+        }
     }
 
     public func availableSessionShortcuts() async throws -> [SessionShortcut] {
@@ -591,6 +627,71 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
 
     private func validateManagedKeybindings(_ keybindings: [AppCommandID: KeybindingOverride]) throws {
         try AppCommandRegistry.validate(keybindings)
+    }
+
+    private func changedManagedKeybindingIDs(
+        from previousPreferences: AppPreferences,
+        to updatedPreferences: AppPreferences
+    ) -> [AppCommandID] {
+        AppCommandRegistry.managedCommandIDs.filter { commandID in
+            AppCommandRegistry.resolvedKeybinding(for: commandID, preferences: previousPreferences) !=
+                AppCommandRegistry.resolvedKeybinding(for: commandID, preferences: updatedPreferences)
+        }
+    }
+
+    private func recordSettingsSaveFailure(_ error: Error) {
+        metrics.recordSettingsSaveFailure()
+        let fields = settingsSaveFailureFields(for: error)
+        logger.emit("settings_save_failed", fields: fields)
+
+        if case let WorkspaceCommandError.settingsValidationFailed(.duplicateManagedKeybinding(commandID, conflictingCommandID)) = error {
+            logger.emit("keybinding_conflict_rejected", fields: [
+                "command_id": commandID.rawValue,
+                "conflicting_command_id": conflictingCommandID.rawValue
+            ])
+        }
+    }
+
+    private func settingsSaveFailureFields(for error: Error) -> [String: String] {
+        guard case let WorkspaceCommandError.settingsValidationFailed(failure) = error else {
+            return [
+                "reason": String(describing: error),
+                "field": "persistence"
+            ]
+        }
+
+        switch failure {
+        case .unknownThemeID(let themeID):
+            return [
+                "reason": "unknown_theme_id:\(themeID)",
+                "field": "theme_id"
+            ]
+        case .unknownDefaultSessionShortcut(let shortcutID):
+            return [
+                "reason": "unknown_default_profile:\(shortcutID.uuidString)",
+                "field": "default_profile_id"
+            ]
+        case .duplicateManagedKeybinding(let commandID, let conflictingCommandID):
+            return [
+                "reason": "duplicate_managed_keybinding:\(commandID.rawValue):\(conflictingCommandID.rawValue)",
+                "field": "keybindings"
+            ]
+        case .mismatchedKeybindingCommandID(let expected, let actual):
+            return [
+                "reason": "mismatched_keybinding_command_id:\(expected.rawValue):\(actual.rawValue)",
+                "field": "keybindings"
+            ]
+        case .emptyKeybinding(let commandID):
+            return [
+                "reason": "empty_keybinding:\(commandID.rawValue)",
+                "field": "keybindings"
+            ]
+        case .malformedLaunchArgumentsJSON(let shortcutID):
+            return [
+                "reason": "malformed_launch_arguments_json:\(shortcutID.uuidString)",
+                "field": "launch_arguments_json"
+            ]
+        }
     }
 
     private func validateLaunchArgumentsJSON(_ launchArgumentsJSON: String?, shortcutID: UUID) throws {

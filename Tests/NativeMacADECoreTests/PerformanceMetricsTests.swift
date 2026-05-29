@@ -16,4 +16,22 @@ struct PerformanceMetricsTests {
         #expect(diagnostics.medianLaunchToReadySeconds == 2)
         #expect(diagnostics.releaseBlockingReasons.contains("median launch-to-ready time above budget") == false)
     }
+
+    @Test
+    func settingsCountersTrackOpenedSavedFailuresThemeAndKeybindingChanges() {
+        let metrics = PerformanceMetrics()
+
+        metrics.recordSettingsOpened()
+        metrics.recordSettingsSaved(changedKeybindingCount: 3)
+        metrics.recordSettingsSaveFailure()
+        metrics.recordThemeChanged()
+        metrics.recordKeybindingsChanged(changedCommandCount: 3)
+
+        #expect(metrics.settingsOpenedCount == 1)
+        #expect(metrics.settingsSavedCount == 1)
+        #expect(metrics.settingsSaveFailureCount == 1)
+        #expect(metrics.themeChangedCount == 1)
+        #expect(metrics.keybindingChangedCount == 3)
+        #expect(metrics.lastSavedChangedKeybindingCount == 3)
+    }
 }
