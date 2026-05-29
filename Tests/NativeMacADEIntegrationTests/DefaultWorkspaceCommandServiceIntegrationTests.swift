@@ -706,6 +706,71 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
     }
 
     @Test
+    func savedFileContentsRestoreAfterRelaunchWhileUnsavedRuntimeChangesDoNot() async throws {
+        let harness = try makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+        let fileURL = try makeTemporaryProjectFile(in: projectPath, relativePath: "Sources/File.swift")
+        let project = try await harness.service.openProject(path: projectPath)
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let fileTab = try await harness.service.openFileTab(sessionID: session.id, path: fileURL.path)
+
+        harness.fileBuffers.updateBuffer(tabID: fileTab.id, text: "let saved = true\n")
+        try await harness.service.saveFileTab(tabID: fileTab.id)
+        harness.fileBuffers.updateBuffer(tabID: fileTab.id, text: "let unsaved = true\n")
+
+        let restoredStore = WorkspaceStore()
+        let restoredTerminal = FakeIntegrationTerminalSurfaceManager()
+        let restoredFileAccess = LocalWorkspaceFileAccess()
+        let restoredFileBuffers = WorkspaceFileBufferController(fileAccess: restoredFileAccess)
+        let restoredService = DefaultWorkspaceCommandService(
+            store: restoredStore,
+            persistenceStore: harness.persistence,
+            restoreCoordinator: RestoreCoordinator(persistenceStore: harness.persistence),
+            terminalSurfaceManager: restoredTerminal,
+            fileAccess: restoredFileAccess,
+            fileBufferManager: restoredFileBuffers,
+            externalEditorOpener: FakeIntegrationExternalEditorOpener()
+        )
+
+        try await restoredService.restoreWorkspace()
+
+        #expect(try String(contentsOf: fileURL, encoding: .utf8) == "let saved = true\n")
+        #expect(restoredStore.tabsForSelectedSession.map(\.id).contains(fileTab.id))
+        #expect(restoredFileBuffers.bufferText(for: fileTab.id) == "let saved = true\n")
+        #expect(restoredFileBuffers.isDirty(tabID: fileTab.id) == false)
+    }
+
+    @Test
+    func selectedFileTabCommandEnablementTracksRealStoreSelectionAndDirtyState() async throws {
+        let harness = try makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+        let fileURL = try makeTemporaryProjectFile(in: projectPath, relativePath: "Sources/File.swift")
+        let project = try await harness.service.openProject(path: projectPath)
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let terminalTab = try #require(harness.store.tabs.first)
+
+        #expect(AppCommandRegistry.isEnabled(.saveFile, selectedTab: harness.store.selectedTab, selectedFileIsDirty: false) == false)
+        #expect(AppCommandRegistry.isEnabled(.openFileInExternalEditor, selectedTab: harness.store.selectedTab, selectedFileIsDirty: false) == false)
+
+        let fileTab = try await harness.service.openFileTab(sessionID: session.id, path: fileURL.path)
+
+        #expect(harness.store.selectedTabID == fileTab.id)
+        #expect(AppCommandRegistry.isEnabled(.saveFile, selectedTab: harness.store.selectedTab, selectedFileIsDirty: false) == false)
+        #expect(AppCommandRegistry.isEnabled(.revertFile, selectedTab: harness.store.selectedTab, selectedFileIsDirty: false))
+        #expect(AppCommandRegistry.isEnabled(.openFileInExternalEditor, selectedTab: harness.store.selectedTab, selectedFileIsDirty: false))
+
+        harness.fileBuffers.updateBuffer(tabID: fileTab.id, text: "let dirty = true\n")
+
+        #expect(AppCommandRegistry.isEnabled(.saveFile, selectedTab: harness.store.selectedTab, selectedFileIsDirty: harness.fileBuffers.isDirty(tabID: fileTab.id)))
+
+        try await harness.service.selectTab(id: terminalTab.id)
+
+        #expect(AppCommandRegistry.isEnabled(.saveFile, selectedTab: harness.store.selectedTab, selectedFileIsDirty: true) == false)
+        #expect(AppCommandRegistry.isEnabled(.revertFile, selectedTab: harness.store.selectedTab, selectedFileIsDirty: true) == false)
+        #expect(AppCommandRegistry.isEnabled(.openFileInExternalEditor, selectedTab: harness.store.selectedTab, selectedFileIsDirty: true) == false)
+    }
+
+    @Test
     func openingOutsideProjectRejectsThroughSQLiteBackedCommandService() async throws {
         let harness = try makeHarness()
         let projectPath = try makeTemporaryProjectDirectory()
@@ -748,6 +813,35 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
         #expect(snapshot?.selectedTabID == nil)
         #expect(snapshot?.tabOrder.isEmpty == true)
         #expect(harness.terminal.closeRequests.count == 1)
+    }
+
+    @Test
+    func dirtyFileCloseRejectsUntilForcedAndRecordsDecisionTelemetry() async throws {
+        let harness = try makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+        let fileURL = try makeTemporaryProjectFile(in: projectPath, relativePath: "Sources/File.swift")
+        let project = try await harness.service.openProject(path: projectPath)
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let terminalTab = try #require(harness.store.tabs.first)
+        let fileTab = try await harness.service.openFileTab(sessionID: session.id, path: fileURL.path)
+        harness.fileBuffers.updateBuffer(tabID: fileTab.id, text: "let dirty = true\n")
+
+        await #expect(throws: WorkspaceCommandError.dirtyFileTabCloseRejected(fileTab.id)) {
+            try await harness.service.closeTab(tabID: fileTab.id, force: false)
+        }
+
+        #expect(try await harness.persistence.loadTabs().map(\.id) == [terminalTab.id, fileTab.id])
+        #expect(harness.service.metrics.dirtyFileCloseConfirmationRejectCount == 1)
+
+        try await harness.service.closeTab(tabID: fileTab.id, force: true)
+
+        #expect(try await harness.persistence.loadTabs().map(\.id) == [terminalTab.id])
+        #expect(harness.service.metrics.dirtyFileCloseConfirmationAcceptCount == 1)
+        #expect(harness.service.logger.events.contains { event in
+            event.name == "file_tab_dirty_close_decision" &&
+                event.fields["tab_id"] == fileTab.id.uuidString &&
+                event.fields["accepted"] == "true"
+        })
     }
 
     @Test

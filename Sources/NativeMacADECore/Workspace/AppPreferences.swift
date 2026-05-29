@@ -77,6 +77,9 @@ public enum AppCommandID: String, CaseIterable, Codable, Hashable, Sendable {
     case previousSession
     case nextSession
     case searchSessions
+    case saveFile
+    case revertFile
+    case openFileInExternalEditor
     case zoomInTerminal
     case zoomOutTerminal
     case toggleRightSidebar

@@ -470,6 +470,12 @@ private extension AppCommandID {
             return "Next Session"
         case .searchSessions:
             return "Search Sessions"
+        case .saveFile:
+            return "Save File"
+        case .revertFile:
+            return "Revert File"
+        case .openFileInExternalEditor:
+            return "Open File in External Editor"
         case .zoomInTerminal:
             return "Zoom In Terminal"
         case .zoomOutTerminal:
@@ -489,6 +495,8 @@ private extension AppCommandID {
             return "Session navigation"
         case .searchSessions:
             return "Session search"
+        case .saveFile, .revertFile, .openFileInExternalEditor:
+            return "File commands"
         case .zoomInTerminal, .zoomOutTerminal:
             return "Terminal zoom"
         case .toggleRightSidebar:

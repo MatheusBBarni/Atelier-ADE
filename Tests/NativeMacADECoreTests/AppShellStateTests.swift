@@ -79,7 +79,13 @@ private final class DelayedStartupService: AppShellStartupServicing {
         PilotDiagnostics(
             restoreFailureRate: 0,
             terminalSurfaceFailureRate: 0,
+            fileSaveFailureRate: 0,
             medianLaunchToReadySeconds: nil,
+            medianFileOpenSeconds: nil,
+            fileRestoreFailureCount: 0,
+            dirtyFileCloseConfirmationAcceptCount: 0,
+            dirtyFileCloseConfirmationRejectCount: 0,
+            externalEditorEscalationCount: 0,
             releaseBlockingReasons: []
         )
     }
@@ -118,7 +124,13 @@ private final class FailingPreferencesStartupService: AppShellStartupServicing {
         PilotDiagnostics(
             restoreFailureRate: 0,
             terminalSurfaceFailureRate: 0,
+            fileSaveFailureRate: 0,
             medianLaunchToReadySeconds: nil,
+            medianFileOpenSeconds: nil,
+            fileRestoreFailureCount: 0,
+            dirtyFileCloseConfirmationAcceptCount: 0,
+            dirtyFileCloseConfirmationRejectCount: 0,
+            externalEditorEscalationCount: 0,
             releaseBlockingReasons: []
         )
     }

@@ -810,6 +810,77 @@ struct DefaultWorkspaceCommandServiceTests {
     }
 
     @Test
+    func fileWorkflowTelemetryUsesHashedPathsWithoutRawFileLocations() async throws {
+        let harness = makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+        let fileURL = try makeTemporaryProjectFile(in: projectPath, relativePath: "Sources/File.swift")
+        let project = try await harness.service.openProject(path: projectPath)
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let standardizedPath = fileURL.standardizedFileURL.resolvingSymlinksInPath().path
+
+        let fileTab = try await harness.service.openFileTab(sessionID: session.id, path: fileURL.path)
+        harness.fileBuffers.updateBuffer(tabID: fileTab.id, text: "let value = 2\n")
+        try await harness.service.saveFileTab(tabID: fileTab.id)
+        try await harness.service.revertFileTab(tabID: fileTab.id)
+        try await harness.service.openFileInExternalEditor(tabID: fileTab.id)
+
+        let fileEvents = harness.service.logger.events.filter {
+            [
+                "file_tab_opened",
+                "file_tab_saved",
+                "file_tab_reverted",
+                "external_editor_opened"
+            ].contains($0.name)
+        }
+
+        #expect(harness.service.metrics.fileOpenDurations.count == 1)
+        #expect(harness.service.metrics.fileSaveSuccessCount == 1)
+        #expect(harness.service.metrics.fileRevertSuccessCount == 1)
+        #expect(harness.service.metrics.externalEditorEscalationCount == 1)
+        #expect(fileEvents.count == 4)
+        #expect(fileEvents.allSatisfy { event in
+            event.fields["hashed_path"] == WorkspacePrivacy.hashIdentifier(standardizedPath) &&
+                event.fields.values.contains(standardizedPath) == false &&
+                event.fields.values.contains(fileURL.path) == false
+        })
+    }
+
+    @Test
+    func fileWorkflowFailureLogsUsePrivacySafeReasonsWithoutRawFileLocations() async throws {
+        let harness = makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+        let outsideProjectPath = try makeTemporaryProjectDirectory(named: "outside-save")
+        let outsideFile = try makeTemporaryProjectFile(in: outsideProjectPath, relativePath: "Outside.swift")
+        let project = WorkspaceProject(path: projectPath, displayName: "Project")
+        let session = WorkspaceSession(projectID: project.id, title: "Session")
+        let fileTab = WorkspaceTab(
+            sessionID: session.id,
+            kind: .file,
+            workingDirectory: projectPath,
+            fileReference: WorkspaceFileReference(path: outsideFile.path, projectRoot: projectPath),
+            ordinal: 0
+        )
+        harness.store.upsertProject(project)
+        harness.store.upsertSession(session)
+        harness.store.upsertTab(fileTab)
+        let standardizedOutsideFile = outsideFile.standardizedFileURL.resolvingSymlinksInPath().path
+        let standardizedProjectPath = URL(fileURLWithPath: projectPath, isDirectory: true).standardizedFileURL.resolvingSymlinksInPath().path
+
+        await #expect(throws: WorkspaceCommandError.filePathOutsideProject(
+            filePath: standardizedOutsideFile,
+            projectRoot: standardizedProjectPath
+        )) {
+            try await harness.service.saveFileTab(tabID: fileTab.id)
+        }
+
+        let event = try #require(harness.service.logger.events.first { $0.name == "file_tab_save_failed" })
+        #expect(event.fields["reason"] == "file_path_outside_project")
+        #expect(event.fields.values.contains(outsideFile.path) == false)
+        #expect(event.fields.values.contains(projectPath) == false)
+        #expect(harness.service.metrics.fileSaveFailureCount == 1)
+    }
+
+    @Test
     func openingFileInExternalEditorUsesDedicatedBoundary() async throws {
         let harness = makeHarness()
         let projectPath = try makeTemporaryProjectDirectory()
@@ -976,6 +1047,57 @@ struct DefaultWorkspaceCommandServiceTests {
     }
 
     @Test
+    func closingDirtyFileTabRejectsWithFileSpecificErrorAndKeepsMetadata() async throws {
+        let harness = makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+        let fileURL = try makeTemporaryProjectFile(in: projectPath, relativePath: "Sources/File.swift")
+        let project = try await harness.service.openProject(path: projectPath)
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let terminalTab = try #require(harness.store.tabs.first)
+        let fileTab = try await harness.service.openFileTab(sessionID: session.id, path: fileURL.path)
+        harness.fileBuffers.updateBuffer(tabID: fileTab.id, text: "let dirty = true\n")
+
+        await #expect(throws: WorkspaceCommandError.dirtyFileTabCloseRejected(fileTab.id)) {
+            try await harness.service.closeTab(tabID: fileTab.id, force: false)
+        }
+
+        #expect(harness.store.tabs.map(\.id) == [terminalTab.id, fileTab.id])
+        #expect(try await harness.persistence.loadTabs().map(\.id) == [terminalTab.id, fileTab.id])
+        #expect(harness.service.metrics.dirtyFileCloseConfirmationRejectCount == 1)
+        #expect(harness.terminal.canCloseRequestCount == 0)
+        #expect(harness.service.logger.events.contains { event in
+            event.name == "file_tab_dirty_close_decision" &&
+                event.fields["tab_id"] == fileTab.id.uuidString &&
+                event.fields["accepted"] == "false" &&
+                event.fields["reason"] == "unsaved_changes"
+        })
+    }
+
+    @Test
+    func forceClosingDirtyFileTabRecordsAcceptedDiscardDecision() async throws {
+        let harness = makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+        let fileURL = try makeTemporaryProjectFile(in: projectPath, relativePath: "Sources/File.swift")
+        let project = try await harness.service.openProject(path: projectPath)
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let terminalTab = try #require(harness.store.tabs.first)
+        let fileTab = try await harness.service.openFileTab(sessionID: session.id, path: fileURL.path)
+        harness.fileBuffers.updateBuffer(tabID: fileTab.id, text: "let dirty = true\n")
+
+        try await harness.service.closeTab(tabID: fileTab.id, force: true)
+
+        #expect(harness.store.tabs.map(\.id) == [terminalTab.id])
+        #expect(harness.service.metrics.dirtyFileCloseConfirmationAcceptCount == 1)
+        #expect(harness.fileBuffers.buffer(for: fileTab.id) == nil)
+        #expect(harness.service.logger.events.contains { event in
+            event.name == "file_tab_dirty_close_decision" &&
+                event.fields["tab_id"] == fileTab.id.uuidString &&
+                event.fields["accepted"] == "true" &&
+                event.fields["reason"] == "discarded_unsaved_changes"
+        })
+    }
+
+    @Test
     func removingSessionForceClosesTabsAndClearsSelection() async throws {
         let harness = makeHarness()
         let project = try await harness.service.openProject(path: makeTemporaryProjectDirectory())
@@ -1011,6 +1133,51 @@ struct DefaultWorkspaceCommandServiceTests {
         #expect(harness.store.selectedSessionID == nil)
         #expect(harness.store.selectedTabID == nil)
         #expect(harness.terminal.releasedTabIDs == [terminalTab.id])
+    }
+
+    @Test
+    func removingSessionRejectsDirtyFileTabsBeforeDeletingMetadata() async throws {
+        let harness = makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+        let fileURL = try makeTemporaryProjectFile(in: projectPath, relativePath: "Sources/File.swift")
+        let project = try await harness.service.openProject(path: projectPath)
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let terminalTab = try #require(harness.store.tabs.first)
+        let fileTab = try await harness.service.openFileTab(sessionID: session.id, path: fileURL.path)
+        harness.fileBuffers.updateBuffer(tabID: fileTab.id, text: "let dirty = true\n")
+
+        await #expect(throws: WorkspaceCommandError.dirtyFileTabCloseRejected(fileTab.id)) {
+            try await harness.service.removeSession(id: session.id)
+        }
+
+        #expect(harness.store.sessions.map(\.id) == [session.id])
+        #expect(harness.store.tabs.map(\.id) == [terminalTab.id, fileTab.id])
+        #expect(try await harness.persistence.loadTabs().map(\.id) == [terminalTab.id, fileTab.id])
+        #expect(harness.service.metrics.dirtyFileCloseConfirmationRejectCount == 1)
+        #expect(harness.terminal.releasedTabIDs.isEmpty)
+    }
+
+    @Test
+    func removingProjectRejectsDirtyFileTabsBeforeDeletingMetadata() async throws {
+        let harness = makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+        let fileURL = try makeTemporaryProjectFile(in: projectPath, relativePath: "Sources/File.swift")
+        let project = try await harness.service.openProject(path: projectPath)
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let terminalTab = try #require(harness.store.tabs.first)
+        let fileTab = try await harness.service.openFileTab(sessionID: session.id, path: fileURL.path)
+        harness.fileBuffers.updateBuffer(tabID: fileTab.id, text: "let dirty = true\n")
+
+        await #expect(throws: WorkspaceCommandError.dirtyFileTabCloseRejected(fileTab.id)) {
+            try await harness.service.removeProject(id: project.id)
+        }
+
+        #expect(harness.store.projects.map(\.id) == [project.id])
+        #expect(harness.store.sessions.map(\.id) == [session.id])
+        #expect(harness.store.tabs.map(\.id) == [terminalTab.id, fileTab.id])
+        #expect(try await harness.persistence.loadTabs().map(\.id) == [terminalTab.id, fileTab.id])
+        #expect(harness.service.metrics.dirtyFileCloseConfirmationRejectCount == 1)
+        #expect(harness.terminal.releasedTabIDs.isEmpty)
     }
 
     @Test

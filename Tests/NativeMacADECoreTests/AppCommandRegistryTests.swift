@@ -13,6 +13,9 @@ struct AppCommandRegistryTests {
             .previousSession,
             .nextSession,
             .searchSessions,
+            .saveFile,
+            .revertFile,
+            .openFileInExternalEditor,
             .zoomInTerminal,
             .zoomOutTerminal,
             .toggleRightSidebar,
@@ -23,11 +26,36 @@ struct AppCommandRegistryTests {
         #expect(defaults[.previousSession] == KeybindingOverride(commandID: .previousSession, keyEquivalent: "upArrow"))
         #expect(defaults[.nextSession] == KeybindingOverride(commandID: .nextSession, keyEquivalent: "downArrow"))
         #expect(defaults[.searchSessions] == KeybindingOverride(commandID: .searchSessions, keyEquivalent: "p"))
+        #expect(defaults[.saveFile] == KeybindingOverride(commandID: .saveFile, keyEquivalent: "s"))
+        #expect(defaults[.revertFile] == KeybindingOverride(commandID: .revertFile, keyEquivalent: "r", modifiers: [.command, .option]))
+        #expect(defaults[.openFileInExternalEditor] == KeybindingOverride(commandID: .openFileInExternalEditor, keyEquivalent: "o", modifiers: [.command, .shift]))
         #expect(defaults[.zoomInTerminal] == KeybindingOverride(commandID: .zoomInTerminal, keyEquivalent: "+"))
         #expect(defaults[.zoomOutTerminal] == KeybindingOverride(commandID: .zoomOutTerminal, keyEquivalent: "-"))
         #expect(defaults[.toggleRightSidebar] == KeybindingOverride(commandID: .toggleRightSidebar, keyEquivalent: "l"))
         #expect(defaults[.openSettings] == KeybindingOverride(commandID: .openSettings, keyEquivalent: ","))
         #expect(AppCommandRegistry.resolvedKeybindings(for: .defaults) == defaults)
+    }
+
+    @Test
+    func fileCommandEnablementFollowsSelectedFileTabAndDirtyState() {
+        let sessionID = UUID()
+        let terminalTab = WorkspaceTab(sessionID: sessionID, workingDirectory: "/tmp/project", ordinal: 0)
+        let fileTab = WorkspaceTab(
+            sessionID: sessionID,
+            kind: .file,
+            workingDirectory: "/tmp/project",
+            fileReference: WorkspaceFileReference(path: "/tmp/project/Sources/App.swift", projectRoot: "/tmp/project"),
+            ordinal: 1
+        )
+
+        #expect(AppCommandRegistry.isEnabled(.saveFile, selectedTab: nil, selectedFileIsDirty: true) == false)
+        #expect(AppCommandRegistry.isEnabled(.saveFile, selectedTab: terminalTab, selectedFileIsDirty: true) == false)
+        #expect(AppCommandRegistry.isEnabled(.saveFile, selectedTab: fileTab, selectedFileIsDirty: false) == false)
+        #expect(AppCommandRegistry.isEnabled(.saveFile, selectedTab: fileTab, selectedFileIsDirty: true))
+        #expect(AppCommandRegistry.isEnabled(.revertFile, selectedTab: fileTab, selectedFileIsDirty: false))
+        #expect(AppCommandRegistry.isEnabled(.openFileInExternalEditor, selectedTab: fileTab, selectedFileIsDirty: false))
+        #expect(AppCommandRegistry.isEnabled(.revertFile, selectedTab: terminalTab, selectedFileIsDirty: true) == false)
+        #expect(AppCommandRegistry.isEnabled(.openFileInExternalEditor, selectedTab: terminalTab, selectedFileIsDirty: true) == false)
     }
 
     @Test

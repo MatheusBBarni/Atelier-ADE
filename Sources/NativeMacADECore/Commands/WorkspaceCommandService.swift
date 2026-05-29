@@ -17,6 +17,7 @@ public enum WorkspaceCommandError: Error, Equatable, Sendable {
     case builtInShortcutDeletionRejected(UUID)
     case customShortcutResetRejected(UUID)
     case closeRejected(UUID)
+    case dirtyFileTabCloseRejected(UUID)
     case terminalUnavailable(String)
     case persistenceFailed(String)
 }

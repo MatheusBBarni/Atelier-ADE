@@ -144,6 +144,10 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .showSessionCommandPalette)) { _ in
             showSessionCommandPalette()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .performSelectedFileCommand)) { notification in
+            guard let commandID = notification.object as? AppCommandID else { return }
+            performSelectedFileCommand(commandID)
+        }
     }
 
     private var activeTheme: AppTheme {
@@ -239,6 +243,57 @@ struct ContentView: View {
 
         return options
     }
+
+    private func performSelectedFileCommand(_ commandID: AppCommandID) {
+        guard let selectedTab = store.selectedTab, selectedTab.kind == .file else { return }
+        Task {
+            do {
+                switch commandID {
+                case .saveFile:
+                    try await commandService.saveFileTab(tabID: selectedTab.id)
+                    NotificationCenter.default.post(name: .fileBufferDirtyStateChanged, object: selectedTab.id)
+                case .revertFile:
+                    try await commandService.revertFileTab(tabID: selectedTab.id)
+                    NotificationCenter.default.post(name: .fileBufferDirtyStateChanged, object: selectedTab.id)
+                case .openFileInExternalEditor:
+                    try await commandService.openFileInExternalEditor(tabID: selectedTab.id)
+                case .previousTab,
+                     .nextTab,
+                     .previousSession,
+                     .nextSession,
+                     .searchSessions,
+                     .zoomInTerminal,
+                     .zoomOutTerminal,
+                     .toggleRightSidebar,
+                     .openSettings:
+                    return
+                }
+            } catch {
+                userMessage = UserMessage(title: fileCommandFailureTitle(for: commandID), detail: String(describing: error))
+            }
+        }
+    }
+
+    private func fileCommandFailureTitle(for commandID: AppCommandID) -> String {
+        switch commandID {
+        case .saveFile:
+            return "File could not be saved"
+        case .revertFile:
+            return "File could not be reverted"
+        case .openFileInExternalEditor:
+            return "File could not be opened"
+        case .previousTab,
+             .nextTab,
+             .previousSession,
+             .nextSession,
+             .searchSessions,
+             .zoomInTerminal,
+             .zoomOutTerminal,
+             .toggleRightSidebar,
+             .openSettings:
+            return "File command failed"
+        }
+    }
 }
 
 struct PilotDiagnosticsView: View {
@@ -253,7 +308,7 @@ struct PilotDiagnosticsView: View {
             Text(diagnostics.releaseBlockingReasons.joined(separator: " • "))
                 .font(.caption)
                 .foregroundStyle(theme.secondaryText.color)
-            Text("Restore failures: \(percent(diagnostics.restoreFailureRate)) · Terminal failures: \(percent(diagnostics.terminalSurfaceFailureRate))")
+            Text("Restore failures: \(percent(diagnostics.restoreFailureRate)) · Terminal failures: \(percent(diagnostics.terminalSurfaceFailureRate)) · File save failures: \(percent(diagnostics.fileSaveFailureRate))")
                 .font(.caption2.monospacedDigit())
                 .foregroundStyle(theme.mutedText.color)
         }
@@ -321,6 +376,20 @@ struct RestoreRecoveryView: View {
                 .padding(10)
                 .background(theme.shellBackground.color.opacity(0.55), in: RoundedRectangle(cornerRadius: 10))
             }
+
+            ForEach(Array(visibleDiagnostics.enumerated()), id: \.offset) { _, diagnostic in
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(diagnosticTitle(for: diagnostic))
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(theme.primaryText.color)
+                    Text(diagnostic.message)
+                        .font(.caption)
+                        .foregroundStyle(theme.secondaryText.color)
+                        .textSelection(.enabled)
+                }
+                .padding(10)
+                .background(theme.shellBackground.color.opacity(0.55), in: RoundedRectangle(cornerRadius: 10))
+            }
         }
         .padding(14)
         .background(theme.elevatedBackground.color.opacity(0.96), in: RoundedRectangle(cornerRadius: 16))
@@ -334,10 +403,37 @@ struct RestoreRecoveryView: View {
     }
 
     private var summary: String {
+        if !visibleDiagnostics.isEmpty, result.skippedProjects.isEmpty {
+            return "Some restored tabs could not be reopened. The available workspace metadata remains available."
+        }
+        if !visibleDiagnostics.isEmpty {
+            return "\(result.skippedProjects.count) project folder(s) and some restored tabs need attention. Available workspace metadata remains available."
+        }
         if result.skippedProjects.isEmpty {
-            return "Some restored terminal surfaces could not be reopened. The workspace metadata remains available."
+            return "Some restored tabs could not be reopened. The workspace metadata remains available."
         }
         return "\(result.skippedProjects.count) project folder(s) could not be accessed. Reopen them from the Projects sidebar when available."
+    }
+
+    private var visibleDiagnostics: [RestoreDiagnostic] {
+        result.diagnostics.filter { diagnostic in
+            diagnostic.severity != .info &&
+                diagnostic.message.hasPrefix("Skipped inaccessible restored project:") == false
+        }
+    }
+
+    private func diagnosticTitle(for diagnostic: RestoreDiagnostic) -> String {
+        if diagnostic.fileTabID != nil {
+            return "Skipped restored file tab"
+        }
+        switch diagnostic.severity {
+        case .failure:
+            return "Restore failure"
+        case .warning:
+            return "Restore warning"
+        case .info:
+            return "Restore note"
+        }
     }
 
     private func forget(_ project: SkippedRestoredProject) {
@@ -509,6 +605,11 @@ struct ProjectSidebarView: View {
                 try await commandService.removeProject(id: project.id)
                 expandedProjectIDs.remove(project.id)
                 pendingRemoval = nil
+            } catch WorkspaceCommandError.dirtyFileTabCloseRejected {
+                userMessage = UserMessage(
+                    title: "Project has unsaved file tabs",
+                    detail: "Save or revert unsaved file tabs in this project before removing it from the workspace."
+                )
             } catch {
                 userMessage = UserMessage(title: "Project could not be removed", detail: String(describing: error))
             }
@@ -555,6 +656,11 @@ struct ProjectSidebarView: View {
         Task {
             do {
                 try await commandService.removeSession(id: id)
+            } catch WorkspaceCommandError.dirtyFileTabCloseRejected {
+                userMessage = UserMessage(
+                    title: "Session has unsaved file tabs",
+                    detail: "Save or revert unsaved file tabs in this session before removing it."
+                )
             } catch {
                 userMessage = UserMessage(title: "Session could not be removed", detail: String(describing: error))
             }
@@ -1221,6 +1327,11 @@ struct TabChromeView: View {
         Task {
             do {
                 try await commandService.closeTab(tabID: id, force: false)
+            } catch WorkspaceCommandError.dirtyFileTabCloseRejected {
+                userMessage = UserMessage(
+                    title: "File has unsaved changes",
+                    detail: "Save or revert this file before closing the tab."
+                )
             } catch WorkspaceCommandError.closeRejected {
                 userMessage = UserMessage(title: "Tab is still running", detail: "This terminal still has a live process. Close was cancelled to avoid interrupting work.")
             } catch {
@@ -1428,6 +1539,13 @@ struct FileEditorHostView: View {
         .background(theme.contentBackground.color)
         .task(id: tab.id) {
             await loadBuffer()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .fileBufferDirtyStateChanged)) { notification in
+            guard notification.object as? UUID == tab.id else { return }
+            refreshBufferSnapshot()
+            if let text = bufferSnapshot?.text {
+                editorText = text
+            }
         }
     }
 

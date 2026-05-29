@@ -7,6 +7,9 @@ public enum AppCommandRegistry {
         .previousSession,
         .nextSession,
         .searchSessions,
+        .saveFile,
+        .revertFile,
+        .openFileInExternalEditor,
         .zoomInTerminal,
         .zoomOutTerminal,
         .toggleRightSidebar,
@@ -19,6 +22,9 @@ public enum AppCommandRegistry {
         .previousSession: KeybindingOverride(commandID: .previousSession, keyEquivalent: "upArrow"),
         .nextSession: KeybindingOverride(commandID: .nextSession, keyEquivalent: "downArrow"),
         .searchSessions: KeybindingOverride(commandID: .searchSessions, keyEquivalent: "p"),
+        .saveFile: KeybindingOverride(commandID: .saveFile, keyEquivalent: "s"),
+        .revertFile: KeybindingOverride(commandID: .revertFile, keyEquivalent: "r", modifiers: [.command, .option]),
+        .openFileInExternalEditor: KeybindingOverride(commandID: .openFileInExternalEditor, keyEquivalent: "o", modifiers: [.command, .shift]),
         .zoomInTerminal: KeybindingOverride(commandID: .zoomInTerminal, keyEquivalent: "+"),
         .zoomOutTerminal: KeybindingOverride(commandID: .zoomOutTerminal, keyEquivalent: "-"),
         .toggleRightSidebar: KeybindingOverride(commandID: .toggleRightSidebar, keyEquivalent: "l"),
@@ -46,6 +52,29 @@ public enum AppCommandRegistry {
         var updatedPreferences = preferences
         updatedPreferences.keybindings[commandID] = nil
         return updatedPreferences
+    }
+
+    public static func isEnabled(
+        _ commandID: AppCommandID,
+        selectedTab: WorkspaceTab?,
+        selectedFileIsDirty: Bool
+    ) -> Bool {
+        switch commandID {
+        case .saveFile:
+            return selectedTab?.kind == .file && selectedFileIsDirty
+        case .revertFile, .openFileInExternalEditor:
+            return selectedTab?.kind == .file
+        case .previousTab,
+             .nextTab,
+             .previousSession,
+             .nextSession,
+             .searchSessions,
+             .zoomInTerminal,
+             .zoomOutTerminal,
+             .toggleRightSidebar,
+             .openSettings:
+            return true
+        }
     }
 
     public static func validate(_ keybindings: [AppCommandID: KeybindingOverride]) throws {

@@ -63,6 +63,28 @@ struct AtelierApp: App {
                 .disabled(workspaceStore.selectedSession == nil)
             }
 
+            CommandGroup(replacing: .saveItem) {
+                Button("Save File") {
+                    performSelectedFileCommand(.saveFile)
+                }
+                .managedKeyboardShortcut(.saveFile, preferences: workspaceStore.appPreferences)
+                .disabled(!selectedFileCommandEnabled(.saveFile))
+
+                Button("Revert File") {
+                    performSelectedFileCommand(.revertFile)
+                }
+                .managedKeyboardShortcut(.revertFile, preferences: workspaceStore.appPreferences)
+                .disabled(!selectedFileCommandEnabled(.revertFile))
+
+                Divider()
+
+                Button("Open File in External Editor") {
+                    performSelectedFileCommand(.openFileInExternalEditor)
+                }
+                .managedKeyboardShortcut(.openFileInExternalEditor, preferences: workspaceStore.appPreferences)
+                .disabled(!selectedFileCommandEnabled(.openFileInExternalEditor))
+            }
+
             CommandMenu("Workspace") {
                 Button("Previous Tab") {
                     selectAdjacentTab(direction: -1)
@@ -108,6 +130,29 @@ struct AtelierApp: App {
                 .managedKeyboardShortcut(.zoomOutTerminal, preferences: workspaceStore.appPreferences)
             }
         }
+    }
+
+    private var selectedFileTab: WorkspaceTab? {
+        guard let selectedTab = workspaceStore.selectedTab, selectedTab.kind == .file else { return nil }
+        return selectedTab
+    }
+
+    private var selectedFileIsDirty: Bool {
+        guard let selectedFileTab else { return false }
+        return fileBufferController.isDirty(tabID: selectedFileTab.id)
+    }
+
+    private func selectedFileCommandEnabled(_ commandID: AppCommandID) -> Bool {
+        AppCommandRegistry.isEnabled(
+            commandID,
+            selectedTab: workspaceStore.selectedTab,
+            selectedFileIsDirty: selectedFileIsDirty
+        )
+    }
+
+    private func performSelectedFileCommand(_ commandID: AppCommandID) {
+        guard selectedFileTab != nil else { return }
+        NotificationCenter.default.post(name: .performSelectedFileCommand, object: commandID)
     }
 
     private func selectAdjacentTab(direction: Int) {
@@ -158,6 +203,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 extension Notification.Name {
     static let toggleWorkspaceSidebar = Notification.Name("Atelier.toggleWorkspaceSidebar")
     static let showSessionCommandPalette = Notification.Name("Atelier.showSessionCommandPalette")
+    static let performSelectedFileCommand = Notification.Name("Atelier.performSelectedFileCommand")
 }
 
 private extension View {

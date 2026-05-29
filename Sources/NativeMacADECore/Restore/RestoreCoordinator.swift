@@ -27,10 +27,22 @@ public struct RestoreDiagnostic: Equatable, Sendable {
 
     public var severity: Severity
     public var message: String
+    public var fileTabID: UUID?
+    public var hashedPath: String?
+    public var telemetryReason: String?
 
-    public init(severity: Severity, message: String) {
+    public init(
+        severity: Severity,
+        message: String,
+        fileTabID: UUID? = nil,
+        hashedPath: String? = nil,
+        telemetryReason: String? = nil
+    ) {
         self.severity = severity
         self.message = message
+        self.fileTabID = fileTabID
+        self.hashedPath = hashedPath
+        self.telemetryReason = telemetryReason
     }
 }
 
@@ -166,11 +178,21 @@ public struct RestoreCoordinator {
                 guard let session = sessionsByID[tab.sessionID],
                       let project = projectsByID[session.projectID]
                 else {
-                    diagnostics.append(fileTabDiagnostic(tabID: tab.id, reason: "owning project or session is unavailable."))
+                    diagnostics.append(fileTabDiagnostic(
+                        tabID: tab.id,
+                        hashedPath: tab.fileReference.map { WorkspacePrivacy.hashIdentifier($0.path) },
+                        reason: "owning project or session is unavailable.",
+                        telemetryReason: "missing_owner"
+                    ))
                     continue
                 }
                 guard let fileReference = tab.fileReference else {
-                    diagnostics.append(fileTabDiagnostic(tabID: tab.id, reason: "file metadata is missing."))
+                    diagnostics.append(fileTabDiagnostic(
+                        tabID: tab.id,
+                        hashedPath: nil,
+                        reason: "file metadata is missing.",
+                        telemetryReason: "missing_file_metadata"
+                    ))
                     continue
                 }
 
@@ -180,15 +202,30 @@ public struct RestoreCoordinator {
                 let filePath = URL(fileURLWithPath: fileReference.path).standardizedFileURL.path
 
                 guard workingDirectory == projectRoot, referenceRoot == projectRoot else {
-                    diagnostics.append(fileTabDiagnostic(tabID: tab.id, reason: "project root metadata does not match the restored project."))
+                    diagnostics.append(fileTabDiagnostic(
+                        tabID: tab.id,
+                        hashedPath: WorkspacePrivacy.hashIdentifier(filePath),
+                        reason: "project root metadata does not match the restored project.",
+                        telemetryReason: "project_root_mismatch"
+                    ))
                     continue
                 }
                 guard isPath(filePath, containedBy: projectRoot) else {
-                    diagnostics.append(fileTabDiagnostic(tabID: tab.id, reason: "file path is outside the restored project."))
+                    diagnostics.append(fileTabDiagnostic(
+                        tabID: tab.id,
+                        hashedPath: WorkspacePrivacy.hashIdentifier(filePath),
+                        reason: "file path is outside the restored project.",
+                        telemetryReason: "file_outside_project"
+                    ))
                     continue
                 }
                 guard fileIsReadable(filePath) else {
-                    diagnostics.append(fileTabDiagnostic(tabID: tab.id, reason: "file is missing or unreadable."))
+                    diagnostics.append(fileTabDiagnostic(
+                        tabID: tab.id,
+                        hashedPath: WorkspacePrivacy.hashIdentifier(filePath),
+                        reason: "file is missing or unreadable.",
+                        telemetryReason: "missing_or_unreadable_file"
+                    ))
                     continue
                 }
 
@@ -202,10 +239,18 @@ public struct RestoreCoordinator {
         return (restoredTabs, diagnostics)
     }
 
-    private func fileTabDiagnostic(tabID: UUID, reason: String) -> RestoreDiagnostic {
+    private func fileTabDiagnostic(
+        tabID: UUID,
+        hashedPath: String?,
+        reason: String,
+        telemetryReason: String
+    ) -> RestoreDiagnostic {
         RestoreDiagnostic(
             severity: .warning,
-            message: "Skipped restored file tab \(tabID.uuidString): \(reason)"
+            message: "Skipped restored file tab \(tabID.uuidString): \(reason)",
+            fileTabID: tabID,
+            hashedPath: hashedPath,
+            telemetryReason: telemetryReason
         )
     }
 

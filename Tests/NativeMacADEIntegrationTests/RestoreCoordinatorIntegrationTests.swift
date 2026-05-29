@@ -94,9 +94,19 @@ struct RestoreCoordinatorIntegrationTests {
         #expect(result.diagnostics.contains { diagnostic in
             diagnostic.severity == .warning &&
                 diagnostic.message.contains(missingFileTabID.uuidString) &&
-                diagnostic.message.contains("missing or unreadable")
+                diagnostic.message.contains("missing or unreadable") &&
+                diagnostic.fileTabID == missingFileTabID &&
+                diagnostic.hashedPath == WorkspacePrivacy.hashIdentifier(missingFile.path)
         })
         #expect(result.hasRecoveryItems)
+        #expect(harness.service.metrics.fileRestoreFailureCount == 1)
+        #expect(harness.service.logger.events.contains { event in
+            event.name == "file_tab_restore_failed" &&
+                event.fields["tab_id"] == missingFileTabID.uuidString &&
+                event.fields["hashed_path"] == WorkspacePrivacy.hashIdentifier(missingFile.path) &&
+                event.fields["reason"] == "missing_or_unreadable_file" &&
+                event.fields.values.contains(missingFile.path) == false
+        })
     }
 
     @Test

@@ -115,6 +115,8 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
         let removedSessionIDs = Set(store.sessions.filter { $0.projectID == id }.map(\.id))
         let removedTabs = store.tabs.filter { removedSessionIDs.contains($0.sessionID) }
         let removedTerminalTabs = removedTabs.filter { $0.kind == .terminal }
+        let removedFileTabs = removedTabs.filter { $0.kind == .file }
+        try rejectIfDirtyFileTabs(removedFileTabs, operation: "remove_project")
         for tab in removedTerminalTabs {
             if let surface = terminalSurface(for: tab) {
                 guard await terminalSurfaceManager.canClose(surface: surface) else {
@@ -149,6 +151,7 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
 
         let removedTerminalTabs = store.terminalTabs(in: id)
         let removedFileTabs = store.fileTabs(in: id)
+        try rejectIfDirtyFileTabs(removedFileTabs, operation: "remove_session")
 
         try await persist { try await persistenceStore.deleteSession(id: id) }
         for tab in removedFileTabs {
@@ -432,6 +435,7 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
     }
 
     public func openFileTab(sessionID: UUID, path: String) async throws -> WorkspaceTab {
+        let startedAt = now()
         guard let session = store.sessions.first(where: { $0.id == sessionID }) else {
             throw WorkspaceCommandError.missingSession(sessionID)
         }
@@ -452,7 +456,16 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
         }) {
             try await loadFileBuffer(for: existingTab)
             try await activateSelection { $0.selectTab(id: existingTab.id) }
-            return store.tab(id: existingTab.id) ?? existingTab
+            let selectedTab = store.tab(id: existingTab.id) ?? existingTab
+            recordFileOpen(
+                project: project,
+                session: session,
+                tab: selectedTab,
+                fileReference: fileReference,
+                startedAt: startedAt,
+                reusedTab: true
+            )
+            return selectedTab
         }
 
         let timestamp = now()
@@ -470,50 +483,60 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
         try await persist { try await persistenceStore.save(tab: tab) }
         store.upsertTab(tab)
         try await persistSnapshot()
-        logger.emit("file_tab_opened", fields: [
-            "project_id": project.id.uuidString,
-            "session_id": session.id.uuidString,
-            "tab_id": tab.id.uuidString,
-            "hashed_path": WorkspacePrivacy.hashIdentifier(fileReference.path)
-        ])
+        recordFileOpen(
+            project: project,
+            session: session,
+            tab: tab,
+            fileReference: fileReference,
+            startedAt: startedAt,
+            reusedTab: false
+        )
         return tab
     }
 
     public func saveFileTab(tabID: UUID) async throws {
+        let startedAt = now()
         let tab = try requireFileTab(id: tabID)
-        try await validateFileAccess(for: tab)
-        if fileBufferManager.buffer(for: tabID) == nil {
-            try await loadFileBuffer(for: tab)
-        }
         do {
+            try await validateFileAccess(for: tab)
+            if fileBufferManager.buffer(for: tabID) == nil {
+                try await loadFileBuffer(for: tab)
+            }
             try await fileBufferManager.saveBuffer(tabID: tabID)
         } catch let error as WorkspaceFileAccessError {
-            throw commandError(for: error)
+            let commandError = commandError(for: error)
+            recordFileSave(tab: tab, startedAt: startedAt, succeeded: false, reason: privacySafeReason(for: commandError))
+            throw commandError
         } catch let error as WorkspaceFileBufferError {
-            throw commandError(for: error)
+            let commandError = commandError(for: error)
+            recordFileSave(tab: tab, startedAt: startedAt, succeeded: false, reason: privacySafeReason(for: commandError))
+            throw commandError
+        } catch {
+            recordFileSave(tab: tab, startedAt: startedAt, succeeded: false, reason: privacySafeReason(for: error))
+            throw error
         }
-        logger.emit("file_tab_saved", fields: [
-            "tab_id": tab.id.uuidString,
-            "session_id": tab.sessionID.uuidString,
-            "hashed_path": WorkspacePrivacy.hashIdentifier(tab.fileReference?.path ?? tab.workingDirectory)
-        ])
+        recordFileSave(tab: tab, startedAt: startedAt, succeeded: true, reason: nil)
     }
 
     public func revertFileTab(tabID: UUID) async throws {
+        let startedAt = now()
         let tab = try requireFileTab(id: tabID)
-        try await validateFileAccess(for: tab)
         do {
+            try await validateFileAccess(for: tab)
             try await fileBufferManager.revertBuffer(for: tab)
         } catch let error as WorkspaceFileAccessError {
-            throw commandError(for: error)
+            let commandError = commandError(for: error)
+            recordFileRevert(tab: tab, startedAt: startedAt, succeeded: false, reason: privacySafeReason(for: commandError))
+            throw commandError
         } catch let error as WorkspaceFileBufferError {
-            throw commandError(for: error)
+            let commandError = commandError(for: error)
+            recordFileRevert(tab: tab, startedAt: startedAt, succeeded: false, reason: privacySafeReason(for: commandError))
+            throw commandError
+        } catch {
+            recordFileRevert(tab: tab, startedAt: startedAt, succeeded: false, reason: privacySafeReason(for: error))
+            throw error
         }
-        logger.emit("file_tab_reverted", fields: [
-            "tab_id": tab.id.uuidString,
-            "session_id": tab.sessionID.uuidString,
-            "hashed_path": WorkspacePrivacy.hashIdentifier(tab.fileReference?.path ?? tab.workingDirectory)
-        ])
+        recordFileRevert(tab: tab, startedAt: startedAt, succeeded: true, reason: nil)
     }
 
     public func openFileInExternalEditor(tabID: UUID) async throws {
@@ -522,12 +545,19 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
         do {
             try await externalEditorOpener.openFile(at: fileReference.path)
         } catch let error as WorkspaceFileAccessError {
-            throw commandError(for: error)
+            let commandError = commandError(for: error)
+            recordExternalEditorFailure(tab: tab, fileReference: fileReference, reason: privacySafeReason(for: commandError))
+            throw commandError
         } catch let error as ExternalEditorError {
-            throw WorkspaceCommandError.externalEditorFailed(String(describing: error))
+            let commandError = WorkspaceCommandError.externalEditorFailed(privacySafeReason(for: error))
+            recordExternalEditorFailure(tab: tab, fileReference: fileReference, reason: privacySafeReason(for: commandError))
+            throw commandError
         } catch {
-            throw WorkspaceCommandError.externalEditorFailed(String(describing: error))
+            let commandError = WorkspaceCommandError.externalEditorFailed(privacySafeReason(for: error))
+            recordExternalEditorFailure(tab: tab, fileReference: fileReference, reason: privacySafeReason(for: commandError))
+            throw commandError
         }
+        metrics.recordExternalEditorEscalation()
         logger.emit("external_editor_opened", fields: [
             "tab_id": tab.id.uuidString,
             "session_id": tab.sessionID.uuidString,
@@ -556,6 +586,7 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
             throw error
         }
         var restoreResult = restoreResultFromCoordinator
+        recordCoordinatorFileRestoreDiagnostics(restoreResult.diagnostics)
         let restoredStore = restoreResult.store
         store.restore(
             projects: restoredStore.projects,
@@ -587,15 +618,17 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
             do {
                 try await loadFileBuffer(for: tab)
             } catch {
+                metrics.recordFileRestoreFailure()
                 restoreResult.diagnostics.append(RestoreDiagnostic(
                     severity: .warning,
-                    message: "File buffer for restored tab \(tab.id.uuidString) could not be loaded: \(String(describing: error))"
+                    message: "Restored file tab \(tab.id.uuidString) could not be loaded: \(fileRestoreMessageSuffix(for: error))",
+                    fileTabID: tab.id,
+                    hashedPath: hashedPath(for: tab),
+                    telemetryReason: privacySafeReason(for: error)
                 ))
-                logger.emit("file_tab_restore_failed", fields: [
-                    "tab_id": tab.id.uuidString,
-                    "session_id": tab.sessionID.uuidString,
-                    "reason": String(describing: error)
-                ])
+                var fields = fileTabLogFields(tab: tab, reason: privacySafeReason(for: error))
+                fields["source"] = "buffer_load"
+                logger.emit("file_tab_restore_failed", fields: fields)
             }
         }
         for skippedProject in restoreResult.skippedProjects {
@@ -633,6 +666,16 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
             let canClose = await terminalSurfaceManager.canClose(surface: surface)
             metrics.recordCloseConfirmation(accepted: canClose)
             guard canClose else { throw WorkspaceCommandError.closeRejected(tabID) }
+        }
+        if tab.kind == .file, fileBufferManager.isDirty(tabID: tabID) {
+            metrics.recordDirtyFileCloseDecision(accepted: force)
+            var fields = fileTabLogFields(tab: tab, reason: force ? "discarded_unsaved_changes" : "unsaved_changes")
+            fields["accepted"] = String(force)
+            fields["operation"] = "close_tab"
+            logger.emit("file_tab_dirty_close_decision", fields: fields)
+            if !force {
+                throw WorkspaceCommandError.dirtyFileTabCloseRejected(tabID)
+            }
         }
 
         try await persist { try await persistenceStore.deleteTab(id: tabID) }
@@ -948,6 +991,101 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
         }
     }
 
+    private func rejectIfDirtyFileTabs(_ tabs: [WorkspaceTab], operation: String) throws {
+        guard let dirtyTab = tabs.first(where: { fileBufferManager.isDirty(tabID: $0.id) }) else { return }
+        metrics.recordDirtyFileCloseDecision(accepted: false)
+        var fields = fileTabLogFields(tab: dirtyTab, reason: "unsaved_changes")
+        fields["accepted"] = "false"
+        fields["operation"] = operation
+        logger.emit("file_tab_dirty_close_decision", fields: fields)
+        throw WorkspaceCommandError.dirtyFileTabCloseRejected(dirtyTab.id)
+    }
+
+    private func recordFileOpen(
+        project: WorkspaceProject,
+        session: WorkspaceSession,
+        tab: WorkspaceTab,
+        fileReference: WorkspaceFileReference,
+        startedAt: Date,
+        reusedTab: Bool
+    ) {
+        let duration = now().timeIntervalSince(startedAt)
+        metrics.recordFileOpen(duration: duration)
+        logger.emit("file_tab_opened", fields: [
+            "project_id": project.id.uuidString,
+            "session_id": session.id.uuidString,
+            "tab_id": tab.id.uuidString,
+            "hashed_path": WorkspacePrivacy.hashIdentifier(fileReference.path),
+            "duration_ms": durationMilliseconds(since: startedAt),
+            "reused_tab": String(reusedTab)
+        ])
+    }
+
+    private func recordFileSave(tab: WorkspaceTab, startedAt: Date, succeeded: Bool, reason: String?) {
+        metrics.recordFileSave(succeeded: succeeded)
+        var fields = fileTabLogFields(tab: tab, reason: reason)
+        fields["duration_ms"] = durationMilliseconds(since: startedAt)
+        logger.emit(succeeded ? "file_tab_saved" : "file_tab_save_failed", fields: fields)
+    }
+
+    private func recordFileRevert(tab: WorkspaceTab, startedAt: Date, succeeded: Bool, reason: String?) {
+        metrics.recordFileRevert(succeeded: succeeded)
+        var fields = fileTabLogFields(tab: tab, reason: reason)
+        fields["duration_ms"] = durationMilliseconds(since: startedAt)
+        logger.emit(succeeded ? "file_tab_reverted" : "file_tab_revert_failed", fields: fields)
+    }
+
+    private func recordExternalEditorFailure(
+        tab: WorkspaceTab,
+        fileReference: WorkspaceFileReference,
+        reason: String
+    ) {
+        logger.emit("external_editor_open_failed", fields: [
+            "tab_id": tab.id.uuidString,
+            "session_id": tab.sessionID.uuidString,
+            "hashed_path": WorkspacePrivacy.hashIdentifier(fileReference.path),
+            "reason": reason
+        ])
+    }
+
+    private func recordCoordinatorFileRestoreDiagnostics(_ diagnostics: [RestoreDiagnostic]) {
+        for diagnostic in diagnostics {
+            guard let fileTabID = diagnostic.fileTabID else { continue }
+            metrics.recordFileRestoreFailure()
+            var fields = [
+                "tab_id": fileTabID.uuidString,
+                "reason": diagnostic.telemetryReason ?? "restore_validation_failed",
+                "source": "metadata_validation"
+            ]
+            if let hashedPath = diagnostic.hashedPath {
+                fields["hashed_path"] = hashedPath
+            }
+            logger.emit("file_tab_restore_failed", fields: fields)
+        }
+    }
+
+    private func fileTabLogFields(tab: WorkspaceTab, reason: String? = nil) -> [String: String] {
+        var fields = [
+            "tab_id": tab.id.uuidString,
+            "session_id": tab.sessionID.uuidString
+        ]
+        if let hashedPath = hashedPath(for: tab) {
+            fields["hashed_path"] = hashedPath
+        }
+        if let reason {
+            fields["reason"] = reason
+        }
+        return fields
+    }
+
+    private func hashedPath(for tab: WorkspaceTab) -> String? {
+        tab.fileReference.map { WorkspacePrivacy.hashIdentifier($0.path) }
+    }
+
+    private func durationMilliseconds(since startedAt: Date) -> String {
+        String(Int((now().timeIntervalSince(startedAt) * 1_000).rounded()))
+    }
+
     private func requireFileTab(id tabID: UUID) throws -> WorkspaceTab {
         guard let tab = store.tab(id: tabID) else {
             throw WorkspaceCommandError.missingTab(tabID)
@@ -983,6 +1121,119 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
             throw commandError(for: error)
         } catch let error as WorkspaceFileBufferError {
             throw commandError(for: error)
+        }
+    }
+
+    private func fileRestoreMessageSuffix(for error: Error) -> String {
+        switch privacySafeReason(for: error) {
+        case "invalid_project_path":
+            return "project folder is unavailable."
+        case "invalid_file_path", "unreadable_file":
+            return "file is missing or unreadable."
+        case "file_path_outside_project":
+            return "file is outside the restored project."
+        case "unsupported_file":
+            return "file type is unsupported."
+        case "missing_buffer":
+            return "file buffer is unavailable."
+        default:
+            return "file could not be loaded."
+        }
+    }
+
+    private func privacySafeReason(for error: Error) -> String {
+        if let commandError = error as? WorkspaceCommandError {
+            return privacySafeReason(for: commandError)
+        }
+        if let fileAccessError = error as? WorkspaceFileAccessError {
+            return privacySafeReason(for: fileAccessError)
+        }
+        if let fileBufferError = error as? WorkspaceFileBufferError {
+            return privacySafeReason(for: fileBufferError)
+        }
+        if let externalEditorError = error as? ExternalEditorError {
+            return privacySafeReason(for: externalEditorError)
+        }
+        return "unexpected_error"
+    }
+
+    private func privacySafeReason(for error: WorkspaceCommandError) -> String {
+        switch error {
+        case .invalidProjectPath:
+            return "invalid_project_path"
+        case .invalidFilePath:
+            return "invalid_file_path"
+        case .filePathOutsideProject:
+            return "file_path_outside_project"
+        case .fileAccessRejected(let fileAccessError):
+            return privacySafeReason(for: fileAccessError)
+        case .fileBufferUnavailable:
+            return "missing_buffer"
+        case .invalidFileTab:
+            return "invalid_file_tab"
+        case .externalEditorFailed:
+            return "external_editor_failed"
+        case .invalidSessionTitle:
+            return "invalid_session_title"
+        case .missingProject:
+            return "missing_project"
+        case .missingSession:
+            return "missing_session"
+        case .missingTab:
+            return "missing_tab"
+        case .missingShortcut:
+            return "missing_shortcut"
+        case .settingsValidationFailed:
+            return "settings_validation_failed"
+        case .builtInShortcutDeletionRejected:
+            return "built_in_shortcut_deletion_rejected"
+        case .customShortcutResetRejected:
+            return "custom_shortcut_reset_rejected"
+        case .closeRejected:
+            return "terminal_close_rejected"
+        case .dirtyFileTabCloseRejected:
+            return "dirty_file_close_rejected"
+        case .terminalUnavailable:
+            return "terminal_unavailable"
+        case .persistenceFailed:
+            return "persistence_failed"
+        }
+    }
+
+    private func privacySafeReason(for error: WorkspaceFileAccessError) -> String {
+        switch error {
+        case .invalidProjectRoot:
+            return "invalid_project_path"
+        case .invalidFilePath:
+            return "invalid_file_path"
+        case .filePathOutsideProject:
+            return "file_path_outside_project"
+        case .unreadableFile:
+            return "unreadable_file"
+        case .unwritableFile:
+            return "unwritable_file"
+        case .unsupportedFile:
+            return "unsupported_file"
+        case .enumerationFailed:
+            return "enumeration_failed"
+        case .writeFailed:
+            return "write_failed"
+        }
+    }
+
+    private func privacySafeReason(for error: WorkspaceFileBufferError) -> String {
+        switch error {
+        case .invalidFileTab:
+            return "invalid_file_tab"
+        case .missingBuffer:
+            return "missing_buffer"
+        }
+    }
+
+    private func privacySafeReason(for error: ExternalEditorError) -> String {
+        switch error {
+        case .openFailed:
+            return "external_editor_open_failed"
         }
     }
 
