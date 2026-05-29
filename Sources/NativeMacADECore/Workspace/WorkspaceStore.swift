@@ -7,6 +7,7 @@ public final class WorkspaceStore {
     public var projects: [WorkspaceProject]
     public var sessions: [WorkspaceSession]
     public var tabs: [WorkspaceTab]
+    public var appPreferences: AppPreferences
     public private(set) var selectedProjectID: UUID?
     public private(set) var selectedSessionID: UUID?
     public private(set) var selectedTabID: UUID?
@@ -19,6 +20,7 @@ public final class WorkspaceStore {
         projects: [WorkspaceProject] = [],
         sessions: [WorkspaceSession] = [],
         tabs: [WorkspaceTab] = [],
+        appPreferences: AppPreferences = .defaults,
         selectedProjectID: UUID? = nil,
         selectedSessionID: UUID? = nil,
         selectedTabID: UUID? = nil
@@ -26,6 +28,7 @@ public final class WorkspaceStore {
         self.projects = projects
         self.sessions = sessions
         self.tabs = tabs
+        self.appPreferences = appPreferences
         self.selectedProjectID = selectedProjectID
         self.selectedSessionID = selectedSessionID
         self.selectedTabID = selectedTabID
@@ -126,6 +129,10 @@ public final class WorkspaceStore {
             tabs.append(tab)
         }
         if select { selectTab(id: tab.id) } else { normalizeSelection() }
+    }
+
+    public func updateAppPreferences(_ preferences: AppPreferences) {
+        appPreferences = preferences
     }
 
     public func removeTab(id: UUID) {

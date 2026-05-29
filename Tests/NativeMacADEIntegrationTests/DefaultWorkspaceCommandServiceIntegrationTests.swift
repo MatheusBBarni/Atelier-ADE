@@ -1,4 +1,5 @@
 import Foundation
+import SQLite3
 import Testing
 @testable import NativeMacADECore
 
@@ -92,6 +93,120 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
         #expect(launchedTab.launchCommand == "claude")
         #expect(launchedTab.launchArgumentsJSON == "[\"--continue\"]")
         #expect(harness.store.selectedTabID == launchedTab.id)
+    }
+
+    @Test
+    func preferencesAndBuiltInOverrideStateRoundTripThroughSQLiteCommandService() async throws {
+        let harness = try makeHarness()
+        let codex = try #require(SessionShortcut.builtInDefaults.first { $0.label == "Codex" })
+        var overriddenCodex = codex
+        overriddenCodex.launchArgumentsJSON = "[\"exec\"]"
+        let savedCodex = try await harness.service.saveSessionShortcut(overriddenCodex)
+        let preferences = AppPreferences(
+            themeID: "catppuccin",
+            defaultSessionShortcutID: codex.id,
+            keybindings: [
+                .openSettings: KeybindingOverride(commandID: .openSettings, keyEquivalent: ",", modifiers: [.command, .shift])
+            ]
+        )
+
+        try await harness.service.saveAppPreferences(preferences)
+
+        let reloadedStore = WorkspaceStore()
+        let reloadedTerminal = FakeIntegrationTerminalSurfaceManager()
+        let reloadedService = DefaultWorkspaceCommandService(
+            store: reloadedStore,
+            persistenceStore: harness.persistence,
+            restoreCoordinator: RestoreCoordinator(persistenceStore: harness.persistence),
+            terminalSurfaceManager: reloadedTerminal
+        )
+        let loadedPreferences = try await reloadedService.loadAppPreferences()
+        let loadedShortcuts = try await reloadedService.availableSessionShortcuts()
+
+        #expect(savedCodex.hasUserOverride == true)
+        #expect(loadedPreferences.themeID == "catppuccin")
+        #expect(loadedPreferences.defaultSessionShortcutID == codex.id)
+        #expect(loadedPreferences.keybindings[.openSettings]?.modifiers == [.command, .shift])
+        #expect(reloadedStore.appPreferences == loadedPreferences)
+        #expect(loadedShortcuts.first { $0.id == codex.id }?.launchArgumentsJSON == "[\"exec\"]")
+        #expect(loadedShortcuts.first { $0.id == codex.id }?.hasUserOverride == true)
+    }
+
+    @Test
+    func savingBuiltInDefaultPreferenceSeedsSQLiteProfileReference() async throws {
+        let harness = try makeHarness()
+        let openCode = try #require(SessionShortcut.builtInDefaults.first { $0.label == "OpenCode" })
+
+        try await harness.service.saveAppPreferences(AppPreferences(defaultSessionShortcutID: openCode.id))
+
+        #expect(try await harness.persistence.loadAppPreferences().defaultSessionShortcutID == openCode.id)
+        #expect(try await harness.persistence.loadSessionShortcuts().contains(openCode))
+        #expect(harness.store.appPreferences.defaultSessionShortcutID == openCode.id)
+    }
+
+    @Test
+    func explicitProfileBeatsSavedDefaultAndSavedDefaultBeatsPlainSessionCreation() async throws {
+        let harness = try makeHarness()
+        let project = try await harness.service.openProject(path: makeTemporaryProjectDirectory())
+        let explicitShortcut = try await harness.service.saveSessionShortcut(SessionShortcut(
+            label: "Explicit Codex",
+            launchCommand: "codex",
+            launchArgumentsJSON: "[\"exec\"]"
+        ))
+        let defaultShortcut = try await harness.service.saveSessionShortcut(SessionShortcut(
+            label: "Default Claude",
+            launchCommand: "claude",
+            launchArgumentsJSON: "[\"--continue\"]"
+        ))
+        try await harness.service.saveAppPreferences(AppPreferences(defaultSessionShortcutID: defaultShortcut.id))
+
+        let explicitSession = try await harness.service.createSession(projectID: project.id, shortcutID: explicitShortcut.id)
+        let defaultSession = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        try await harness.service.saveAppPreferences(AppPreferences(defaultSessionShortcutID: nil))
+        let plainSession = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let launchedTabs = harness.terminal.createdTabs
+
+        #expect(explicitSession.shortcutID == explicitShortcut.id)
+        #expect(defaultSession.shortcutID == defaultShortcut.id)
+        #expect(plainSession.shortcutID == nil)
+        #expect(launchedTabs.first { $0.sessionID == explicitSession.id }?.launchCommand == "codex")
+        #expect(launchedTabs.first { $0.sessionID == defaultSession.id }?.launchCommand == "claude")
+        #expect(launchedTabs.first { $0.sessionID == plainSession.id }?.launchCommand == nil)
+    }
+
+    @Test
+    func loadingPersistedStaleDefaultSelfHealsAndPlainSessionCreationSucceeds() async throws {
+        let harness = try makeHarness()
+        let staleShortcutID = UUID()
+        let project = try await harness.service.openProject(path: makeTemporaryProjectDirectory())
+        try writeStaleDefaultShortcutID(staleShortcutID, databasePath: harness.databasePath)
+
+        let loadedPreferences = try await harness.service.loadAppPreferences()
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let tab = try #require(harness.terminal.createdTabs.last)
+
+        #expect(loadedPreferences.defaultSessionShortcutID == nil)
+        #expect(try await harness.persistence.loadAppPreferences().defaultSessionShortcutID == nil)
+        #expect(harness.store.appPreferences.defaultSessionShortcutID == nil)
+        #expect(session.shortcutID == nil)
+        #expect(tab.launchCommand == nil)
+    }
+
+    @Test
+    func repeatedProfileListLoadsDoNotDuplicateBuiltInsAndIncludeOpenCode() async throws {
+        let harness = try makeHarness()
+
+        let firstLoad = try await harness.service.availableSessionShortcuts()
+        let secondLoad = try await harness.service.availableSessionShortcuts()
+        let persistedShortcuts = try await harness.persistence.loadSessionShortcuts()
+        let openCode = try #require(secondLoad.first { $0.label == "OpenCode" })
+
+        #expect(firstLoad == secondLoad)
+        #expect(persistedShortcuts == secondLoad)
+        #expect(openCode.launchCommand == "opencode")
+        #expect(openCode.id == UUID(uuidString: "33333333-3333-4333-8333-333333333333"))
+        #expect(secondLoad.filter(\.isBuiltIn).count == SessionShortcut.builtInDefaults.count)
+        #expect(Set(secondLoad.map(\.id)).count == secondLoad.count)
     }
 
     @Test
@@ -382,7 +497,8 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
 
     private func makeHarness(now: @escaping @MainActor () -> Date = Date.init) throws -> CommandServiceIntegrationHarness {
         let store = WorkspaceStore()
-        let persistence = try SQLiteWorkspaceMetadataStore(path: temporaryDatabasePath())
+        let databasePath = temporaryDatabasePath()
+        let persistence = try SQLiteWorkspaceMetadataStore(path: databasePath)
         let terminal = FakeIntegrationTerminalSurfaceManager()
         let coordinator = RestoreCoordinator(persistenceStore: persistence)
         let service = DefaultWorkspaceCommandService(
@@ -397,7 +513,8 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
             store: store,
             persistence: persistence,
             terminal: terminal,
-            service: service
+            service: service,
+            databasePath: databasePath
         )
     }
 
@@ -414,6 +531,31 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url.path
     }
+
+    private func writeStaleDefaultShortcutID(_ shortcutID: UUID, databasePath: String) throws {
+        var database: OpaquePointer?
+        guard sqlite3_open_v2(databasePath, &database, SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK else {
+            throw SQLiteWorkspaceMetadataStoreError.openFailed("Unable to open stale default fixture database")
+        }
+        defer { sqlite3_close(database) }
+
+        try execute(database, "PRAGMA foreign_keys = OFF")
+        try execute(database, """
+        UPDATE app_preferences
+        SET default_session_shortcut_id = '\(shortcutID.uuidString)'
+        WHERE id = 1
+        """)
+        try execute(database, "PRAGMA foreign_keys = ON")
+    }
+
+    private func execute(_ database: OpaquePointer?, _ sql: String) throws {
+        var error: UnsafeMutablePointer<CChar>?
+        guard sqlite3_exec(database, sql, nil, nil, &error) == SQLITE_OK else {
+            let message = error.map { String(cString: $0) } ?? "Unknown SQLite error"
+            sqlite3_free(error)
+            throw SQLiteWorkspaceMetadataStoreError.stepFailed(message)
+        }
+    }
 }
 
 @MainActor
@@ -422,6 +564,7 @@ private struct CommandServiceIntegrationHarness {
     let persistence: SQLiteWorkspaceMetadataStore
     let terminal: FakeIntegrationTerminalSurfaceManager
     let service: DefaultWorkspaceCommandService
+    let databasePath: String
 }
 
 @MainActor

@@ -3,6 +3,12 @@ import Foundation
 public struct AppPreferences: Equatable, Sendable {
     public static let fixedID = 1
     public static let defaultThemeID = "cursor"
+    public static let supportedThemeIDs: Set<String> = [
+        "dracula",
+        "onedark",
+        "catppuccin",
+        "cursor"
+    ]
 
     public var id: Int
     public var themeID: String
@@ -108,7 +114,7 @@ public struct KeybindingOverride: Codable, Equatable, Sendable {
     }
 }
 
-public enum KeyModifier: String, CaseIterable, Codable, Equatable, Sendable {
+public enum KeyModifier: String, CaseIterable, Codable, Equatable, Hashable, Sendable {
     case command
     case shift
     case option

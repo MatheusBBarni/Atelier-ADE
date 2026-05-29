@@ -206,6 +206,123 @@ struct DefaultWorkspaceCommandServiceTests {
     }
 
     @Test
+    func savingPreferencesRejectsUnknownThemeAndLeavesPersistenceUnchanged() async throws {
+        let harness = makeHarness()
+        let originalPreferences = AppPreferences(
+            themeID: "cursor",
+            updatedAt: Date(timeIntervalSince1970: 100)
+        )
+        try await harness.persistence.save(appPreferences: originalPreferences)
+
+        await #expect(throws: WorkspaceCommandError.settingsValidationFailed(.unknownThemeID("unknown-theme"))) {
+            try await harness.service.saveAppPreferences(AppPreferences(themeID: "unknown-theme"))
+        }
+
+        #expect(try await harness.persistence.loadAppPreferences() == originalPreferences)
+        #expect(harness.store.appPreferences == .defaults)
+    }
+
+    @Test
+    func savingPreferencesRejectsUnknownDefaultProfileReferenceAndLeavesPersistenceUnchanged() async throws {
+        let harness = makeHarness()
+        let originalPreferences = AppPreferences(themeID: "cursor", updatedAt: Date(timeIntervalSince1970: 101))
+        let missingShortcutID = UUID()
+        try await harness.persistence.save(appPreferences: originalPreferences)
+
+        await #expect(throws: WorkspaceCommandError.settingsValidationFailed(.unknownDefaultSessionShortcut(missingShortcutID))) {
+            try await harness.service.saveAppPreferences(AppPreferences(defaultSessionShortcutID: missingShortcutID))
+        }
+
+        #expect(try await harness.persistence.loadAppPreferences() == originalPreferences)
+    }
+
+    @Test
+    func savingPreferencesRejectsDuplicateManagedKeybindingsWithTypedFailure() async throws {
+        let harness = makeHarness()
+        let preferences = AppPreferences(
+            keybindings: [
+                .nextTab: KeybindingOverride(commandID: .nextTab, keyEquivalent: "[")
+            ]
+        )
+
+        await #expect(throws: WorkspaceCommandError.settingsValidationFailed(.duplicateManagedKeybinding(
+            commandID: .nextTab,
+            conflictingCommandID: .previousTab
+        ))) {
+            try await harness.service.saveAppPreferences(preferences)
+        }
+    }
+
+    @Test
+    func savingProfileRejectsMalformedLaunchArgumentsAndPreservesPreviousState() async throws {
+        let harness = makeHarness()
+        let shortcut = SessionShortcut(
+            label: "Custom Codex",
+            launchCommand: "codex",
+            launchArgumentsJSON: "[\"exec\"]"
+        )
+        let savedShortcut = try await harness.service.saveSessionShortcut(shortcut)
+        var malformedShortcut = savedShortcut
+        malformedShortcut.launchArgumentsJSON = "{\"not\":\"an-array\"}"
+
+        await #expect(throws: WorkspaceCommandError.settingsValidationFailed(.malformedLaunchArgumentsJSON(savedShortcut.id))) {
+            _ = try await harness.service.saveSessionShortcut(malformedShortcut)
+        }
+
+        #expect(try await harness.persistence.loadSessionShortcuts() == [savedShortcut])
+    }
+
+    @Test
+    func editingBuiltInProfileMarksOverrideAndResetRestoresCanonicalValues() async throws {
+        let harness = makeHarness()
+        let canonicalShortcut = try #require(SessionShortcut.builtInDefaults.first { $0.label == "Codex" })
+        var editedShortcut = canonicalShortcut
+        editedShortcut.launchArgumentsJSON = "[\"exec\"]"
+
+        let savedShortcut = try await harness.service.saveSessionShortcut(editedShortcut)
+        let resetShortcut = try await harness.service.resetBuiltInSessionShortcut(id: canonicalShortcut.id)
+
+        #expect(savedShortcut.isBuiltIn == true)
+        #expect(savedShortcut.hasUserOverride == true)
+        #expect(savedShortcut.launchArgumentsJSON == "[\"exec\"]")
+        #expect(resetShortcut == canonicalShortcut)
+        #expect(try await harness.persistence.loadSessionShortcuts().first { $0.id == canonicalShortcut.id } == canonicalShortcut)
+    }
+
+    @Test
+    func deletingCustomProfileClearsDefaultSessionShortcutInPersistenceAndStore() async throws {
+        let harness = makeHarness()
+        let shortcut = try await harness.service.saveSessionShortcut(SessionShortcut(
+            label: "Review",
+            launchCommand: "claude",
+            launchArgumentsJSON: "[\"--continue\"]"
+        ))
+        try await harness.service.saveAppPreferences(AppPreferences(defaultSessionShortcutID: shortcut.id))
+
+        try await harness.service.deleteSessionShortcut(id: shortcut.id)
+
+        #expect(try await harness.persistence.loadSessionShortcuts().isEmpty)
+        #expect(try await harness.persistence.loadAppPreferences().defaultSessionShortcutID == nil)
+        #expect(harness.store.appPreferences.defaultSessionShortcutID == nil)
+    }
+
+    @Test
+    func deletingBuiltInProfileFailsWithoutMutatingPersistence() async throws {
+        let harness = makeHarness()
+        let shortcuts = try await harness.service.availableSessionShortcuts()
+        let preferences = AppPreferences(themeID: "dracula", updatedAt: Date(timeIntervalSince1970: 200))
+        try await harness.persistence.save(appPreferences: preferences)
+        let builtInShortcut = try #require(shortcuts.first { $0.label == "Claude" })
+
+        await #expect(throws: WorkspaceCommandError.builtInShortcutDeletionRejected(builtInShortcut.id)) {
+            try await harness.service.deleteSessionShortcut(id: builtInShortcut.id)
+        }
+
+        #expect(try await harness.persistence.loadSessionShortcuts() == shortcuts)
+        #expect(try await harness.persistence.loadAppPreferences() == preferences)
+    }
+
+    @Test
     func creatingTabInShortcutSessionInheritsStoredLaunchIntent() async throws {
         let harness = makeHarness()
         let projectPath = try makeTemporaryProjectDirectory()

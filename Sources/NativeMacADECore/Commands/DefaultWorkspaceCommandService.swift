@@ -158,8 +158,83 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
         try await activateSelection { $0.selectTab(id: id) }
     }
 
+    public func loadAppPreferences() async throws -> AppPreferences {
+        let preferences = try await loadNormalizedAppPreferences(healStaleReferences: true)
+        store.updateAppPreferences(preferences)
+        return preferences
+    }
+
+    public func saveAppPreferences(_ preferences: AppPreferences) async throws {
+        try await validateAppPreferences(preferences)
+        var updatedPreferences = preferences
+        updatedPreferences.id = AppPreferences.fixedID
+        updatedPreferences.updatedAt = now()
+
+        try await persistBuiltInDefaultShortcutIfNeeded(for: updatedPreferences)
+        try await persist { try await persistenceStore.save(appPreferences: updatedPreferences) }
+        store.updateAppPreferences(updatedPreferences)
+        logger.emit("settings_saved", fields: [
+            "theme_id": updatedPreferences.themeID,
+            "default_profile_id": updatedPreferences.defaultSessionShortcutID?.uuidString ?? "none",
+            "changed_keybinding_count": String(updatedPreferences.keybindings.count)
+        ])
+    }
+
     public func availableSessionShortcuts() async throws -> [SessionShortcut] {
         try await loadSessionShortcutsIncludingBuiltIns()
+    }
+
+    public func saveSessionShortcut(_ shortcut: SessionShortcut) async throws -> SessionShortcut {
+        try validateLaunchArgumentsJSON(shortcut.launchArgumentsJSON, shortcutID: shortcut.id)
+        let savedShortcut = normalizedShortcutForSave(shortcut)
+
+        try await persist { try await persistenceStore.save(shortcut: savedShortcut) }
+        logger.emit("agent_profile_saved", fields: [
+            "shortcut_id": savedShortcut.id.uuidString,
+            "is_built_in": String(savedShortcut.isBuiltIn),
+            "has_user_override": String(savedShortcut.hasUserOverride)
+        ])
+        return savedShortcut
+    }
+
+    public func deleteSessionShortcut(id: UUID) async throws {
+        if Self.canonicalBuiltInShortcut(id: id) != nil {
+            throw WorkspaceCommandError.builtInShortcutDeletionRejected(id)
+        }
+
+        let shortcuts = try await loadSessionShortcutsIncludingBuiltIns(seedMissingBuiltIns: false)
+        guard shortcuts.contains(where: { $0.id == id }) else {
+            throw WorkspaceCommandError.missingShortcut(id)
+        }
+        let preferencesBeforeDelete = try await loadNormalizedAppPreferences(healStaleReferences: true)
+
+        try await persist { try await persistenceStore.deleteShortcut(id: id) }
+        let preferencesAfterDelete = try await loadNormalizedAppPreferences(healStaleReferences: true)
+        store.updateAppPreferences(preferencesAfterDelete)
+
+        if preferencesBeforeDelete.defaultSessionShortcutID == id {
+            logger.emit("default_profile_cleared", fields: [
+                "stale_profile_id": id.uuidString,
+                "reason": "deleted_profile"
+            ])
+        }
+    }
+
+    public func resetBuiltInSessionShortcut(id: UUID) async throws -> SessionShortcut {
+        guard let canonicalShortcut = Self.canonicalBuiltInShortcut(id: id) else {
+            let shortcuts = try await loadSessionShortcutsIncludingBuiltIns(seedMissingBuiltIns: false)
+            if shortcuts.contains(where: { $0.id == id }) {
+                throw WorkspaceCommandError.customShortcutResetRejected(id)
+            }
+            throw WorkspaceCommandError.missingShortcut(id)
+        }
+
+        try validateLaunchArgumentsJSON(canonicalShortcut.launchArgumentsJSON, shortcutID: canonicalShortcut.id)
+        try await persist { try await persistenceStore.save(shortcut: canonicalShortcut) }
+        logger.emit("agent_profile_reset", fields: [
+            "shortcut_id": canonicalShortcut.id.uuidString
+        ])
+        return canonicalShortcut
     }
 
     public func createSession(projectID: UUID, shortcutID: UUID?) async throws -> WorkspaceSession {
@@ -409,15 +484,156 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
     }
 
     private func loadSessionShortcutsIncludingBuiltIns(seedMissingBuiltIns: Bool = true) async throws -> [SessionShortcut] {
-        var shortcuts = try await persist { try await persistenceStore.loadSessionShortcuts() }
-        let existingIDs = Set(shortcuts.map(\.id))
-        for shortcut in SessionShortcut.builtInDefaults where !existingIDs.contains(shortcut.id) {
-            if seedMissingBuiltIns {
-                try await persist { try await persistenceStore.save(shortcut: shortcut) }
+        let persistedShortcuts = try await persist { try await persistenceStore.loadSessionShortcuts() }
+        let persistedByID = Dictionary(uniqueKeysWithValues: persistedShortcuts.map { ($0.id, $0) })
+        let builtInIDs = Set(SessionShortcut.builtInDefaults.map(\.id))
+
+        var mergedShortcuts: [SessionShortcut] = []
+        for canonicalShortcut in SessionShortcut.builtInDefaults {
+            let effectiveShortcut: SessionShortcut
+            if let persistedShortcut = persistedByID[canonicalShortcut.id] {
+                if persistedShortcut.hasUserOverride {
+                    var overriddenShortcut = persistedShortcut
+                    overriddenShortcut.isBuiltIn = true
+                    effectiveShortcut = overriddenShortcut
+                } else {
+                    effectiveShortcut = canonicalShortcut
+                }
+                if seedMissingBuiltIns, effectiveShortcut != persistedShortcut {
+                    try await persist { try await persistenceStore.save(shortcut: effectiveShortcut) }
+                }
+            } else {
+                effectiveShortcut = canonicalShortcut
+                if seedMissingBuiltIns {
+                    try await persist { try await persistenceStore.save(shortcut: canonicalShortcut) }
+                }
             }
-            shortcuts.append(shortcut)
+            mergedShortcuts.append(effectiveShortcut)
         }
-        return shortcuts.sorted { $0.label < $1.label }
+
+        for persistedShortcut in persistedShortcuts where !builtInIDs.contains(persistedShortcut.id) {
+            var customShortcut = persistedShortcut
+            customShortcut.isBuiltIn = false
+            customShortcut.hasUserOverride = false
+            if seedMissingBuiltIns, customShortcut != persistedShortcut {
+                try await persist { try await persistenceStore.save(shortcut: customShortcut) }
+            }
+            mergedShortcuts.append(customShortcut)
+        }
+
+        return sortSessionShortcuts(mergedShortcuts)
+    }
+
+    private func loadNormalizedAppPreferences(healStaleReferences: Bool) async throws -> AppPreferences {
+        var preferences = try await persist { try await persistenceStore.loadAppPreferences() }
+        var shouldPersistRepair = false
+
+        if !AppPreferences.supportedThemeIDs.contains(preferences.themeID) {
+            logger.emit("settings_preference_repaired", fields: [
+                "field": "theme_id",
+                "theme_id": preferences.themeID,
+                "reason": "unknown_theme"
+            ])
+            preferences.themeID = AppPreferences.defaultThemeID
+            shouldPersistRepair = true
+        }
+
+        if let defaultShortcutID = preferences.defaultSessionShortcutID {
+            let shortcuts = try await loadSessionShortcutsIncludingBuiltIns(seedMissingBuiltIns: false)
+            if !shortcuts.contains(where: { $0.id == defaultShortcutID }) {
+                logger.emit("default_profile_resolution_failed", fields: [
+                    "shortcut_id": defaultShortcutID.uuidString,
+                    "reason": "missing_shortcut"
+                ])
+                logger.emit("default_profile_cleared", fields: [
+                    "stale_profile_id": defaultShortcutID.uuidString,
+                    "reason": "missing_shortcut"
+                ])
+                preferences.defaultSessionShortcutID = nil
+                shouldPersistRepair = true
+            }
+        }
+
+        if healStaleReferences, shouldPersistRepair {
+            preferences.id = AppPreferences.fixedID
+            preferences.updatedAt = now()
+            try await persist { try await persistenceStore.save(appPreferences: preferences) }
+        }
+
+        return preferences
+    }
+
+    private func validateAppPreferences(_ preferences: AppPreferences) async throws {
+        guard AppPreferences.supportedThemeIDs.contains(preferences.themeID) else {
+            throw WorkspaceCommandError.settingsValidationFailed(.unknownThemeID(preferences.themeID))
+        }
+
+        try validateManagedKeybindings(preferences.keybindings)
+
+        if let defaultShortcutID = preferences.defaultSessionShortcutID {
+            let shortcuts = try await loadSessionShortcutsIncludingBuiltIns(seedMissingBuiltIns: false)
+            guard shortcuts.contains(where: { $0.id == defaultShortcutID }) else {
+                throw WorkspaceCommandError.settingsValidationFailed(.unknownDefaultSessionShortcut(defaultShortcutID))
+            }
+        }
+    }
+
+    private func persistBuiltInDefaultShortcutIfNeeded(for preferences: AppPreferences) async throws {
+        guard let defaultShortcutID = preferences.defaultSessionShortcutID,
+              let canonicalShortcut = Self.canonicalBuiltInShortcut(id: defaultShortcutID)
+        else { return }
+
+        let persistedShortcuts = try await persist { try await persistenceStore.loadSessionShortcuts() }
+        if !persistedShortcuts.contains(where: { $0.id == defaultShortcutID }) {
+            try await persist { try await persistenceStore.save(shortcut: canonicalShortcut) }
+        }
+    }
+
+    private func validateManagedKeybindings(_ keybindings: [AppCommandID: KeybindingOverride]) throws {
+        for (commandID, override) in keybindings where override.commandID != commandID {
+            throw WorkspaceCommandError.settingsValidationFailed(.mismatchedKeybindingCommandID(
+                expected: commandID,
+                actual: override.commandID
+            ))
+        }
+
+        var signaturesByCommand: [KeybindingSignature: AppCommandID] = [:]
+        for commandID in AppCommandID.allCases {
+            let keybinding = keybindings[commandID] ?? commandID.defaultKeybinding
+            let signature = try KeybindingSignature(commandID: commandID, keybinding: keybinding)
+            if let conflictingCommandID = signaturesByCommand[signature] {
+                throw WorkspaceCommandError.settingsValidationFailed(.duplicateManagedKeybinding(
+                    commandID: commandID,
+                    conflictingCommandID: conflictingCommandID
+                ))
+            }
+            signaturesByCommand[signature] = commandID
+        }
+    }
+
+    private func validateLaunchArgumentsJSON(_ launchArgumentsJSON: String?, shortcutID: UUID) throws {
+        guard let launchArgumentsJSON else { return }
+        let trimmedJSON = launchArgumentsJSON.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedJSON.isEmpty,
+              let data = trimmedJSON.data(using: .utf8),
+              (try? JSONDecoder().decode([String].self, from: data)) != nil
+        else {
+            throw WorkspaceCommandError.settingsValidationFailed(.malformedLaunchArgumentsJSON(shortcutID))
+        }
+    }
+
+    private func normalizedShortcutForSave(_ shortcut: SessionShortcut) -> SessionShortcut {
+        guard let canonicalShortcut = Self.canonicalBuiltInShortcut(id: shortcut.id) else {
+            var customShortcut = shortcut
+            customShortcut.isBuiltIn = false
+            customShortcut.hasUserOverride = false
+            return customShortcut
+        }
+
+        var builtInShortcut = shortcut
+        builtInShortcut.isBuiltIn = true
+        builtInShortcut.hasUserOverride = !Self.profileFieldsMatch(builtInShortcut, canonicalShortcut)
+        return builtInShortcut
     }
 
     private func resolveLaunchIntent(explicitShortcutID: UUID?) async throws -> ResolvedLaunchIntent {
@@ -429,7 +645,8 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
             return ResolvedLaunchIntent(source: .explicit, shortcut: shortcut)
         }
 
-        let preferences = try await persist { try await persistenceStore.loadAppPreferences() }
+        let preferences = try await loadNormalizedAppPreferences(healStaleReferences: true)
+        store.updateAppPreferences(preferences)
         guard let defaultShortcutID = preferences.defaultSessionShortcutID else {
             return ResolvedLaunchIntent(source: .plain, shortcut: nil)
         }
@@ -509,6 +726,7 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
             projects: store.projects,
             sessions: store.sessions,
             tabs: store.tabs,
+            appPreferences: store.appPreferences,
             selectedProjectID: store.selectedProjectID,
             selectedSessionID: store.selectedSessionID,
             selectedTabID: store.selectedTabID
@@ -565,6 +783,40 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
     private func persistSnapshot() async throws {
         let snapshot = store.snapshot(updatedAt: now())
         try await persist { try await persistenceStore.save(snapshot: snapshot) }
+    }
+
+    private func sortSessionShortcuts(_ shortcuts: [SessionShortcut]) -> [SessionShortcut] {
+        shortcuts.sorted {
+            if $0.label == $1.label {
+                return $0.id.uuidString < $1.id.uuidString
+            }
+            return $0.label < $1.label
+        }
+    }
+
+    private static func canonicalBuiltInShortcut(id: UUID) -> SessionShortcut? {
+        SessionShortcut.builtInDefaults.first { $0.id == id }
+    }
+
+    private static func profileFieldsMatch(_ lhs: SessionShortcut, _ rhs: SessionShortcut) -> Bool {
+        lhs.label == rhs.label &&
+            lhs.launchCommand == rhs.launchCommand &&
+            lhs.launchArgumentsJSON == rhs.launchArgumentsJSON &&
+            lhs.secretRef == rhs.secretRef
+    }
+}
+
+private struct KeybindingSignature: Hashable {
+    let keyEquivalent: String
+    let modifiers: Set<KeyModifier>
+
+    init(commandID: AppCommandID, keybinding: KeybindingOverride) throws {
+        let trimmedKeyEquivalent = keybinding.keyEquivalent.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedKeyEquivalent.isEmpty else {
+            throw WorkspaceCommandError.settingsValidationFailed(.emptyKeybinding(commandID))
+        }
+        keyEquivalent = trimmedKeyEquivalent.lowercased()
+        modifiers = Set(keybinding.modifiers)
     }
 }
 

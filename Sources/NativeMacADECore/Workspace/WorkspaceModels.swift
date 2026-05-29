@@ -147,6 +147,13 @@ public struct SessionShortcut: Identifiable, Equatable, Sendable {
             launchCommand: "claude",
             launchArgumentsJSON: "[]",
             isBuiltIn: true
+        ),
+        SessionShortcut(
+            id: UUID(uuidString: "33333333-3333-4333-8333-333333333333")!,
+            label: "OpenCode",
+            launchCommand: "opencode",
+            launchArgumentsJSON: "[]",
+            isBuiltIn: true
         )
     ]
 }
