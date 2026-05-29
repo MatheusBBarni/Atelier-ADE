@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Build project sidebar, session management UI, and default Nord shell theme"
 type: frontend
 complexity: high
@@ -30,11 +30,11 @@ Implement the first major user-facing workflow shell: the persistent project sid
 </requirements>
 
 ## Subtasks
-- [ ] 5.1 Build the root SwiftUI workspace shell that places the project sidebar beside session-focused content.
-- [ ] 5.2 Implement project sidebar UI for selecting, opening, and removing projects.
-- [ ] 5.3 Implement the project-scoped session list with create, select, and rename flows.
-- [ ] 5.4 Apply the Nord theme tokens to the app shell and make active-state cues explicit.
-- [ ] 5.5 Add tests that verify selection, session rename, default naming visibility, and theme defaults.
+- [x] 5.1 Build the root SwiftUI workspace shell that places the project sidebar beside session-focused content.
+- [x] 5.2 Implement project sidebar UI for selecting, opening, and removing projects.
+- [x] 5.3 Implement the project-scoped session list with create, select, and rename flows.
+- [x] 5.4 Apply the Nord theme tokens to the app shell and make active-state cues explicit.
+- [x] 5.5 Add tests that verify selection, session rename, default naming visibility, and theme defaults.
 
 ## Implementation Details
 Use TechSpec "User Experience" and "System Architecture > Component Overview" to keep SwiftUI responsible for navigation and visible workspace state. Apply the user's Nord-theme request here as the default app shell theme, while leaving terminal launch/theme integration to task 06.
@@ -69,14 +69,14 @@ Use TechSpec "User Experience" and "System Architecture > Component Overview" to
 
 ## Tests
 - Unit tests:
-  - [ ] Selecting a project updates the active project highlight and exposes only that project's sessions.
-  - [ ] Creating a new session from the selected project displays the default timestamp-based title.
-  - [ ] Renaming a session updates the visible title while preserving project ownership and ordering.
-  - [ ] Nord theme tokens are the default values used by the workspace shell and sidebar rows.
+  - [x] Selecting a project updates the active project highlight and exposes only that project's sessions.
+  - [x] Creating a new session from the selected project displays the default timestamp-based title.
+  - [x] Renaming a session updates the visible title while preserving project ownership and ordering.
+  - [x] Nord theme tokens are the default values used by the workspace shell and sidebar rows.
 - Integration tests:
-  - [ ] Opening a project from the sidebar adds it to the persistent project list and selects it immediately.
-  - [ ] Removing a project from the sidebar clears dependent selection state without crashing the workspace shell.
-  - [ ] Restored selection state reopens the same project and session in the UI after relaunch reconstruction.
+  - [x] Opening a project from the sidebar adds it to the persistent project list and selects it immediately.
+  - [x] Removing a project from the sidebar clears dependent selection state without crashing the workspace shell.
+  - [x] Restored selection state reopens the same project and session in the UI after relaunch reconstruction.
 - Test coverage target: >=80%
 - All tests must pass
 

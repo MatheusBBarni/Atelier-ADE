@@ -5,6 +5,7 @@ import SwiftUI
 struct NativeMacADEApp: App {
     @State private var workspaceStore: WorkspaceStore
     private let commandService: any WorkspaceCommandService
+    private let terminalHostController: TerminalHostController
 
     init() {
         self.init(container: .live())
@@ -13,11 +14,12 @@ struct NativeMacADEApp: App {
     init(container: AppDependencyContainer = .live()) {
         _workspaceStore = State(initialValue: container.workspaceStore)
         commandService = container.workspaceCommandService
+        terminalHostController = container.terminalHostController
     }
 
     var body: some Scene {
         WindowGroup {
-            ContentView(store: workspaceStore, commandService: commandService)
+            ContentView(store: workspaceStore, commandService: commandService, terminalHostController: terminalHostController)
         }
         .windowStyle(.titleBar)
         .commands {

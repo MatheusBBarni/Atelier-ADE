@@ -123,6 +123,39 @@ struct DefaultWorkspaceCommandServiceTests {
         #expect(harness.terminal.createdTabs == [tab])
     }
 
+    @Test
+    func closingLiveTabHonorsConfirmQuitBeforeRemovingMetadata() async throws {
+        let harness = makeHarness()
+        let project = try await harness.service.openProject(path: makeTemporaryProjectDirectory())
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let tab = try await harness.service.createTab(sessionID: session.id)
+        harness.terminal.canCloseResult = false
+
+        await #expect(throws: WorkspaceCommandError.closeRejected(tab.id)) {
+            try await harness.service.closeTab(tabID: tab.id, force: false)
+        }
+
+        #expect(harness.store.tabs == [tab])
+        #expect(harness.store.selectedTabID == tab.id)
+        #expect(try await harness.persistence.loadTabs() == [tab])
+    }
+
+    @Test
+    func selectingTabKeepsSelectedSessionContextStable() async throws {
+        let harness = makeHarness()
+        let project = try await harness.service.openProject(path: makeTemporaryProjectDirectory())
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let firstTab = try await harness.service.createTab(sessionID: session.id)
+        let secondTab = try await harness.service.createTab(sessionID: session.id)
+
+        try await harness.service.selectTab(id: firstTab.id)
+
+        #expect(harness.store.selectedProjectID == project.id)
+        #expect(harness.store.selectedSessionID == session.id)
+        #expect(harness.store.selectedTabID == firstTab.id)
+        #expect(harness.store.tabsForSelectedSession.map(\.id) == [firstTab.id, secondTab.id])
+    }
+
     private func makeHarness(now: @escaping @MainActor () -> Date = Date.init) -> CommandServiceHarness<InMemoryWorkspacePersistenceStore> {
         let store = WorkspaceStore()
         let persistence = InMemoryWorkspacePersistenceStore()
@@ -164,18 +197,47 @@ private struct CommandServiceHarness<Persistence: WorkspacePersistenceStore> {
 @MainActor
 private final class FakeTerminalSurfaceManager: WorkspaceTerminalSurfaceManaging {
     private(set) var createdTabs: [WorkspaceTab] = []
+    private(set) var focusedTabIDs: [UUID] = []
+    private(set) var resizedTabIDs: [UUID] = []
+    private(set) var releasedTabIDs: [UUID] = []
     var surfaceCreationError: Error?
+    var surfacesByTabID: [UUID: GhosttySurfaceHandle] = [:]
+    var canCloseResult = true
+    var exitedTabIDs: Set<UUID> = []
 
     func createSurface(for tab: WorkspaceTab) async throws -> GhosttySurfaceHandle {
         createdTabs.append(tab)
         if let surfaceCreationError {
             throw surfaceCreationError
         }
-        return GhosttySurfaceHandle()
+        let surface = GhosttySurfaceHandle()
+        surfacesByTabID[tab.id] = surface
+        return surface
+    }
+
+    func surface(for tabID: UUID) -> GhosttySurfaceHandle? {
+        surfacesByTabID[tabID]
     }
 
     func canClose(surface: GhosttySurfaceHandle) async -> Bool {
-        true
+        canCloseResult
+    }
+
+    func focus(tabID: UUID) {
+        focusedTabIDs.append(tabID)
+    }
+
+    func resize(tabID: UUID, columns: Int, rows: Int) {
+        resizedTabIDs.append(tabID)
+    }
+
+    func hasExited(tabID: UUID) async -> Bool {
+        exitedTabIDs.contains(tabID)
+    }
+
+    func releaseSurface(for tabID: UUID) {
+        releasedTabIDs.append(tabID)
+        surfacesByTabID[tabID] = nil
     }
 }
 

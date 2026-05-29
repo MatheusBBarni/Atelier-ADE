@@ -16,7 +16,14 @@ let package = Package(
             name: "NativeMacADE",
             dependencies: ["NativeMacADECore"]
         ),
-        .target(name: "NativeMacADECore"),
+        .target(
+            name: "CGhostty",
+            publicHeadersPath: "include"
+        ),
+        .target(
+            name: "NativeMacADECore",
+            dependencies: ["CGhostty"]
+        ),
         .testTarget(
             name: "NativeMacADECoreTests",
             dependencies: ["NativeMacADECore"]

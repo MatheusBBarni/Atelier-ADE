@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Implement workspace domain models and SQLite metadata store"
 type: backend
 complexity: high
@@ -29,11 +29,11 @@ Implement the domain entities and metadata-only SQLite persistence that anchor t
 </requirements>
 
 ## Subtasks
-- [ ] 3.1 Add the core workspace entity definitions required by the TechSpec.
-- [ ] 3.2 Create the SQLite schema and migration/bootstrap logic for V1 metadata tables.
-- [ ] 3.3 Implement repository or store operations for project, session, tab, shortcut, and restore-snapshot metadata.
-- [ ] 3.4 Add serialization and mapping coverage for ordering, recency, and restore snapshot behavior.
-- [ ] 3.5 Add persistence tests that exercise metadata-only storage rules and deliberate exclusions.
+- [x] 3.1 Add the core workspace entity definitions required by the TechSpec.
+- [x] 3.2 Create the SQLite schema and migration/bootstrap logic for V1 metadata tables.
+- [x] 3.3 Implement repository or store operations for project, session, tab, shortcut, and restore-snapshot metadata.
+- [x] 3.4 Add serialization and mapping coverage for ordering, recency, and restore snapshot behavior.
+- [x] 3.5 Add persistence tests that exercise metadata-only storage rules and deliberate exclusions.
 
 ## Implementation Details
 Follow TechSpec "Implementation Design > Data Models" and "Storage Structures" exactly. This task establishes the data contract that the store, command service, restore flow, and session shortcuts depend on, so keep the schema narrow and aligned with ADR-005.
@@ -68,13 +68,13 @@ Follow TechSpec "Implementation Design > Data Models" and "Storage Structures" e
 
 ## Tests
 - Unit tests:
-  - [ ] Default session naming stores `MM-DD HH:mm` values and flips `isUserNamed` only after rename.
-  - [ ] Tab metadata preserves session ownership, working directory, ordinal, and relaunch launch fields.
-  - [ ] Restore snapshot serialization preserves selected project/session/tab IDs and tab ordering.
+  - [x] Default session naming stores `MM-DD HH:mm` values and flips `isUserNamed` only after rename.
+  - [x] Tab metadata preserves session ownership, working directory, ordinal, and relaunch launch fields.
+  - [x] Restore snapshot serialization preserves selected project/session/tab IDs and tab ordering.
 - Integration tests:
-  - [ ] SQLite bootstrap creates exactly the `projects`, `sessions`, `tabs`, `session_shortcuts`, and `restore_snapshot` tables.
-  - [ ] Replacing the active restore snapshot overwrites prior snapshot data without duplicating active rows.
-  - [ ] Loading persisted metadata for an existing project/session/tab graph returns the expected ordering and recency fields.
+  - [x] SQLite bootstrap creates exactly the `projects`, `sessions`, `tabs`, `session_shortcuts`, and `restore_snapshot` tables.
+  - [x] Replacing the active restore snapshot overwrites prior snapshot data without duplicating active rows.
+  - [x] Loading persisted metadata for an existing project/session/tab graph returns the expected ordering and recency fields.
 - Test coverage target: >=80%
 - All tests must pass
 

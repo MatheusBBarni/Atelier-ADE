@@ -127,6 +127,25 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
     }
 
     @Test
+    func forceClosingExitedTerminalLeavesRemainingTabsStable() async throws {
+        let harness = try makeHarness()
+        let project = try await harness.service.openProject(path: makeTemporaryProjectDirectory())
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let exitedTab = try await harness.service.createTab(sessionID: session.id)
+        let remainingTab = try await harness.service.createTab(sessionID: session.id)
+
+        try await harness.service.closeTab(tabID: exitedTab.id, force: true)
+
+        #expect(harness.store.tabs.map(\.id) == [remainingTab.id])
+        #expect(harness.store.selectedProjectID == project.id)
+        #expect(harness.store.selectedSessionID == session.id)
+        #expect(harness.store.selectedTabID == remainingTab.id)
+        #expect(try await harness.persistence.loadTabs().map(\.id) == [remainingTab.id])
+        #expect(harness.terminal.closeRequests.isEmpty)
+        #expect(harness.terminal.releasedTabIDs == [exitedTab.id])
+    }
+
+    @Test
     func removingProjectDeletesDependentGraphAndClearsPersistedSelection() async throws {
         let harness = try makeHarness()
         let project = try await harness.service.openProject(path: makeTemporaryProjectDirectory())
@@ -203,19 +222,47 @@ private struct CommandServiceIntegrationHarness {
 private final class FakeIntegrationTerminalSurfaceManager: WorkspaceTerminalSurfaceManaging {
     private(set) var createdTabs: [WorkspaceTab] = []
     private(set) var closeRequests: [GhosttySurfaceHandle] = []
+    private(set) var focusedTabIDs: [UUID] = []
+    private(set) var resizedTabIDs: [UUID] = []
+    private(set) var releasedTabIDs: [UUID] = []
     var surfaceCreationError: Error?
     var canCloseResult = true
+    var exitedTabIDs: Set<UUID> = []
+    private var surfacesByTabID: [UUID: GhosttySurfaceHandle] = [:]
 
     func createSurface(for tab: WorkspaceTab) async throws -> GhosttySurfaceHandle {
         createdTabs.append(tab)
         if let surfaceCreationError {
             throw surfaceCreationError
         }
-        return GhosttySurfaceHandle()
+        let surface = GhosttySurfaceHandle()
+        surfacesByTabID[tab.id] = surface
+        return surface
+    }
+
+    func surface(for tabID: UUID) -> GhosttySurfaceHandle? {
+        surfacesByTabID[tabID]
     }
 
     func canClose(surface: GhosttySurfaceHandle) async -> Bool {
         closeRequests.append(surface)
         return canCloseResult
+    }
+
+    func focus(tabID: UUID) {
+        focusedTabIDs.append(tabID)
+    }
+
+    func resize(tabID: UUID, columns: Int, rows: Int) {
+        resizedTabIDs.append(tabID)
+    }
+
+    func hasExited(tabID: UUID) async -> Bool {
+        exitedTabIDs.contains(tabID)
+    }
+
+    func releaseSurface(for tabID: UUID) {
+        releasedTabIDs.append(tabID)
+        surfacesByTabID[tabID] = nil
     }
 }

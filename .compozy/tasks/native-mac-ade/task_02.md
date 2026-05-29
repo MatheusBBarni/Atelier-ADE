@@ -1,10 +1,10 @@
 ---
-status: pending
+status: completed
 title: "Pin Ghostty and build the adapter boundary"
 type: infra
 complexity: high
 dependencies:
-  - task_01
+    - task_01
 ---
 
 # Task 02: Pin Ghostty and build the adapter boundary

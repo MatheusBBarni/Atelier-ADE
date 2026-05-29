@@ -1,0 +1,8 @@
+{
+  "name": "libghostty",
+  "source": "https://github.com/ghostty-org/ghostty",
+  "revision": "cb36966a752982014827a9cabcf630ec3788b3d9",
+  "header": "include/ghostty.h",
+  "integrationTarget": "CGhostty",
+  "notes": "CGhostty is the app-owned SwiftPM C boundary for the pinned libghostty revision. Replace its implementation with direct calls into a matching vendored libghostty binary artifact when the full upstream XCFramework is available."
+}

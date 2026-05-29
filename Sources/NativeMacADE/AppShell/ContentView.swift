@@ -5,6 +5,7 @@ import SwiftUI
 struct ContentView: View {
     let store: WorkspaceStore
     let commandService: any WorkspaceCommandService
+    let terminalHostController: TerminalHostController
     @State private var didRequestRestore = false
     @State private var isRestoring = true
     @State private var userMessage: UserMessage?
@@ -16,7 +17,7 @@ struct ContentView: View {
             } content: {
                 SessionListView(store: store, commandService: commandService, userMessage: $userMessage)
             } detail: {
-                WorkspaceDetailView(store: store, commandService: commandService, userMessage: $userMessage)
+                WorkspaceDetailView(store: store, commandService: commandService, terminalHostController: terminalHostController, userMessage: $userMessage)
             }
             .disabled(isRestoring)
 
@@ -379,6 +380,7 @@ struct SessionRenameView: View {
 struct WorkspaceDetailView: View {
     let store: WorkspaceStore
     let commandService: any WorkspaceCommandService
+    let terminalHostController: TerminalHostController
     @Binding var userMessage: UserMessage?
 
     var body: some View {
@@ -386,7 +388,12 @@ struct WorkspaceDetailView: View {
             ActiveContextBanner(project: store.selectedProject, session: store.selectedSession)
             TabChromeView(store: store, commandService: commandService, userMessage: $userMessage)
             Divider().overlay(NordTheme.polarNight3.color)
-            TerminalPlaceholderView(selectedProject: store.selectedProject, selectedSession: store.selectedSession, selectedTab: store.selectedTab)
+            TerminalHostAreaView(
+                store: store,
+                commandService: commandService,
+                terminalHostController: terminalHostController,
+                userMessage: $userMessage
+            )
         }
         .background(NordTheme.contentBackground.color)
         .toolbar {
@@ -448,18 +455,12 @@ struct TabChromeView: View {
                         .foregroundStyle(NordTheme.mutedText.color)
                 } else {
                     ForEach(store.tabsForSelectedSession) { tab in
-                        Button {
-                            selectTab(tab.id)
-                        } label: {
-                            Label(URL(fileURLWithPath: tab.workingDirectory).lastPathComponent, systemImage: tab.id == store.selectedTabID ? "terminal.fill" : "terminal")
-                                .labelStyle(.titleAndIcon)
-                                .lineLimit(1)
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .tint(tab.id == store.selectedTabID ? NordTheme.activeBorder.color : NordTheme.polarNight3.color)
-                        .accessibilityLabel("Terminal tab in \(tab.workingDirectory)")
-                        .accessibilityValue(tab.id == store.selectedTabID ? "Active tab" : "Tab")
+                        TabItemView(
+                            tab: tab,
+                            isActive: tab.id == store.selectedTabID,
+                            onSelect: { selectTab(tab.id) },
+                            onClose: { closeTab(tab.id) }
+                        )
                     }
                 }
             }
@@ -478,18 +479,131 @@ struct TabChromeView: View {
             }
         }
     }
+
+    private func closeTab(_ id: UUID) {
+        Task {
+            do {
+                try await commandService.closeTab(tabID: id, force: false)
+            } catch WorkspaceCommandError.closeRejected {
+                userMessage = UserMessage(title: "Tab is still running", detail: "Ghostty reported that this terminal has a live process. Close was cancelled to avoid interrupting work.")
+            } catch {
+                userMessage = UserMessage(title: "Tab could not be closed", detail: String(describing: error))
+            }
+        }
+    }
+}
+
+struct TabItemView: View {
+    let tab: WorkspaceTab
+    let isActive: Bool
+    let onSelect: () -> Void
+    let onClose: () -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Button(action: onSelect) {
+                Label(title, systemImage: isActive ? "terminal.fill" : "terminal")
+                    .labelStyle(.titleAndIcon)
+                    .lineLimit(1)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(isActive ? NordTheme.primaryText.color : NordTheme.secondaryText.color)
+
+            Button("Close tab", systemImage: "xmark", action: onClose)
+                .labelStyle(.iconOnly)
+                .buttonStyle(.borderless)
+                .foregroundStyle(isActive ? NordTheme.snowStorm2.color : NordTheme.mutedText.color)
+                .help("Close terminal tab")
+        }
+        .padding(.leading, 10)
+        .padding(.trailing, 6)
+        .padding(.vertical, 6)
+        .background(isActive ? NordTheme.activeBackground.color.opacity(0.38) : NordTheme.elevatedBackground.color.opacity(0.72), in: Capsule())
+        .overlay {
+            Capsule().stroke(isActive ? NordTheme.activeBorder.color : NordTheme.polarNight3.color, lineWidth: 1)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Terminal tab in \(tab.workingDirectory)")
+        .accessibilityValue(isActive ? "Active tab" : "Tab")
+    }
+
+    private var title: String {
+        let directoryName = URL(fileURLWithPath: tab.workingDirectory).lastPathComponent
+        return directoryName.isEmpty ? tab.workingDirectory : directoryName
+    }
+}
+
+struct TerminalHostAreaView: View {
+    let store: WorkspaceStore
+    let commandService: any WorkspaceCommandService
+    let terminalHostController: TerminalHostController
+    @Binding var userMessage: UserMessage?
+
+    var body: some View {
+        ZStack {
+            NordTheme.contentBackground.color
+            if let selectedTab = store.selectedTab {
+                TerminalHostView(
+                    tab: selectedTab,
+                    isActive: selectedTab.id == store.selectedTabID,
+                    controller: terminalHostController,
+                    onError: { error in userMessage = UserMessage(title: "Terminal unavailable", detail: String(describing: error)) }
+                )
+                .id(selectedTab.id)
+                .padding(12)
+            } else {
+                TerminalPlaceholderView(selectedProject: store.selectedProject, selectedSession: store.selectedSession)
+            }
+        }
+        .task(id: store.tabsForSelectedSession.map(\.id)) {
+            await ensureVisibleSessionSurfaces()
+        }
+    }
+
+    private func ensureVisibleSessionSurfaces() async {
+        for tab in store.tabsForSelectedSession {
+            do {
+                try await terminalHostController.createSurface(for: tab)
+            } catch {
+                userMessage = UserMessage(title: "Terminal unavailable", detail: String(describing: error))
+                return
+            }
+        }
+    }
+}
+
+struct TerminalHostView: NSViewRepresentable {
+    let tab: WorkspaceTab
+    let isActive: Bool
+    let controller: TerminalHostController
+    let onError: (any Error) -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        controller.makeHostView(for: tab, isActive: isActive)
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        controller.updateHostView(nsView, tab: tab, isActive: isActive)
+        Task { @MainActor in
+            do {
+                try await controller.createSurface(for: tab)
+                controller.focus(tabID: tab.id)
+            } catch {
+                onError(error)
+            }
+        }
+    }
 }
 
 struct TerminalPlaceholderView: View {
     let selectedProject: WorkspaceProject?
     let selectedSession: WorkspaceSession?
-    let selectedTab: WorkspaceTab?
 
     var body: some View {
         ZStack {
             NordTheme.contentBackground.color
             VStack(spacing: 12) {
-                Image(systemName: selectedTab == nil ? "terminal" : "terminal.fill")
+                Image(systemName: "terminal")
                     .font(.system(size: 44))
                     .foregroundStyle(NordTheme.frost1.color)
                 Text(title)
@@ -512,12 +626,10 @@ struct TerminalPlaceholderView: View {
     private var title: String {
         if selectedProject == nil { return "Choose a project" }
         if selectedSession == nil { return "Create or select a session" }
-        if selectedTab == nil { return "Create a tab" }
-        return "Terminal host boundary"
+        return "Create a tab"
     }
 
     private var message: String {
-        if let selectedTab { return selectedTab.workingDirectory }
         if let selectedProject { return selectedProject.path }
         return "Open a project to start a project-scoped workflow."
     }
@@ -623,13 +735,15 @@ private extension NordColorToken {
     let store = WorkspaceStore.preview()
     let persistence = InMemoryWorkspacePersistenceStore()
     let restoreCoordinator = RestoreCoordinator(persistenceStore: persistence)
+    let terminalHostController = TerminalHostController()
     ContentView(
         store: store,
         commandService: DefaultWorkspaceCommandService(
             store: store,
             persistenceStore: persistence,
             restoreCoordinator: restoreCoordinator,
-            terminalSurfaceManager: TerminalHostController()
-        )
+            terminalSurfaceManager: terminalHostController
+        ),
+        terminalHostController: terminalHostController
     )
 }

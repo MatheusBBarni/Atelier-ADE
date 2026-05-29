@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Build tab chrome and AppKit terminal host integration"
 type: frontend
 complexity: high
@@ -31,11 +31,11 @@ Implement the in-app terminal experience by connecting tab chrome to AppKit-host
 </requirements>
 
 ## Subtasks
-- [ ] 6.1 Build the SwiftUI tab chrome and bind it to selected session/tab state.
-- [ ] 6.2 Implement the AppKit terminal host components that attach one Ghostty surface per visible tab.
-- [ ] 6.3 Connect tab creation and selection flows to working-directory launch behavior through the Ghostty adapter.
-- [ ] 6.4 Apply the Nord default terminal appearance and clear focus/active-state behavior in the terminal area.
-- [ ] 6.5 Add tests for Ghostty host lifecycle, tab behavior, and close/exit semantics.
+- [x] 6.1 Build the SwiftUI tab chrome and bind it to selected session/tab state.
+- [x] 6.2 Implement the AppKit terminal host components that attach one Ghostty surface per visible tab.
+- [x] 6.3 Connect tab creation and selection flows to working-directory launch behavior through the Ghostty adapter.
+- [x] 6.4 Apply the Nord default terminal appearance and clear focus/active-state behavior in the terminal area.
+- [x] 6.5 Add tests for Ghostty host lifecycle, tab behavior, and close/exit semantics.
 
 ## Implementation Details
 Reference TechSpec "System Architecture > Terminal Host Layer" and "Integration Points" for the Ghostty boundary. Keep the tab experience inside the app-owned project -> session -> tab model and do not introduce external Ghostty coordination or multi-window orchestration in V1.
@@ -70,14 +70,14 @@ Reference TechSpec "System Architecture > Terminal Host Layer" and "Integration 
 
 ## Tests
 - Unit tests:
-  - [ ] Creating a tab requests the selected project working directory from the command/service boundary.
-  - [ ] Closing a tab with a live terminal process honors confirm-quit before force close.
-  - [ ] Tab selection updates the visible active tab state without losing the selected session context.
+  - [x] Creating a tab requests the selected project working directory from the command/service boundary.
+  - [x] Closing a tab with a live terminal process honors confirm-quit before force close.
+  - [x] Tab selection updates the visible active tab state without losing the selected session context.
 - Integration tests:
-  - [ ] A new tab creates exactly one Ghostty surface with the selected project's working directory.
-  - [ ] Resizing or focusing the terminal host propagates the expected lifecycle hooks to the Ghostty adapter.
-  - [ ] Terminal process exit updates the workspace state and leaves the remaining tabs stable.
-  - [ ] The default Nord terminal appearance is applied when a terminal surface is created.
+  - [x] A new tab creates exactly one Ghostty surface with the selected project's working directory.
+  - [x] Resizing or focusing the terminal host propagates the expected lifecycle hooks to the Ghostty adapter.
+  - [x] Terminal process exit updates the workspace state and leaves the remaining tabs stable.
+  - [x] The default Nord terminal appearance is applied when a terminal surface is created.
 - Test coverage target: >=80%
 - All tests must pass
 

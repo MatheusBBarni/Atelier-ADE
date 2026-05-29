@@ -6,6 +6,7 @@ public struct AppDependencyContainer {
     public let persistenceStore: any WorkspacePersistenceStore
     public let restoreCoordinator: RestoreCoordinator
     public let ghosttyAdapter: any GhosttyAdapter
+    public let terminalHostController: TerminalHostController
     public let workspaceCommandService: any WorkspaceCommandService
 
     public init(
@@ -13,12 +14,14 @@ public struct AppDependencyContainer {
         persistenceStore: any WorkspacePersistenceStore,
         restoreCoordinator: RestoreCoordinator,
         ghosttyAdapter: any GhosttyAdapter,
+        terminalHostController: TerminalHostController,
         workspaceCommandService: any WorkspaceCommandService
     ) {
         self.workspaceStore = workspaceStore
         self.persistenceStore = persistenceStore
         self.restoreCoordinator = restoreCoordinator
         self.ghosttyAdapter = ghosttyAdapter
+        self.terminalHostController = terminalHostController
         self.workspaceCommandService = workspaceCommandService
     }
 
@@ -34,11 +37,17 @@ public struct AppDependencyContainer {
             restoreCoordinator: restoreCoordinator,
             terminalSurfaceManager: terminalHostController
         )
+        terminalHostController.onSurfaceExited = { tabID in
+            Task { @MainActor in
+                try? await workspaceCommandService.closeTab(tabID: tabID, force: true)
+            }
+        }
         return AppDependencyContainer(
             workspaceStore: workspaceStore,
             persistenceStore: persistenceStore,
             restoreCoordinator: restoreCoordinator,
             ghosttyAdapter: ghosttyAdapter,
+            terminalHostController: terminalHostController,
             workspaceCommandService: workspaceCommandService
         )
     }

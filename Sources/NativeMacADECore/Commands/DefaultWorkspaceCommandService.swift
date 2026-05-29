@@ -3,7 +3,12 @@ import Foundation
 @MainActor
 public protocol WorkspaceTerminalSurfaceManaging: AnyObject {
     func createSurface(for tab: WorkspaceTab) async throws -> GhosttySurfaceHandle
+    func surface(for tabID: UUID) -> GhosttySurfaceHandle?
     func canClose(surface: GhosttySurfaceHandle) async -> Bool
+    func focus(tabID: UUID)
+    func resize(tabID: UUID, columns: Int, rows: Int)
+    func hasExited(tabID: UUID) async -> Bool
+    func releaseSurface(for tabID: UUID)
 }
 
 @MainActor
@@ -67,7 +72,7 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
         let removedSessionIDs = Set(store.sessions.filter { $0.projectID == id }.map(\.id))
         let removedTabs = store.tabs.filter { removedSessionIDs.contains($0.sessionID) }
         for tab in removedTabs {
-            if let surface = surfacesByTabID[tab.id] {
+            if let surface = surfacesByTabID[tab.id] ?? terminalSurfaceManager.surface(for: tab.id) {
                 guard await terminalSurfaceManager.canClose(surface: surface) else {
                     throw WorkspaceCommandError.closeRejected(tab.id)
                 }
@@ -76,6 +81,9 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
         let removedTabIDs = Set(removedTabs.map(\.id))
 
         try await persist { try await persistenceStore.deleteProject(id: id) }
+        for tabID in removedTabIDs {
+            terminalSurfaceManager.releaseSurface(for: tabID)
+        }
         surfacesByTabID = surfacesByTabID.filter { tabID, _ in !removedTabIDs.contains(tabID) }
         store.removeProject(id: id)
         try await persistSnapshot()
@@ -188,13 +196,15 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
         guard store.tabs.contains(where: { $0.id == tabID }) else {
             throw WorkspaceCommandError.missingTab(tabID)
         }
-        if !force, let surface = surfacesByTabID[tabID] {
+        let surface = surfacesByTabID[tabID] ?? terminalSurfaceManager.surface(for: tabID)
+        if !force, let surface {
             let canClose = await terminalSurfaceManager.canClose(surface: surface)
             guard canClose else { throw WorkspaceCommandError.closeRejected(tabID) }
         }
 
         try await persist { try await persistenceStore.deleteTab(id: tabID) }
         surfacesByTabID[tabID] = nil
+        terminalSurfaceManager.releaseSurface(for: tabID)
         store.removeTab(id: tabID)
         try await persistSnapshot()
     }
