@@ -665,6 +665,50 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
     }
 
     @Test
+    func fileOpenEditSavePersistsMetadataAndWritesSavedContentsToDisk() async throws {
+        let harness = try makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+        let fileURL = try makeTemporaryProjectFile(in: projectPath, relativePath: "Sources/File.swift")
+        let project = try await harness.service.openProject(path: projectPath)
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+
+        let fileTab = try await harness.service.openFileTab(sessionID: session.id, path: fileURL.path)
+        harness.fileBuffers.updateBuffer(tabID: fileTab.id, text: "let saved = true\n")
+        try await harness.service.saveFileTab(tabID: fileTab.id)
+        let persistedTabs = try await harness.persistence.loadTabs()
+        let persistedFileTab = try #require(persistedTabs.first { $0.id == fileTab.id })
+
+        #expect(try String(contentsOf: fileURL, encoding: .utf8) == "let saved = true\n")
+        #expect(harness.fileBuffers.isDirty(tabID: fileTab.id) == false)
+        #expect(persistedFileTab.kind == .file)
+        #expect(persistedFileTab.fileReference?.path == fileURL.standardizedFileURL.resolvingSymlinksInPath().path)
+        #expect(try await harness.persistence.loadRestoreSnapshot()?.tabOrder.contains(fileTab.id) == true)
+    }
+
+    @Test
+    func openingOutsideProjectRejectsThroughSQLiteBackedCommandService() async throws {
+        let harness = try makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+        let outsideProjectPath = try makeTemporaryProjectDirectory(named: "outside")
+        let outsideFile = try makeTemporaryProjectFile(in: outsideProjectPath, relativePath: "Outside.swift")
+        let project = try await harness.service.openProject(path: projectPath)
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let terminalTab = try #require(harness.store.tabs.first)
+        let standardizedOutsideFile = outsideFile.standardizedFileURL.resolvingSymlinksInPath().path
+        let standardizedProjectPath = URL(fileURLWithPath: projectPath, isDirectory: true).standardizedFileURL.resolvingSymlinksInPath().path
+
+        await #expect(throws: WorkspaceCommandError.filePathOutsideProject(
+            filePath: standardizedOutsideFile,
+            projectRoot: standardizedProjectPath
+        )) {
+            _ = try await harness.service.openFileTab(sessionID: session.id, path: outsideFile.path)
+        }
+
+        #expect(try await harness.persistence.loadTabs().map(\.id) == [terminalTab.id])
+        #expect(harness.store.tabs.map(\.id) == [terminalTab.id])
+    }
+
+    @Test
     func closingLastTabRemovesPersistenceAndClearsSelectedTab() async throws {
         let harness = try makeHarness()
         let projectPath = try makeTemporaryProjectDirectory()
@@ -758,11 +802,17 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
         let persistence = try SQLiteWorkspaceMetadataStore(path: databasePath)
         let terminal = FakeIntegrationTerminalSurfaceManager()
         let coordinator = RestoreCoordinator(persistenceStore: persistence)
+        let fileAccess = LocalWorkspaceFileAccess()
+        let fileBuffers = WorkspaceFileBufferController(fileAccess: fileAccess, now: now)
+        let externalEditor = FakeIntegrationExternalEditorOpener()
         let service = DefaultWorkspaceCommandService(
             store: store,
             persistenceStore: persistence,
             restoreCoordinator: coordinator,
             terminalSurfaceManager: terminal,
+            fileAccess: fileAccess,
+            fileBufferManager: fileBuffers,
+            externalEditorOpener: externalEditor,
             now: now
         )
 
@@ -770,6 +820,8 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
             store: store,
             persistence: persistence,
             terminal: terminal,
+            fileBuffers: fileBuffers,
+            externalEditor: externalEditor,
             service: service,
             databasePath: databasePath
         )
@@ -843,6 +895,8 @@ private struct CommandServiceIntegrationHarness {
     let store: WorkspaceStore
     let persistence: SQLiteWorkspaceMetadataStore
     let terminal: FakeIntegrationTerminalSurfaceManager
+    let fileBuffers: WorkspaceFileBufferController
+    let externalEditor: FakeIntegrationExternalEditorOpener
     let service: DefaultWorkspaceCommandService
     let databasePath: String
 }
@@ -893,5 +947,14 @@ private final class FakeIntegrationTerminalSurfaceManager: WorkspaceTerminalSurf
     func releaseSurface(for tabID: UUID) {
         releasedTabIDs.append(tabID)
         surfacesByTabID[tabID] = nil
+    }
+}
+
+@MainActor
+private final class FakeIntegrationExternalEditorOpener: ExternalEditorOpening {
+    private(set) var openedPaths: [String] = []
+
+    func openFile(at path: String) async throws {
+        openedPaths.append(path)
     }
 }

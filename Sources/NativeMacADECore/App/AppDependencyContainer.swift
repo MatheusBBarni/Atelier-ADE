@@ -7,6 +7,9 @@ public struct AppDependencyContainer {
     public let restoreCoordinator: RestoreCoordinator
     public let ghosttyAdapter: any GhosttyAdapter
     public let terminalHostController: TerminalHostController
+    public let fileAccessService: any WorkspaceFileAccessing
+    public let fileBufferController: any WorkspaceFileBufferManaging
+    public let externalEditorOpener: any ExternalEditorOpening
     public let workspaceCommandService: any WorkspaceCommandService
     public let workspaceLogger: WorkspaceLogger
     public let performanceMetrics: PerformanceMetrics
@@ -17,6 +20,9 @@ public struct AppDependencyContainer {
         restoreCoordinator: RestoreCoordinator,
         ghosttyAdapter: any GhosttyAdapter,
         terminalHostController: TerminalHostController,
+        fileAccessService: any WorkspaceFileAccessing,
+        fileBufferController: any WorkspaceFileBufferManaging,
+        externalEditorOpener: any ExternalEditorOpening,
         workspaceCommandService: any WorkspaceCommandService,
         workspaceLogger: WorkspaceLogger,
         performanceMetrics: PerformanceMetrics
@@ -26,6 +32,9 @@ public struct AppDependencyContainer {
         self.restoreCoordinator = restoreCoordinator
         self.ghosttyAdapter = ghosttyAdapter
         self.terminalHostController = terminalHostController
+        self.fileAccessService = fileAccessService
+        self.fileBufferController = fileBufferController
+        self.externalEditorOpener = externalEditorOpener
         self.workspaceCommandService = workspaceCommandService
         self.workspaceLogger = workspaceLogger
         self.performanceMetrics = performanceMetrics
@@ -37,6 +46,9 @@ public struct AppDependencyContainer {
         let restoreCoordinator = RestoreCoordinator(persistenceStore: persistenceStore)
         let ghosttyAdapter = LiveGhosttyAdapter()
         let terminalHostController = TerminalHostController(adapter: ghosttyAdapter)
+        let fileAccessService = LocalWorkspaceFileAccess()
+        let fileBufferController = WorkspaceFileBufferController(fileAccess: fileAccessService)
+        let externalEditorOpener = SystemExternalEditorOpener()
         let workspaceLogger = WorkspaceLogger()
         let performanceMetrics = PerformanceMetrics()
         let workspaceCommandService = DefaultWorkspaceCommandService(
@@ -44,6 +56,9 @@ public struct AppDependencyContainer {
             persistenceStore: persistenceStore,
             restoreCoordinator: restoreCoordinator,
             terminalSurfaceManager: terminalHostController,
+            fileAccess: fileAccessService,
+            fileBufferManager: fileBufferController,
+            externalEditorOpener: externalEditorOpener,
             logger: workspaceLogger,
             metrics: performanceMetrics
         )
@@ -59,6 +74,9 @@ public struct AppDependencyContainer {
             restoreCoordinator: restoreCoordinator,
             ghosttyAdapter: ghosttyAdapter,
             terminalHostController: terminalHostController,
+            fileAccessService: fileAccessService,
+            fileBufferController: fileBufferController,
+            externalEditorOpener: externalEditorOpener,
             workspaceCommandService: workspaceCommandService,
             workspaceLogger: workspaceLogger,
             performanceMetrics: performanceMetrics

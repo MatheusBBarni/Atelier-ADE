@@ -20,7 +20,9 @@ struct DefaultWorkspaceCommandServiceTests {
         #expect(harness.store.projects == [project])
         #expect(harness.store.selectedProjectID == project.id)
         #expect(harness.store.selectedProject == project)
+        #expect(project.bookmarkData?.isEmpty == false)
         #expect(try await harness.persistence.loadProjects() == [project])
+        #expect(try await harness.persistence.loadProjects().first?.bookmarkData?.isEmpty == false)
         #expect(snapshot?.selectedProjectID == project.id)
     }
 
@@ -684,6 +686,121 @@ struct DefaultWorkspaceCommandServiceTests {
     }
 
     @Test
+    func openingFileTabCreatesMetadataAndLoadsInitialBufferWithoutLaunchingTerminalSurface() async throws {
+        let harness = makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+        let fileURL = try makeTemporaryProjectFile(in: projectPath, relativePath: "Sources/File.swift")
+        let project = try await harness.service.openProject(path: projectPath)
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let terminalTab = try #require(harness.store.tabs.first)
+
+        let fileTab = try await harness.service.openFileTab(sessionID: session.id, path: fileURL.path)
+
+        #expect(fileTab.kind == .file)
+        #expect(fileTab.fileReference?.path == fileURL.standardizedFileURL.resolvingSymlinksInPath().path)
+        #expect(fileTab.fileReference?.projectRoot == URL(fileURLWithPath: projectPath, isDirectory: true).standardizedFileURL.resolvingSymlinksInPath().path)
+        #expect(harness.store.tabsForSelectedSession.map(\.id) == [terminalTab.id, fileTab.id])
+        #expect(harness.store.selectedTabID == fileTab.id)
+        #expect(harness.fileBuffers.bufferText(for: fileTab.id) == "let value = 1\n")
+        #expect(harness.fileBuffers.isDirty(tabID: fileTab.id) == false)
+        #expect(harness.terminal.createdTabs.map(\.id) == [terminalTab.id])
+    }
+
+    @Test
+    func openingFileOutsideProjectRejectsWithoutAddingFileTab() async throws {
+        let harness = makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+        let outsideProjectPath = try makeTemporaryProjectDirectory(named: "outside")
+        let outsideFile = try makeTemporaryProjectFile(in: outsideProjectPath, relativePath: "Outside.swift")
+        let project = try await harness.service.openProject(path: projectPath)
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let terminalTab = try #require(harness.store.tabs.first)
+        let standardizedOutsideFile = outsideFile.standardizedFileURL.resolvingSymlinksInPath().path
+        let standardizedProjectPath = URL(fileURLWithPath: projectPath, isDirectory: true).standardizedFileURL.resolvingSymlinksInPath().path
+
+        await #expect(throws: WorkspaceCommandError.filePathOutsideProject(
+            filePath: standardizedOutsideFile,
+            projectRoot: standardizedProjectPath
+        )) {
+            _ = try await harness.service.openFileTab(sessionID: session.id, path: outsideFile.path)
+        }
+
+        #expect(harness.store.tabs.map(\.id) == [terminalTab.id])
+        #expect(try await harness.persistence.loadTabs().map(\.id) == [terminalTab.id])
+    }
+
+    @Test
+    func savingFileTabOutsideProjectRejectsBeforeWriting() async throws {
+        let harness = makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+        let outsideProjectPath = try makeTemporaryProjectDirectory(named: "outside-save")
+        let outsideFile = try makeTemporaryProjectFile(in: outsideProjectPath, relativePath: "Outside.swift")
+        let project = WorkspaceProject(path: projectPath, displayName: "Project")
+        let session = WorkspaceSession(projectID: project.id, title: "Session")
+        let fileTab = WorkspaceTab(
+            sessionID: session.id,
+            kind: .file,
+            workingDirectory: projectPath,
+            fileReference: WorkspaceFileReference(path: outsideFile.path, projectRoot: projectPath),
+            ordinal: 0
+        )
+        let standardizedOutsideFile = outsideFile.standardizedFileURL.resolvingSymlinksInPath().path
+        let standardizedProjectPath = URL(fileURLWithPath: projectPath, isDirectory: true).standardizedFileURL.resolvingSymlinksInPath().path
+        harness.store.upsertProject(project)
+        harness.store.upsertSession(session)
+        harness.store.upsertTab(fileTab)
+
+        await #expect(throws: WorkspaceCommandError.filePathOutsideProject(
+            filePath: standardizedOutsideFile,
+            projectRoot: standardizedProjectPath
+        )) {
+            try await harness.service.saveFileTab(tabID: fileTab.id)
+        }
+
+        #expect(try String(contentsOf: outsideFile, encoding: .utf8) == "let value = 1\n")
+    }
+
+    @Test
+    func saveAndRevertFileTabUseRuntimeBufferAndExplicitDiskWrites() async throws {
+        let harness = makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+        let fileURL = try makeTemporaryProjectFile(in: projectPath, relativePath: "Sources/File.swift")
+        let project = try await harness.service.openProject(path: projectPath)
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let fileTab = try await harness.service.openFileTab(sessionID: session.id, path: fileURL.path)
+
+        harness.fileBuffers.updateBuffer(tabID: fileTab.id, text: "let value = 2\n")
+        #expect(harness.fileBuffers.isDirty(tabID: fileTab.id))
+
+        try await harness.service.saveFileTab(tabID: fileTab.id)
+
+        #expect(try String(contentsOf: fileURL, encoding: .utf8) == "let value = 2\n")
+        #expect(harness.fileBuffers.isDirty(tabID: fileTab.id) == false)
+
+        try "let value = 3\n".write(to: fileURL, atomically: true, encoding: .utf8)
+        harness.fileBuffers.updateBuffer(tabID: fileTab.id, text: "let unsaved = true\n")
+
+        try await harness.service.revertFileTab(tabID: fileTab.id)
+
+        #expect(harness.fileBuffers.bufferText(for: fileTab.id) == "let value = 3\n")
+        #expect(harness.fileBuffers.isDirty(tabID: fileTab.id) == false)
+    }
+
+    @Test
+    func openingFileInExternalEditorUsesDedicatedBoundary() async throws {
+        let harness = makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+        let fileURL = try makeTemporaryProjectFile(in: projectPath, relativePath: "Sources/File.swift")
+        let project = try await harness.service.openProject(path: projectPath)
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let fileTab = try await harness.service.openFileTab(sessionID: session.id, path: fileURL.path)
+
+        try await harness.service.openFileInExternalEditor(tabID: fileTab.id)
+
+        #expect(harness.externalEditor.openedPaths == [fileURL.standardizedFileURL.resolvingSymlinksInPath().path])
+    }
+
+    @Test
     func creatingTabReleasesSurfaceWhenPersistenceFails() async throws {
         let project = WorkspaceProject(path: "/tmp/native-mac-ade-persist-fail", displayName: "persist-fail")
         let session = WorkspaceSession(projectID: project.id, title: "Persistence failure")
@@ -989,11 +1106,17 @@ struct DefaultWorkspaceCommandServiceTests {
         let persistence = InMemoryWorkspacePersistenceStore()
         let terminal = FakeTerminalSurfaceManager()
         let coordinator = RestoreCoordinator(persistenceStore: persistence)
+        let fileAccess = LocalWorkspaceFileAccess()
+        let fileBuffers = WorkspaceFileBufferController(fileAccess: fileAccess, now: now)
+        let externalEditor = FakeExternalEditorOpener()
         let service = DefaultWorkspaceCommandService(
             store: store,
             persistenceStore: persistence,
             restoreCoordinator: coordinator,
             terminalSurfaceManager: terminal,
+            fileAccess: fileAccess,
+            fileBufferManager: fileBuffers,
+            externalEditorOpener: externalEditor,
             now: now
         )
 
@@ -1001,6 +1124,8 @@ struct DefaultWorkspaceCommandServiceTests {
             store: store,
             persistence: persistence,
             terminal: terminal,
+            fileBuffers: fileBuffers,
+            externalEditor: externalEditor,
             service: service
         )
     }
@@ -1042,6 +1167,8 @@ private struct CommandServiceHarness<Persistence: WorkspacePersistenceStore> {
     let store: WorkspaceStore
     let persistence: Persistence
     let terminal: FakeTerminalSurfaceManager
+    let fileBuffers: WorkspaceFileBufferController
+    let externalEditor: FakeExternalEditorOpener
     let service: DefaultWorkspaceCommandService
 }
 
@@ -1091,6 +1218,17 @@ private final class FakeTerminalSurfaceManager: WorkspaceTerminalSurfaceManaging
     func releaseSurface(for tabID: UUID) {
         releasedTabIDs.append(tabID)
         surfacesByTabID[tabID] = nil
+    }
+}
+
+@MainActor
+private final class FakeExternalEditorOpener: ExternalEditorOpening {
+    private(set) var openedPaths: [String] = []
+    var openError: (any Error)?
+
+    func openFile(at path: String) async throws {
+        if let openError { throw openError }
+        openedPaths.append(path)
     }
 }
 

@@ -100,6 +100,38 @@ struct RestoreCoordinatorIntegrationTests {
     }
 
     @Test
+    func relaunchRestoresFileTabsFromDiskButNotUnsavedRuntimeBufferText() async throws {
+        let harness = try makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+        let fileURL = try makeTemporaryProjectFile(in: projectPath, relativePath: "Sources/App.swift")
+        let project = try await harness.service.openProject(path: projectPath)
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let fileTab = try await harness.service.openFileTab(sessionID: session.id, path: fileURL.path)
+        harness.fileBuffers.updateBuffer(tabID: fileTab.id, text: "let unsaved = true\n")
+
+        let restoredStore = WorkspaceStore()
+        let restoredTerminal = RestoreIntegrationTerminalSurfaceManager()
+        let restoredFileAccess = LocalWorkspaceFileAccess()
+        let restoredFileBuffers = WorkspaceFileBufferController(fileAccess: restoredFileAccess)
+        let restoredService = DefaultWorkspaceCommandService(
+            store: restoredStore,
+            persistenceStore: harness.persistence,
+            restoreCoordinator: RestoreCoordinator(persistenceStore: harness.persistence),
+            terminalSurfaceManager: restoredTerminal,
+            fileAccess: restoredFileAccess,
+            fileBufferManager: restoredFileBuffers,
+            externalEditorOpener: RestoreIntegrationExternalEditorOpener()
+        )
+
+        try await restoredService.restoreWorkspace()
+
+        #expect(restoredStore.tabsForSelectedSession.map(\.id).contains(fileTab.id))
+        #expect(restoredFileBuffers.bufferText(for: fileTab.id) == "let restored = true\n")
+        #expect(restoredFileBuffers.isDirty(tabID: fileTab.id) == false)
+        #expect(try String(contentsOf: fileURL, encoding: .utf8) == "let restored = true\n")
+    }
+
+    @Test
     func missingProjectPathRestoresRemainingContextAndReportsRecovery() async throws {
         let harness = try makeHarness()
         let validPath = try makeTemporaryProjectDirectory()
@@ -259,17 +291,25 @@ struct RestoreCoordinatorIntegrationTests {
         let persistence = try SQLiteWorkspaceMetadataStore(path: databasePath)
         let terminal = RestoreIntegrationTerminalSurfaceManager()
         let coordinator = RestoreCoordinator(persistenceStore: persistence)
+        let fileAccess = LocalWorkspaceFileAccess()
+        let fileBuffers = WorkspaceFileBufferController(fileAccess: fileAccess)
+        let externalEditor = RestoreIntegrationExternalEditorOpener()
         let service = DefaultWorkspaceCommandService(
             store: store,
             persistenceStore: persistence,
             restoreCoordinator: coordinator,
-            terminalSurfaceManager: terminal
+            terminalSurfaceManager: terminal,
+            fileAccess: fileAccess,
+            fileBufferManager: fileBuffers,
+            externalEditorOpener: externalEditor
         )
         return RestoreIntegrationHarness(
             databasePath: databasePath,
             store: store,
             persistence: persistence,
             terminal: terminal,
+            fileBuffers: fileBuffers,
+            externalEditor: externalEditor,
             service: service
         )
     }
@@ -317,6 +357,8 @@ private struct RestoreIntegrationHarness {
     let store: WorkspaceStore
     let persistence: SQLiteWorkspaceMetadataStore
     let terminal: RestoreIntegrationTerminalSurfaceManager
+    let fileBuffers: WorkspaceFileBufferController
+    let externalEditor: RestoreIntegrationExternalEditorOpener
     let service: DefaultWorkspaceCommandService
 }
 
@@ -340,4 +382,9 @@ private final class RestoreIntegrationTerminalSurfaceManager: WorkspaceTerminalS
     func resize(tabID: UUID, columns: Int, rows: Int) {}
     func hasExited(tabID: UUID) async -> Bool { false }
     func releaseSurface(for tabID: UUID) { surfacesByTabID[tabID] = nil }
+}
+
+@MainActor
+private final class RestoreIntegrationExternalEditorOpener: ExternalEditorOpening {
+    func openFile(at path: String) async throws {}
 }

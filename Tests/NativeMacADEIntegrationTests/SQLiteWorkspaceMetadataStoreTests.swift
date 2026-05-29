@@ -204,6 +204,41 @@ struct SQLiteWorkspaceMetadataStoreTests {
     }
 
     @Test
+    func projectBookmarkDataPersistsAlongsideFileTabMetadata() async throws {
+        let path = temporaryDatabasePath()
+        let store = try SQLiteWorkspaceMetadataStore(path: path)
+        let bookmarkData = Data([9, 8, 7, 6])
+        let project = WorkspaceProject(
+            path: "/Users/example/bookmarked",
+            bookmarkData: bookmarkData,
+            displayName: "bookmarked"
+        )
+        let session = WorkspaceSession(projectID: project.id, title: "Bookmarked")
+        let fileReference = WorkspaceFileReference(
+            path: "/Users/example/bookmarked/Sources/App.swift",
+            projectRoot: project.path
+        )
+        let fileTab = WorkspaceTab(
+            sessionID: session.id,
+            kind: .file,
+            workingDirectory: project.path,
+            fileReference: fileReference,
+            ordinal: 0
+        )
+
+        try await store.save(project: project)
+        try await store.save(session: session)
+        try await store.save(tab: fileTab)
+
+        let loadedProject = try #require(try await store.loadProjects().first)
+        let loadedFileTab = try #require(try await store.loadTabs().first)
+
+        #expect(loadedProject.bookmarkData == bookmarkData)
+        #expect(loadedFileTab.kind == .file)
+        #expect(loadedFileTab.fileReference == fileReference)
+    }
+
+    @Test
     func versionOneDatabaseUpgradesToVersionTwoWithoutMutatingWorkspaceMetadata() async throws {
         let path = temporaryDatabasePath()
         let fixture = try createVersionOneDatabase(path: path)

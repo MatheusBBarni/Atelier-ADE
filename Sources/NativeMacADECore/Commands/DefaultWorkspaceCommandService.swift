@@ -17,6 +17,9 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
     private let persistenceStore: any WorkspacePersistenceStore
     private let restoreCoordinator: RestoreCoordinator
     private let terminalSurfaceManager: any WorkspaceTerminalSurfaceManaging
+    private let fileAccess: any WorkspaceFileAccessing
+    private let fileBufferManager: any WorkspaceFileBufferManaging
+    private let externalEditorOpener: any ExternalEditorOpening
     private let fileManager: FileManager
     public let logger: WorkspaceLogger
     public let metrics: PerformanceMetrics
@@ -28,15 +31,22 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
         persistenceStore: any WorkspacePersistenceStore,
         restoreCoordinator: RestoreCoordinator,
         terminalSurfaceManager: any WorkspaceTerminalSurfaceManaging,
+        fileAccess: (any WorkspaceFileAccessing)? = nil,
+        fileBufferManager: (any WorkspaceFileBufferManaging)? = nil,
+        externalEditorOpener: (any ExternalEditorOpening)? = nil,
         fileManager: FileManager = .default,
         logger: WorkspaceLogger = WorkspaceLogger(),
         metrics: PerformanceMetrics = PerformanceMetrics(),
         now: @escaping @MainActor () -> Date = Date.init
     ) {
+        let resolvedFileAccess = fileAccess ?? LocalWorkspaceFileAccess(fileManager: fileManager)
         self.store = store
         self.persistenceStore = persistenceStore
         self.restoreCoordinator = restoreCoordinator
         self.terminalSurfaceManager = terminalSurfaceManager
+        self.fileAccess = resolvedFileAccess
+        self.fileBufferManager = fileBufferManager ?? WorkspaceFileBufferController(fileAccess: resolvedFileAccess, now: now)
+        self.externalEditorOpener = externalEditorOpener ?? SystemExternalEditorOpener()
         self.fileManager = fileManager
         self.logger = logger
         self.metrics = metrics
@@ -55,15 +65,22 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
         let reusedProject: Bool
         if var existing = store.project(matchingPath: standardizedPath) {
             existing.lastOpenedAt = timestamp
+            if existing.bookmarkData == nil {
+                existing.bookmarkData = projectBookmarkData(for: standardizedPath)
+            }
             project = existing
             reusedProject = true
         } else if var persistedProject = try await persistedProject(matchingPath: standardizedPath) {
             persistedProject.lastOpenedAt = timestamp
+            if persistedProject.bookmarkData == nil {
+                persistedProject.bookmarkData = projectBookmarkData(for: standardizedPath)
+            }
             project = persistedProject
             reusedProject = true
         } else {
             project = WorkspaceProject(
                 path: standardizedPath,
+                bookmarkData: projectBookmarkData(for: standardizedPath),
                 displayName: URL(fileURLWithPath: standardizedPath).lastPathComponent,
                 createdAt: timestamp,
                 lastOpenedAt: timestamp,
@@ -108,6 +125,9 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
         let removedTerminalTabIDs = Set(removedTerminalTabs.map(\.id))
 
         try await persist { try await persistenceStore.deleteProject(id: id) }
+        for tab in removedTabs where tab.kind == .file {
+            fileBufferManager.discardBuffer(tabID: tab.id)
+        }
         for tab in removedTerminalTabs {
             releaseTerminalSurface(for: tab)
         }
@@ -128,8 +148,12 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
         }
 
         let removedTerminalTabs = store.terminalTabs(in: id)
+        let removedFileTabs = store.fileTabs(in: id)
 
         try await persist { try await persistenceStore.deleteSession(id: id) }
+        for tab in removedFileTabs {
+            fileBufferManager.discardBuffer(tabID: tab.id)
+        }
         for tab in removedTerminalTabs {
             releaseTerminalSurface(for: tab)
         }
@@ -415,14 +439,18 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
             throw WorkspaceCommandError.missingProject(session.projectID)
         }
 
-        let standardizedPath = URL(fileURLWithPath: path).standardizedFileURL.path
-        let standardizedProjectPath = URL(fileURLWithPath: project.path).standardizedFileURL.path
-        try validateOpenFilePath(standardizedPath, projectRoot: standardizedProjectPath, originalPath: path)
+        let fileReference: WorkspaceFileReference
+        do {
+            fileReference = try await fileAccess.validatedFileReference(path: path, projectRoot: project.path)
+        } catch let error as WorkspaceFileAccessError {
+            throw commandError(for: error)
+        }
 
         if let existingTab = store.fileTabs(in: session.id).first(where: { tab in
-            guard let fileReference = tab.fileReference else { return false }
-            return URL(fileURLWithPath: fileReference.path).standardizedFileURL.path == standardizedPath
+            guard let existingReference = tab.fileReference else { return false }
+            return existingReference.path == fileReference.path
         }) {
+            try await loadFileBuffer(for: existingTab)
             try await activateSelection { $0.selectTab(id: existingTab.id) }
             return store.tab(id: existingTab.id) ?? existingTab
         }
@@ -431,16 +459,14 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
         let tab = WorkspaceTab(
             sessionID: session.id,
             kind: .file,
-            workingDirectory: standardizedProjectPath,
-            fileReference: WorkspaceFileReference(
-                path: standardizedPath,
-                projectRoot: standardizedProjectPath
-            ),
+            workingDirectory: fileReference.projectRoot,
+            fileReference: fileReference,
             ordinal: store.nextTabOrdinal(for: session.id),
             createdAt: timestamp,
             lastActivatedAt: timestamp
         )
 
+        try await loadFileBuffer(for: tab)
         try await persist { try await persistenceStore.save(tab: tab) }
         store.upsertTab(tab)
         try await persistSnapshot()
@@ -448,9 +474,65 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
             "project_id": project.id.uuidString,
             "session_id": session.id.uuidString,
             "tab_id": tab.id.uuidString,
-            "hashed_path": WorkspacePrivacy.hashIdentifier(standardizedPath)
+            "hashed_path": WorkspacePrivacy.hashIdentifier(fileReference.path)
         ])
         return tab
+    }
+
+    public func saveFileTab(tabID: UUID) async throws {
+        let tab = try requireFileTab(id: tabID)
+        try await validateFileAccess(for: tab)
+        if fileBufferManager.buffer(for: tabID) == nil {
+            try await loadFileBuffer(for: tab)
+        }
+        do {
+            try await fileBufferManager.saveBuffer(tabID: tabID)
+        } catch let error as WorkspaceFileAccessError {
+            throw commandError(for: error)
+        } catch let error as WorkspaceFileBufferError {
+            throw commandError(for: error)
+        }
+        logger.emit("file_tab_saved", fields: [
+            "tab_id": tab.id.uuidString,
+            "session_id": tab.sessionID.uuidString,
+            "hashed_path": WorkspacePrivacy.hashIdentifier(tab.fileReference?.path ?? tab.workingDirectory)
+        ])
+    }
+
+    public func revertFileTab(tabID: UUID) async throws {
+        let tab = try requireFileTab(id: tabID)
+        try await validateFileAccess(for: tab)
+        do {
+            try await fileBufferManager.revertBuffer(for: tab)
+        } catch let error as WorkspaceFileAccessError {
+            throw commandError(for: error)
+        } catch let error as WorkspaceFileBufferError {
+            throw commandError(for: error)
+        }
+        logger.emit("file_tab_reverted", fields: [
+            "tab_id": tab.id.uuidString,
+            "session_id": tab.sessionID.uuidString,
+            "hashed_path": WorkspacePrivacy.hashIdentifier(tab.fileReference?.path ?? tab.workingDirectory)
+        ])
+    }
+
+    public func openFileInExternalEditor(tabID: UUID) async throws {
+        let tab = try requireFileTab(id: tabID)
+        let fileReference = try await validateFileAccess(for: tab)
+        do {
+            try await externalEditorOpener.openFile(at: fileReference.path)
+        } catch let error as WorkspaceFileAccessError {
+            throw commandError(for: error)
+        } catch let error as ExternalEditorError {
+            throw WorkspaceCommandError.externalEditorFailed(String(describing: error))
+        } catch {
+            throw WorkspaceCommandError.externalEditorFailed(String(describing: error))
+        }
+        logger.emit("external_editor_opened", fields: [
+            "tab_id": tab.id.uuidString,
+            "session_id": tab.sessionID.uuidString,
+            "hashed_path": WorkspacePrivacy.hashIdentifier(fileReference.path)
+        ])
     }
 
     @discardableResult
@@ -501,6 +583,21 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
                 ))
             }
         }
+        for tab in store.tabs where tab.kind == .file {
+            do {
+                try await loadFileBuffer(for: tab)
+            } catch {
+                restoreResult.diagnostics.append(RestoreDiagnostic(
+                    severity: .warning,
+                    message: "File buffer for restored tab \(tab.id.uuidString) could not be loaded: \(String(describing: error))"
+                ))
+                logger.emit("file_tab_restore_failed", fields: [
+                    "tab_id": tab.id.uuidString,
+                    "session_id": tab.sessionID.uuidString,
+                    "reason": String(describing: error)
+                ])
+            }
+        }
         for skippedProject in restoreResult.skippedProjects {
             logger.emit("restore_skipped_project", fields: [
                 "project_id": skippedProject.id.uuidString,
@@ -539,6 +636,9 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
         }
 
         try await persist { try await persistenceStore.deleteTab(id: tabID) }
+        if tab.kind == .file {
+            fileBufferManager.discardBuffer(tabID: tabID)
+        }
         releaseTerminalSurface(for: tab)
         store.removeTab(id: tabID)
         try await persistSnapshot()
@@ -833,31 +933,6 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
         return fileManager.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue
     }
 
-    private func validateOpenFilePath(_ path: String, projectRoot: String, originalPath: String) throws {
-        guard (originalPath as NSString).isAbsolutePath else {
-            throw WorkspaceCommandError.invalidFilePath(originalPath)
-        }
-        guard isPath(path, containedBy: projectRoot) else {
-            throw WorkspaceCommandError.filePathOutsideProject(filePath: path, projectRoot: projectRoot)
-        }
-
-        var isDirectory: ObjCBool = false
-        guard fileManager.fileExists(atPath: path, isDirectory: &isDirectory),
-              !isDirectory.boolValue,
-              fileManager.isReadableFile(atPath: path)
-        else {
-            throw WorkspaceCommandError.invalidFilePath(originalPath)
-        }
-    }
-
-    private func isPath(_ path: String, containedBy projectRoot: String) -> Bool {
-        let standardizedPath = URL(fileURLWithPath: path).standardizedFileURL.path
-        let standardizedRoot = URL(fileURLWithPath: projectRoot, isDirectory: true).standardizedFileURL.path
-        guard standardizedPath != standardizedRoot else { return false }
-        let rootPrefix = standardizedRoot.hasSuffix("/") ? standardizedRoot : "\(standardizedRoot)/"
-        return standardizedPath.hasPrefix(rootPrefix)
-    }
-
     private func requireProject(id: UUID) throws -> WorkspaceProject {
         guard let project = store.projects.first(where: { $0.id == id }) else {
             throw WorkspaceCommandError.missingProject(id)
@@ -871,6 +946,81 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
         return persistedProjects.first {
             URL(fileURLWithPath: $0.path).standardizedFileURL.path == standardizedPath
         }
+    }
+
+    private func requireFileTab(id tabID: UUID) throws -> WorkspaceTab {
+        guard let tab = store.tab(id: tabID) else {
+            throw WorkspaceCommandError.missingTab(tabID)
+        }
+        guard tab.kind == .file else {
+            throw WorkspaceCommandError.invalidFileTab(tabID, "Terminal tabs do not support file commands")
+        }
+        guard tab.fileReference != nil else {
+            throw WorkspaceCommandError.invalidFileTab(tabID, "File tab is missing file metadata")
+        }
+        return tab
+    }
+
+    @discardableResult
+    private func validateFileAccess(for tab: WorkspaceTab) async throws -> WorkspaceFileReference {
+        guard let fileReference = tab.fileReference else {
+            throw WorkspaceCommandError.invalidFileTab(tab.id, "File tab is missing file metadata")
+        }
+        do {
+            return try await fileAccess.validatedFileReference(
+                path: fileReference.path,
+                projectRoot: fileReference.projectRoot
+            )
+        } catch let error as WorkspaceFileAccessError {
+            throw commandError(for: error)
+        }
+    }
+
+    private func loadFileBuffer(for tab: WorkspaceTab) async throws {
+        do {
+            try await fileBufferManager.loadBuffer(for: tab)
+        } catch let error as WorkspaceFileAccessError {
+            throw commandError(for: error)
+        } catch let error as WorkspaceFileBufferError {
+            throw commandError(for: error)
+        }
+    }
+
+    private func commandError(for error: WorkspaceFileAccessError) -> WorkspaceCommandError {
+        switch error {
+        case .invalidProjectRoot(let path):
+            return .invalidProjectPath(path)
+        case .invalidFilePath(let path), .unreadableFile(let path):
+            return .invalidFilePath(path)
+        case .filePathOutsideProject(let filePath, let projectRoot):
+            return .filePathOutsideProject(filePath: filePath, projectRoot: projectRoot)
+        case .unwritableFile, .unsupportedFile, .enumerationFailed, .writeFailed:
+            return .fileAccessRejected(error)
+        }
+    }
+
+    private func commandError(for error: WorkspaceFileBufferError) -> WorkspaceCommandError {
+        switch error {
+        case .invalidFileTab(let tabID, let reason):
+            return .invalidFileTab(tabID, reason)
+        case .missingBuffer(let tabID):
+            return .fileBufferUnavailable(tabID)
+        }
+    }
+
+    private func projectBookmarkData(for path: String) -> Data? {
+        let url = URL(fileURLWithPath: path, isDirectory: true)
+        #if os(macOS)
+        if let data = try? url.bookmarkData(options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil),
+           !data.isEmpty {
+            return data
+        }
+        #endif
+        if let data = try? url.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil),
+           !data.isEmpty {
+            return data
+        }
+        return nil
     }
 
     private func activateSelection(_ select: (WorkspaceStore) -> Void) async throws {

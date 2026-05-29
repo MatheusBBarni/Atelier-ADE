@@ -4,7 +4,10 @@ public enum WorkspaceCommandError: Error, Equatable, Sendable {
     case invalidProjectPath(String)
     case invalidFilePath(String)
     case filePathOutsideProject(filePath: String, projectRoot: String)
+    case fileAccessRejected(WorkspaceFileAccessError)
+    case fileBufferUnavailable(UUID)
     case invalidFileTab(UUID, String)
+    case externalEditorFailed(String)
     case invalidSessionTitle(String)
     case missingProject(UUID)
     case missingSession(UUID)
@@ -46,6 +49,9 @@ public protocol WorkspaceCommandService: AppShellStartupServicing {
     func renameSession(sessionID: UUID, title: String) async throws
     func createTab(sessionID: UUID) async throws -> WorkspaceTab
     func openFileTab(sessionID: UUID, path: String) async throws -> WorkspaceTab
+    func saveFileTab(tabID: UUID) async throws
+    func revertFileTab(tabID: UUID) async throws
+    func openFileInExternalEditor(tabID: UUID) async throws
     @discardableResult
     func restoreWorkspace() async throws -> RestoreWorkspaceResult
     func closeTab(tabID: UUID, force: Bool) async throws
