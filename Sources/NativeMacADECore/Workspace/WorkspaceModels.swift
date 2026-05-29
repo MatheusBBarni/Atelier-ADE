@@ -1,6 +1,6 @@
 import Foundation
 
-public struct WorkspaceProject: Identifiable, Equatable, Sendable {
+public struct Project: Identifiable, Equatable, Sendable {
     public let id: UUID
     public var path: String
     public var bookmarkData: Data?
@@ -28,7 +28,9 @@ public struct WorkspaceProject: Identifiable, Equatable, Sendable {
     }
 }
 
-public struct WorkspaceSession: Identifiable, Equatable, Sendable {
+public typealias WorkspaceProject = Project
+
+public struct Session: Identifiable, Equatable, Sendable {
     public let id: UUID
     public var projectID: UUID
     public var title: String
@@ -40,7 +42,7 @@ public struct WorkspaceSession: Identifiable, Equatable, Sendable {
     public init(
         id: UUID = UUID(),
         projectID: UUID,
-        title: String,
+        title: String? = nil,
         isUserNamed: Bool = false,
         shortcutID: UUID? = nil,
         createdAt: Date = Date(),
@@ -48,15 +50,30 @@ public struct WorkspaceSession: Identifiable, Equatable, Sendable {
     ) {
         self.id = id
         self.projectID = projectID
-        self.title = title
+        self.title = title ?? Self.defaultTitle(for: createdAt)
         self.isUserNamed = isUserNamed
         self.shortcutID = shortcutID
         self.createdAt = createdAt
         self.lastActivatedAt = lastActivatedAt
     }
+
+    public mutating func rename(to title: String) {
+        self.title = title
+        self.isUserNamed = true
+    }
+
+    public static func defaultTitle(for date: Date, timeZone: TimeZone = .current) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MM-dd HH:mm"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = timeZone
+        return formatter.string(from: date)
+    }
 }
 
-public struct WorkspaceTab: Identifiable, Equatable, Sendable {
+public typealias WorkspaceSession = Session
+
+public struct Tab: Identifiable, Equatable, Sendable {
     public let id: UUID
     public var sessionID: UUID
     public var workingDirectory: String
@@ -87,12 +104,56 @@ public struct WorkspaceTab: Identifiable, Equatable, Sendable {
     }
 }
 
+public typealias WorkspaceTab = Tab
+
+public struct SessionShortcut: Identifiable, Equatable, Sendable {
+    public let id: UUID
+    public var label: String
+    public var launchCommand: String
+    public var launchArgumentsJSON: String?
+    public var secretRef: String?
+    public var isBuiltIn: Bool
+
+    public init(
+        id: UUID = UUID(),
+        label: String,
+        launchCommand: String,
+        launchArgumentsJSON: String? = nil,
+        secretRef: String? = nil,
+        isBuiltIn: Bool = false
+    ) {
+        self.id = id
+        self.label = label
+        self.launchCommand = launchCommand
+        self.launchArgumentsJSON = launchArgumentsJSON
+        self.secretRef = secretRef
+        self.isBuiltIn = isBuiltIn
+    }
+}
+
 public struct RestoreSnapshot: Equatable, Sendable {
+    public var id: Int
     public var selectedProjectID: UUID?
     public var selectedSessionID: UUID?
     public var selectedTabID: UUID?
-    public var openTabIDs: [UUID]
-    public var capturedAt: Date
+    public var tabOrder: [UUID]
+    public var updatedAt: Date
+
+    public init(
+        id: Int = 1,
+        selectedProjectID: UUID?,
+        selectedSessionID: UUID?,
+        selectedTabID: UUID?,
+        tabOrder: [UUID],
+        updatedAt: Date = Date()
+    ) {
+        self.id = id
+        self.selectedProjectID = selectedProjectID
+        self.selectedSessionID = selectedSessionID
+        self.selectedTabID = selectedTabID
+        self.tabOrder = tabOrder
+        self.updatedAt = updatedAt
+    }
 
     public init(
         selectedProjectID: UUID?,
@@ -101,10 +162,43 @@ public struct RestoreSnapshot: Equatable, Sendable {
         openTabIDs: [UUID],
         capturedAt: Date = Date()
     ) {
-        self.selectedProjectID = selectedProjectID
-        self.selectedSessionID = selectedSessionID
-        self.selectedTabID = selectedTabID
-        self.openTabIDs = openTabIDs
-        self.capturedAt = capturedAt
+        self.init(
+            selectedProjectID: selectedProjectID,
+            selectedSessionID: selectedSessionID,
+            selectedTabID: selectedTabID,
+            tabOrder: openTabIDs,
+            updatedAt: capturedAt
+        )
     }
+
+    public var openTabIDs: [UUID] {
+        get { tabOrder }
+        set { tabOrder = newValue }
+    }
+
+    public var capturedAt: Date {
+        get { updatedAt }
+        set { updatedAt = newValue }
+    }
+
+    public var tabOrderJSON: String {
+        get throws {
+            let data = try JSONEncoder().encode(tabOrder.map(\.uuidString))
+            return String(decoding: data, as: UTF8.self)
+        }
+    }
+
+    public static func decodeTabOrderJSON(_ json: String) throws -> [UUID] {
+        let strings = try JSONDecoder().decode([String].self, from: Data(json.utf8))
+        return try strings.map { value in
+            guard let uuid = UUID(uuidString: value) else {
+                throw RestoreSnapshotSerializationError.invalidTabID(value)
+            }
+            return uuid
+        }
+    }
+}
+
+public enum RestoreSnapshotSerializationError: Error, Equatable, Sendable {
+    case invalidTabID(String)
 }
