@@ -113,6 +113,10 @@ public actor SQLiteWorkspaceMetadataStore: WorkspacePersistenceStore {
     }
 
     public func save(project: WorkspaceProject) async throws {
+        try saveProject(project)
+    }
+
+    private func saveProject(_ project: WorkspaceProject) throws {
         try execute("""
             INSERT INTO projects (id, path, bookmark_data, display_name, created_at, last_opened_at, sort_index)
             VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -135,6 +139,10 @@ public actor SQLiteWorkspaceMetadataStore: WorkspacePersistenceStore {
     }
 
     public func save(session: WorkspaceSession) async throws {
+        try saveSession(session)
+    }
+
+    private func saveSession(_ session: WorkspaceSession) throws {
         try execute("""
             INSERT INTO sessions (id, project_id, title, is_user_named, shortcut_id, created_at, last_activated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -157,6 +165,10 @@ public actor SQLiteWorkspaceMetadataStore: WorkspacePersistenceStore {
     }
 
     public func save(tab: WorkspaceTab) async throws {
+        try saveTab(tab)
+    }
+
+    private func saveTab(_ tab: WorkspaceTab) throws {
         try execute("""
             INSERT INTO tabs (id, session_id, working_directory, launch_command, launch_arguments_json, ordinal, created_at, last_activated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -183,8 +195,27 @@ public actor SQLiteWorkspaceMetadataStore: WorkspacePersistenceStore {
     public func save(session: WorkspaceSession, firstTab: WorkspaceTab) async throws {
         do {
             try executeRaw("BEGIN IMMEDIATE TRANSACTION")
-            try await save(session: session)
-            try await save(tab: firstTab)
+            try saveSession(session)
+            try saveTab(firstTab)
+            try executeRaw("COMMIT")
+        } catch {
+            try? executeRaw("ROLLBACK")
+            throw error
+        }
+    }
+
+    public func saveActivation(
+        project: WorkspaceProject?,
+        session: WorkspaceSession?,
+        tab: WorkspaceTab?,
+        snapshot: RestoreSnapshot
+    ) async throws {
+        do {
+            try executeRaw("BEGIN IMMEDIATE TRANSACTION")
+            if let project { try saveProject(project) }
+            if let session { try saveSession(session) }
+            if let tab { try saveTab(tab) }
+            try saveSnapshot(snapshot)
             try executeRaw("COMMIT")
         } catch {
             try? executeRaw("ROLLBACK")
@@ -213,6 +244,10 @@ public actor SQLiteWorkspaceMetadataStore: WorkspacePersistenceStore {
     }
 
     public func save(snapshot: RestoreSnapshot) async throws {
+        try saveSnapshot(snapshot)
+    }
+
+    private func saveSnapshot(_ snapshot: RestoreSnapshot) throws {
         let tabOrderJSON = try snapshot.tabOrderJSON
         try execute("""
             INSERT INTO restore_snapshot (id, selected_project_id, selected_session_id, selected_tab_id, tab_order_json, updated_at)

@@ -153,6 +153,104 @@ struct SQLiteWorkspaceMetadataStoreTests {
         #expect(try inspectUserTableNames(path: path).isDisjoint(with: ["scrollback", "pty_sessions", "checkpoints", "workspaces"]))
     }
 
+    @Test
+    func activationSavePersistsRecencyAndSnapshotAtomically() async throws {
+        let path = temporaryDatabasePath()
+        let store = try SQLiteWorkspaceMetadataStore(path: path)
+        let activatedAt = Date(timeIntervalSince1970: 200)
+        var project = WorkspaceProject(
+            path: "/Users/example/activation",
+            displayName: "activation",
+            lastOpenedAt: Date(timeIntervalSince1970: 20)
+        )
+        var session = WorkspaceSession(
+            projectID: project.id,
+            title: "Activation",
+            lastActivatedAt: Date(timeIntervalSince1970: 30)
+        )
+        var tab = WorkspaceTab(
+            sessionID: session.id,
+            workingDirectory: project.path,
+            ordinal: 0,
+            lastActivatedAt: Date(timeIntervalSince1970: 40)
+        )
+        try await store.save(project: project)
+        try await store.save(session: session)
+        try await store.save(tab: tab)
+
+        project.lastOpenedAt = activatedAt
+        session.lastActivatedAt = activatedAt
+        tab.lastActivatedAt = activatedAt
+        try await store.saveActivation(
+            project: project,
+            session: session,
+            tab: tab,
+            snapshot: RestoreSnapshot(
+                selectedProjectID: project.id,
+                selectedSessionID: session.id,
+                selectedTabID: tab.id,
+                tabOrder: [tab.id],
+                updatedAt: activatedAt
+            )
+        )
+
+        #expect(try await store.loadProjects().first?.lastOpenedAt == activatedAt)
+        #expect(try await store.loadSessions().first?.lastActivatedAt == activatedAt)
+        #expect(try await store.loadTabs().first?.lastActivatedAt == activatedAt)
+        #expect(try await store.loadRestoreSnapshot()?.selectedTabID == tab.id)
+        #expect(try await store.loadRestoreSnapshot()?.updatedAt == activatedAt)
+    }
+
+    @Test
+    func activationSaveRollsBackWhenMidTransactionWriteFails() async throws {
+        let path = temporaryDatabasePath()
+        let store = try SQLiteWorkspaceMetadataStore(path: path)
+        let originalProject = WorkspaceProject(
+            path: "/Users/example/rollback",
+            displayName: "rollback",
+            createdAt: Date(timeIntervalSince1970: 10),
+            lastOpenedAt: Date(timeIntervalSince1970: 20)
+        )
+        let originalSession = WorkspaceSession(
+            projectID: originalProject.id,
+            title: "Rollback",
+            createdAt: Date(timeIntervalSince1970: 25),
+            lastActivatedAt: Date(timeIntervalSince1970: 30)
+        )
+        try await store.save(project: originalProject)
+        try await store.save(session: originalSession)
+
+        var updatedProject = originalProject
+        var updatedSession = originalSession
+        updatedProject.lastOpenedAt = Date(timeIntervalSince1970: 200)
+        updatedSession.lastActivatedAt = Date(timeIntervalSince1970: 200)
+        let invalidTab = WorkspaceTab(
+            sessionID: UUID(),
+            workingDirectory: originalProject.path,
+            ordinal: 0,
+            lastActivatedAt: Date(timeIntervalSince1970: 200)
+        )
+
+        await #expect(throws: SQLiteWorkspaceMetadataStoreError.self) {
+            try await store.saveActivation(
+                project: updatedProject,
+                session: updatedSession,
+                tab: invalidTab,
+                snapshot: RestoreSnapshot(
+                    selectedProjectID: updatedProject.id,
+                    selectedSessionID: updatedSession.id,
+                    selectedTabID: invalidTab.id,
+                    tabOrder: [invalidTab.id]
+                )
+            )
+        }
+
+        #expect(try await store.loadProjects() == [originalProject])
+        #expect(try await store.loadSessions() == [originalSession])
+        #expect(try await store.loadTabs().isEmpty)
+        #expect(try await store.loadRestoreSnapshot() == nil)
+    }
+
     private func temporaryDatabasePath() -> String {
         URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("native-mac-ade-\(UUID().uuidString).sqlite")

@@ -116,18 +116,24 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
     }
 
     public func selectProject(id: UUID?) async throws {
-        store.selectProject(id: id)
-        try await persistSnapshot()
+        if let id, !store.projects.contains(where: { $0.id == id }) {
+            throw WorkspaceCommandError.missingProject(id)
+        }
+        try await activateSelection { $0.selectProject(id: id) }
     }
 
     public func selectSession(id: UUID?) async throws {
-        store.selectSession(id: id)
-        try await persistSnapshot()
+        if let id, !store.sessions.contains(where: { $0.id == id }) {
+            throw WorkspaceCommandError.missingSession(id)
+        }
+        try await activateSelection { $0.selectSession(id: id) }
     }
 
     public func selectTab(id: UUID?) async throws {
-        store.selectTab(id: id)
-        try await persistSnapshot()
+        if let id, !store.tabs.contains(where: { $0.id == id }) {
+            throw WorkspaceCommandError.missingTab(id)
+        }
+        try await activateSelection { $0.selectTab(id: id) }
     }
 
     public func availableSessionShortcuts() async throws -> [SessionShortcut] {
@@ -433,6 +439,43 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
         return persistedProjects.first {
             URL(fileURLWithPath: $0.path).standardizedFileURL.path == standardizedPath
         }
+    }
+
+    private func activateSelection(_ select: (WorkspaceStore) -> Void) async throws {
+        let timestamp = now()
+        let nextStore = WorkspaceStore(
+            projects: store.projects,
+            sessions: store.sessions,
+            tabs: store.tabs,
+            selectedProjectID: store.selectedProjectID,
+            selectedSessionID: store.selectedSessionID,
+            selectedTabID: store.selectedTabID
+        )
+        select(nextStore)
+        if let selectedProjectID = nextStore.selectedProjectID {
+            nextStore.markProjectOpened(id: selectedProjectID, at: timestamp)
+        }
+        if let selectedSessionID = nextStore.selectedSessionID {
+            nextStore.markSessionActivated(id: selectedSessionID, at: timestamp)
+        }
+        if let selectedTabID = nextStore.selectedTabID {
+            nextStore.markTabActivated(id: selectedTabID, at: timestamp)
+        }
+        let snapshot = nextStore.snapshot(updatedAt: timestamp)
+        try await persist {
+            try await persistenceStore.saveActivation(
+                project: nextStore.selectedProject,
+                session: nextStore.selectedSession,
+                tab: nextStore.selectedTab,
+                snapshot: snapshot
+            )
+        }
+        store.restore(
+            projects: nextStore.projects,
+            sessions: nextStore.sessions,
+            tabs: nextStore.tabs,
+            selection: nextStore.selection
+        )
     }
 
     private func createSurface(for tab: WorkspaceTab) async throws -> GhosttySurfaceHandle {

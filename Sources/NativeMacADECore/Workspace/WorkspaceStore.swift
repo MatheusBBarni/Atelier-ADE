@@ -183,6 +183,25 @@ public final class WorkspaceStore {
         return (ordinals.max() ?? -1) + 1
     }
 
+    public func markProjectOpened(id: UUID, at date: Date) {
+        guard let index = projects.firstIndex(where: { $0.id == id }) else { return }
+        projects[index].lastOpenedAt = date
+        projects.sort {
+            if $0.sortIndex == $1.sortIndex { return $0.lastOpenedAt > $1.lastOpenedAt }
+            return $0.sortIndex < $1.sortIndex
+        }
+    }
+
+    public func markSessionActivated(id: UUID, at date: Date) {
+        guard let index = sessions.firstIndex(where: { $0.id == id }) else { return }
+        sessions[index].lastActivatedAt = date
+    }
+
+    public func markTabActivated(id: UUID, at date: Date) {
+        guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
+        tabs[index].lastActivatedAt = date
+    }
+
     public func snapshot(updatedAt: Date = Date()) -> RestoreSnapshot {
         RestoreSnapshot(
             selectedProjectID: selectedProjectID,

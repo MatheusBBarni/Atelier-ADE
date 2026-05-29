@@ -270,6 +270,80 @@ struct DefaultWorkspaceCommandServiceTests {
         #expect(harness.store.tabsForSelectedSession.map(\.id) == [firstTab.id, secondTab.id])
     }
 
+    @Test
+    func selectingTabPersistsProjectSessionAndTabRecency() async throws {
+        let activatedAt = Date(timeIntervalSince1970: 2_000)
+        let project = WorkspaceProject(
+            path: "/tmp/native-mac-ade-recency",
+            displayName: "recency",
+            createdAt: Date(timeIntervalSince1970: 10),
+            lastOpenedAt: Date(timeIntervalSince1970: 20)
+        )
+        let session = WorkspaceSession(
+            projectID: project.id,
+            title: "Recency",
+            createdAt: Date(timeIntervalSince1970: 30),
+            lastActivatedAt: Date(timeIntervalSince1970: 40)
+        )
+        let tab = WorkspaceTab(
+            sessionID: session.id,
+            workingDirectory: project.path,
+            ordinal: 0,
+            createdAt: Date(timeIntervalSince1970: 50),
+            lastActivatedAt: Date(timeIntervalSince1970: 60)
+        )
+        let store = WorkspaceStore(projects: [project], sessions: [session], tabs: [tab])
+        let persistence = InMemoryWorkspacePersistenceStore(projects: [project], sessions: [session], tabs: [tab])
+        let terminal = FakeTerminalSurfaceManager()
+        let service = DefaultWorkspaceCommandService(
+            store: store,
+            persistenceStore: persistence,
+            restoreCoordinator: RestoreCoordinator(persistenceStore: persistence),
+            terminalSurfaceManager: terminal,
+            now: { activatedAt }
+        )
+
+        try await service.selectTab(id: tab.id)
+
+        #expect(store.selectedProjectID == project.id)
+        #expect(store.selectedSessionID == session.id)
+        #expect(store.selectedTabID == tab.id)
+        #expect(store.selectedProject?.lastOpenedAt == activatedAt)
+        #expect(store.selectedSession?.lastActivatedAt == activatedAt)
+        #expect(store.selectedTab?.lastActivatedAt == activatedAt)
+        #expect(try await persistence.loadProjects().first?.lastOpenedAt == activatedAt)
+        #expect(try await persistence.loadSessions().first?.lastActivatedAt == activatedAt)
+        #expect(try await persistence.loadTabs().first?.lastActivatedAt == activatedAt)
+        #expect(try await persistence.loadRestoreSnapshot()?.selectedTabID == tab.id)
+    }
+
+    @Test
+    func selectingTabDoesNotMutateStoreWhenActivationPersistenceFails() async throws {
+        let project = WorkspaceProject(path: "/tmp/native-mac-ade-activation-fail", displayName: "activation-fail")
+        let session = WorkspaceSession(projectID: project.id, title: "Activation failure")
+        let tab = WorkspaceTab(sessionID: session.id, workingDirectory: project.path, ordinal: 0)
+        let store = WorkspaceStore(projects: [project], sessions: [session], tabs: [tab])
+        let persistence = ActivationFailingPersistenceStore(project: project, session: session, tab: tab)
+        let terminal = FakeTerminalSurfaceManager()
+        let service = DefaultWorkspaceCommandService(
+            store: store,
+            persistenceStore: persistence,
+            restoreCoordinator: RestoreCoordinator(persistenceStore: persistence),
+            terminalSurfaceManager: terminal
+        )
+
+        await #expect(throws: WorkspaceCommandError.persistenceFailed("activation save failed")) {
+            try await service.selectTab(id: tab.id)
+        }
+
+        #expect(store.selectedProjectID == nil)
+        #expect(store.selectedSessionID == nil)
+        #expect(store.selectedTabID == nil)
+        #expect(store.projects == [project])
+        #expect(store.sessions == [session])
+        #expect(store.tabs == [tab])
+    }
+
     private func makeHarness(now: @escaping @MainActor () -> Date = Date.init) -> CommandServiceHarness<InMemoryWorkspacePersistenceStore> {
         let store = WorkspaceStore()
         let persistence = InMemoryWorkspacePersistenceStore()
@@ -386,6 +460,7 @@ private actor TabSaveFailingPersistenceStore: WorkspacePersistenceStore {
     func save(session: WorkspaceSession) async throws {}
     func save(tab: WorkspaceTab) async throws { throw Failure.tabSave }
     func save(session: WorkspaceSession, firstTab: WorkspaceTab) async throws { throw Failure.tabSave }
+    func saveActivation(project: WorkspaceProject?, session: WorkspaceSession?, tab: WorkspaceTab?, snapshot: RestoreSnapshot) async throws {}
     func save(shortcut: SessionShortcut) async throws {}
     func save(snapshot: RestoreSnapshot) async throws {}
     func deleteProject(id: UUID) async throws {}
@@ -397,5 +472,42 @@ private actor TabSaveFailingPersistenceStore: WorkspacePersistenceStore {
         case tabSave
 
         var description: String { "tab save failed" }
+    }
+}
+
+private actor ActivationFailingPersistenceStore: WorkspacePersistenceStore {
+    let project: WorkspaceProject
+    let session: WorkspaceSession
+    let tab: WorkspaceTab
+
+    init(project: WorkspaceProject, session: WorkspaceSession, tab: WorkspaceTab) {
+        self.project = project
+        self.session = session
+        self.tab = tab
+    }
+
+    func loadProjects() async throws -> [WorkspaceProject] { [project] }
+    func loadSessions() async throws -> [WorkspaceSession] { [session] }
+    func loadTabs() async throws -> [WorkspaceTab] { [tab] }
+    func loadSessionShortcuts() async throws -> [SessionShortcut] { [] }
+    func loadRestoreSnapshot() async throws -> RestoreSnapshot? { nil }
+    func save(project: WorkspaceProject) async throws {}
+    func save(session: WorkspaceSession) async throws {}
+    func save(tab: WorkspaceTab) async throws {}
+    func save(session: WorkspaceSession, firstTab: WorkspaceTab) async throws {}
+    func saveActivation(project: WorkspaceProject?, session: WorkspaceSession?, tab: WorkspaceTab?, snapshot: RestoreSnapshot) async throws {
+        throw Failure.activationSave
+    }
+    func save(shortcut: SessionShortcut) async throws {}
+    func save(snapshot: RestoreSnapshot) async throws {}
+    func deleteProject(id: UUID) async throws {}
+    func deleteSession(id: UUID) async throws {}
+    func deleteTab(id: UUID) async throws {}
+    func deleteShortcut(id: UUID) async throws {}
+
+    enum Failure: Error, CustomStringConvertible {
+        case activationSave
+
+        var description: String { "activation save failed" }
     }
 }
