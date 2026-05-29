@@ -180,6 +180,18 @@ public actor SQLiteWorkspaceMetadataStore: WorkspacePersistenceStore {
         }
     }
 
+    public func save(session: WorkspaceSession, firstTab: WorkspaceTab) async throws {
+        do {
+            try executeRaw("BEGIN IMMEDIATE TRANSACTION")
+            try await save(session: session)
+            try await save(tab: firstTab)
+            try executeRaw("COMMIT")
+        } catch {
+            try? executeRaw("ROLLBACK")
+            throw error
+        }
+    }
+
     public func save(shortcut: SessionShortcut) async throws {
         try execute("""
             INSERT INTO session_shortcuts (id, label, launch_command, launch_arguments_json, secret_ref, is_built_in)
@@ -253,6 +265,15 @@ public actor SQLiteWorkspaceMetadataStore: WorkspacePersistenceStore {
         try bindValues(statement)
         guard sqlite3_step(statement) == SQLITE_DONE else {
             throw SQLiteWorkspaceMetadataStoreError.stepFailed(lastErrorMessage())
+        }
+    }
+
+    private func executeRaw(_ sql: String) throws {
+        var error: UnsafeMutablePointer<CChar>?
+        guard sqlite3_exec(database, sql, nil, nil, &error) == SQLITE_OK else {
+            let message = error.map { String(cString: $0) } ?? lastErrorMessage()
+            sqlite3_free(error)
+            throw SQLiteWorkspaceMetadataStoreError.stepFailed(message)
         }
     }
 

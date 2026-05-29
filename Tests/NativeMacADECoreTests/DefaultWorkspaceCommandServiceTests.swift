@@ -57,6 +57,79 @@ struct DefaultWorkspaceCommandServiceTests {
     }
 
     @Test
+    func creatingSessionWithShortcutStoresShortcutAndLaunchesFirstTab() async throws {
+        let harness = makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+        let project = try await harness.service.openProject(path: projectPath)
+        let shortcut = SessionShortcut(
+            label: "Codex Plan",
+            launchCommand: "codex",
+            launchArgumentsJSON: "[\"--model\",\"gpt-5.5\"]",
+            secretRef: "keychain://native-mac-ade/codex",
+            isBuiltIn: true
+        )
+        try await harness.persistence.save(shortcut: shortcut)
+
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: shortcut.id)
+        let tab = try #require(harness.store.tabs.first)
+
+        #expect(session.shortcutID == shortcut.id)
+        #expect(try await harness.persistence.loadSessions().first?.shortcutID == shortcut.id)
+        #expect(tab.sessionID == session.id)
+        #expect(tab.workingDirectory == project.path)
+        #expect(tab.launchCommand == "codex")
+        #expect(tab.launchArgumentsJSON == "[\"--model\",\"gpt-5.5\"]")
+        #expect(harness.terminal.createdTabs == [tab])
+        #expect(harness.service.logger.events.contains { event in
+            event.name == "session_created" &&
+            event.fields["shortcut_id"] == shortcut.id.uuidString &&
+            event.fields["launch_profile_label"] == "Codex Plan"
+        })
+        #expect(harness.service.logger.events.contains { event in
+            event.name == "tab_created" && event.fields["launch_profile_label"] == "Codex Plan"
+        })
+    }
+
+    @Test
+    func shortcutLaunchMappingProducesExpectedGhosttyLaunchConfiguration() throws {
+        let shortcut = SessionShortcut(
+            label: "Claude",
+            launchCommand: "claude",
+            launchArgumentsJSON: "[\"--dangerously-skip-permissions\"]",
+            isBuiltIn: true
+        )
+        let tab = WorkspaceTab(
+            sessionID: UUID(),
+            workingDirectory: "/Users/example/project",
+            launchCommand: shortcut.launchCommand,
+            launchArgumentsJSON: shortcut.launchArgumentsJSON,
+            ordinal: 0
+        )
+
+        let configuration = GhosttyLaunchConfiguration(tab: tab)
+
+        #expect(configuration.workingDirectory == "/Users/example/project")
+        #expect(configuration.command == "claude")
+        #expect(configuration.arguments == ["--dangerously-skip-permissions"])
+        #expect(configuration.appearance == .nordDefault)
+    }
+
+    @Test
+    func projectOpenStructuredLogUsesHashedPathAndRequiredFields() async throws {
+        let harness = makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+
+        let project = try await harness.service.openProject(path: projectPath)
+        let event = try #require(harness.service.logger.events.first { $0.name == "project_opened" })
+
+        #expect(event.fields["project_id"] == project.id.uuidString)
+        #expect(event.fields["hashed_path"] == WorkspacePrivacy.hashIdentifier(project.path))
+        #expect(event.fields["hashed_path"] != project.path)
+        #expect(event.fields.values.contains(project.path) == false)
+        #expect(event.fields["reused_project"] == "false")
+    }
+
+    @Test
     func renamingSessionUpdatesTitleAndMarksItUserNamed() async throws {
         let harness = makeHarness()
         let projectPath = try makeTemporaryProjectDirectory()
@@ -121,6 +194,47 @@ struct DefaultWorkspaceCommandServiceTests {
         #expect(harness.store.selectedSessionID == session.id)
         #expect(harness.store.selectedTabID == tab.id)
         #expect(harness.terminal.createdTabs == [tab])
+        #expect(harness.service.metrics.terminalSurfaceCreationCount == 1)
+    }
+
+    @Test
+    func creatingTabReleasesSurfaceWhenPersistenceFails() async throws {
+        let project = WorkspaceProject(path: "/tmp/native-mac-ade-persist-fail", displayName: "persist-fail")
+        let session = WorkspaceSession(projectID: project.id, title: "Persistence failure")
+        let store = WorkspaceStore()
+        store.upsertProject(project)
+        store.upsertSession(session)
+        let persistence = TabSaveFailingPersistenceStore(project: project, session: session)
+        let terminal = FakeTerminalSurfaceManager()
+        let service = DefaultWorkspaceCommandService(
+            store: store,
+            persistenceStore: persistence,
+            restoreCoordinator: RestoreCoordinator(persistenceStore: persistence),
+            terminalSurfaceManager: terminal
+        )
+
+        await #expect(throws: WorkspaceCommandError.persistenceFailed("tab save failed")) {
+            _ = try await service.createTab(sessionID: session.id)
+        }
+
+        let createdTab = try #require(terminal.createdTabs.first)
+        #expect(terminal.releasedTabIDs == [createdTab.id])
+        #expect(store.tabs.isEmpty)
+    }
+
+    @Test
+    func terminalProcessExitEmitsStructuredLocalEvent() async throws {
+        let harness = makeHarness()
+        let project = try await harness.service.openProject(path: makeTemporaryProjectDirectory())
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let tab = try await harness.service.createTab(sessionID: session.id)
+
+        harness.service.recordTerminalProcessExit(tabID: tab.id, exitStatus: 0)
+
+        let event = try #require(harness.service.logger.events.first { $0.name == "terminal_process_exited" })
+        #expect(event.fields["tab_id"] == tab.id.uuidString)
+        #expect(event.fields["session_id"] == session.id.uuidString)
+        #expect(event.fields["exit_status"] == "0")
     }
 
     @Test
@@ -250,6 +364,38 @@ private final class DateSequence {
     }
 
     func next() -> Date {
-        dates.removeFirst()
+        dates.isEmpty ? Date(timeIntervalSince1970: 999) : dates.removeFirst()
+    }
+}
+
+private actor TabSaveFailingPersistenceStore: WorkspacePersistenceStore {
+    let project: WorkspaceProject
+    let session: WorkspaceSession
+
+    init(project: WorkspaceProject, session: WorkspaceSession) {
+        self.project = project
+        self.session = session
+    }
+
+    func loadProjects() async throws -> [WorkspaceProject] { [project] }
+    func loadSessions() async throws -> [WorkspaceSession] { [session] }
+    func loadTabs() async throws -> [WorkspaceTab] { [] }
+    func loadSessionShortcuts() async throws -> [SessionShortcut] { [] }
+    func loadRestoreSnapshot() async throws -> RestoreSnapshot? { nil }
+    func save(project: WorkspaceProject) async throws {}
+    func save(session: WorkspaceSession) async throws {}
+    func save(tab: WorkspaceTab) async throws { throw Failure.tabSave }
+    func save(session: WorkspaceSession, firstTab: WorkspaceTab) async throws { throw Failure.tabSave }
+    func save(shortcut: SessionShortcut) async throws {}
+    func save(snapshot: RestoreSnapshot) async throws {}
+    func deleteProject(id: UUID) async throws {}
+    func deleteSession(id: UUID) async throws {}
+    func deleteTab(id: UUID) async throws {}
+    func deleteShortcut(id: UUID) async throws {}
+
+    enum Failure: Error, CustomStringConvertible {
+        case tabSave
+
+        var description: String { "tab save failed" }
     }
 }

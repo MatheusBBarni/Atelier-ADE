@@ -9,6 +9,7 @@ public protocol WorkspacePersistenceStore: Sendable {
     func save(project: WorkspaceProject) async throws
     func save(session: WorkspaceSession) async throws
     func save(tab: WorkspaceTab) async throws
+    func save(session: WorkspaceSession, firstTab: WorkspaceTab) async throws
     func save(shortcut: SessionShortcut) async throws
     func save(snapshot: RestoreSnapshot) async throws
     func deleteProject(id: UUID) async throws
@@ -77,6 +78,13 @@ public actor InMemoryWorkspacePersistenceStore: WorkspacePersistenceStore {
     public func save(tab: WorkspaceTab) async throws {
         tabs.removeAll { $0.id == tab.id }
         tabs.append(tab)
+    }
+
+    public func save(session: WorkspaceSession, firstTab: WorkspaceTab) async throws {
+        sessions.removeAll { $0.id == session.id }
+        tabs.removeAll { $0.id == firstTab.id }
+        sessions.append(session)
+        tabs.append(firstTab)
     }
 
     public func save(shortcut: SessionShortcut) async throws {

@@ -77,6 +77,46 @@ struct RestoreCoordinatorIntegrationTests {
         #expect(result.skippedProjects.map(\.id) == [missingProjectID])
         #expect(result.hasRecoveryItems)
         #expect(harness.terminal.createdTabs.map(\.id) == [validTabID])
+        #expect(harness.service.logger.events.contains { event in
+            event.name == "restore_skipped_project" &&
+            event.fields["project_id"] == missingProjectID.uuidString &&
+            event.fields["hashed_path"] == WorkspacePrivacy.hashIdentifier(missingPath) &&
+            event.fields.values.contains(missingPath) == false
+        })
+        #expect(harness.service.metrics.inaccessibleRestoredProjectCount == 1)
+    }
+
+    @Test
+    func terminalSurfaceFailureDuringRestoreEmitsPilotDiagnostics() async throws {
+        let harness = try makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+        let projectID = UUID()
+        let sessionID = UUID()
+        let tabID = UUID()
+        try await harness.persistence.save(project: WorkspaceProject(id: projectID, path: projectPath, displayName: "restore-failure"))
+        try await harness.persistence.save(session: WorkspaceSession(id: sessionID, projectID: projectID, title: "Restore Failure"))
+        try await harness.persistence.save(tab: WorkspaceTab(id: tabID, sessionID: sessionID, workingDirectory: projectPath, ordinal: 0))
+        try await harness.persistence.save(snapshot: RestoreSnapshot(
+            selectedProjectID: projectID,
+            selectedSessionID: sessionID,
+            selectedTabID: tabID,
+            tabOrder: [tabID]
+        ))
+        harness.terminal.surfaceCreationError = GhosttyAdapterError.surfaceCreationFailed("restore surface failed")
+
+        let result = try await harness.service.restoreWorkspace()
+
+        #expect(result.diagnostics.contains { $0.severity == .failure })
+        #expect(harness.service.metrics.terminalSurfaceFailureCount == 1)
+        #expect(harness.service.metrics.diagnostics().releaseBlockingReasons.contains("terminal surface failure rate above 1%"))
+        #expect(harness.service.logger.events.contains { event in
+            event.name == "terminal_surface_failed" &&
+            event.fields["tab_id"] == tabID.uuidString &&
+            event.fields["reason"]?.contains("restore surface failed") == true
+        })
+        #expect(harness.service.logger.events.contains { event in
+            event.name == "restore_completed" && event.fields["succeeded"] == "false"
+        })
     }
 
     @Test
@@ -214,9 +254,11 @@ private struct RestoreIntegrationHarness {
 private final class RestoreIntegrationTerminalSurfaceManager: WorkspaceTerminalSurfaceManaging {
     private(set) var createdTabs: [WorkspaceTab] = []
     private var surfacesByTabID: [UUID: GhosttySurfaceHandle] = [:]
+    var surfaceCreationError: Error?
 
     func createSurface(for tab: WorkspaceTab) async throws -> GhosttySurfaceHandle {
         createdTabs.append(tab)
+        if let surfaceCreationError { throw surfaceCreationError }
         let surface = GhosttySurfaceHandle()
         surfacesByTabID[tab.id] = surface
         return surface

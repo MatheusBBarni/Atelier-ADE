@@ -103,13 +103,14 @@ struct TerminalHostIntegrationTests {
         adapter.exitsEverySurface = true
         let controller = TerminalHostController(adapter: adapter)
         let tab = WorkspaceTab(sessionID: UUID(), workingDirectory: "/tmp/native-mac-ade-exit-callback", ordinal: 0)
-        var exitedTabIDs: [UUID] = []
-        controller.onSurfaceExited = { exitedTabIDs.append($0) }
+        var exitedEvents: [(UUID, Int32?)] = []
+        controller.onSurfaceExited = { exitedEvents.append(($0, $1)) }
 
         _ = try await controller.createSurface(for: tab)
         try await Task.sleep(for: .milliseconds(25))
 
-        #expect(exitedTabIDs == [tab.id])
+        #expect(exitedEvents.map(\.0) == [tab.id])
+        #expect(exitedEvents.map(\.1) == [0])
     }
 }
 
@@ -119,6 +120,7 @@ private final class RecordingGhosttyAdapter: GhosttyAdapter {
     private(set) var createdConfigurations: [GhosttyLaunchConfiguration] = []
     private(set) var focusedSurfaces: [GhosttySurfaceHandle] = []
     private(set) var resizeRequests: [ResizeRequest] = []
+    private(set) var destroyedSurfaces: [GhosttySurfaceHandle] = []
     var canCloseResult = true
     var exitedSurfaces: Set<GhosttySurfaceHandle> = []
     var exitsEverySurface = false
@@ -154,6 +156,14 @@ private final class RecordingGhosttyAdapter: GhosttyAdapter {
 
     func hasExited(surface: GhosttySurfaceHandle) async -> Bool {
         exitsEverySurface || exitedSurfaces.contains(surface)
+    }
+
+    func exitStatus(surface: GhosttySurfaceHandle) async -> Int32? {
+        0
+    }
+
+    func destroySurface(_ surface: GhosttySurfaceHandle) {
+        destroyedSurfaces.append(surface)
     }
 }
 

@@ -8,6 +8,8 @@ public struct AppDependencyContainer {
     public let ghosttyAdapter: any GhosttyAdapter
     public let terminalHostController: TerminalHostController
     public let workspaceCommandService: any WorkspaceCommandService
+    public let workspaceLogger: WorkspaceLogger
+    public let performanceMetrics: PerformanceMetrics
 
     public init(
         workspaceStore: WorkspaceStore,
@@ -15,7 +17,9 @@ public struct AppDependencyContainer {
         restoreCoordinator: RestoreCoordinator,
         ghosttyAdapter: any GhosttyAdapter,
         terminalHostController: TerminalHostController,
-        workspaceCommandService: any WorkspaceCommandService
+        workspaceCommandService: any WorkspaceCommandService,
+        workspaceLogger: WorkspaceLogger,
+        performanceMetrics: PerformanceMetrics
     ) {
         self.workspaceStore = workspaceStore
         self.persistenceStore = persistenceStore
@@ -23,6 +27,8 @@ public struct AppDependencyContainer {
         self.ghosttyAdapter = ghosttyAdapter
         self.terminalHostController = terminalHostController
         self.workspaceCommandService = workspaceCommandService
+        self.workspaceLogger = workspaceLogger
+        self.performanceMetrics = performanceMetrics
     }
 
     public static func live() -> AppDependencyContainer {
@@ -31,14 +37,19 @@ public struct AppDependencyContainer {
         let restoreCoordinator = RestoreCoordinator(persistenceStore: persistenceStore)
         let ghosttyAdapter = LiveGhosttyAdapter()
         let terminalHostController = TerminalHostController(adapter: ghosttyAdapter)
+        let workspaceLogger = WorkspaceLogger()
+        let performanceMetrics = PerformanceMetrics()
         let workspaceCommandService = DefaultWorkspaceCommandService(
             store: workspaceStore,
             persistenceStore: persistenceStore,
             restoreCoordinator: restoreCoordinator,
-            terminalSurfaceManager: terminalHostController
+            terminalSurfaceManager: terminalHostController,
+            logger: workspaceLogger,
+            metrics: performanceMetrics
         )
-        terminalHostController.onSurfaceExited = { tabID in
+        terminalHostController.onSurfaceExited = { tabID, exitStatus in
             Task { @MainActor in
+                workspaceCommandService.recordTerminalProcessExit(tabID: tabID, exitStatus: exitStatus)
                 try? await workspaceCommandService.closeTab(tabID: tabID, force: true)
             }
         }
@@ -48,7 +59,9 @@ public struct AppDependencyContainer {
             restoreCoordinator: restoreCoordinator,
             ghosttyAdapter: ghosttyAdapter,
             terminalHostController: terminalHostController,
-            workspaceCommandService: workspaceCommandService
+            workspaceCommandService: workspaceCommandService,
+            workspaceLogger: workspaceLogger,
+            performanceMetrics: performanceMetrics
         )
     }
 

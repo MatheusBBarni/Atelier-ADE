@@ -88,6 +88,14 @@ struct CGhosttyRuntime: Sendable {
         ade_ghostty_surface_has_exited(surface.rawValue)
     }
 
+    func exitStatus(surface: Surface) -> Int32 {
+        ade_ghostty_surface_exit_status(surface.rawValue)
+    }
+
+    func destroy(surface: inout Surface) {
+        ade_ghostty_destroy_surface(&surface.rawValue)
+    }
+
     private func mapError(code: ade_ghostty_error_code_t, message: UnsafePointer<CChar>?) -> GhosttyAdapterError {
         let message = message.map(String.init(cString:)) ?? "Unknown Ghostty failure"
         switch code {

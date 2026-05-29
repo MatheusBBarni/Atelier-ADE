@@ -7,7 +7,7 @@ public final class TerminalHostController: WorkspaceTerminalSurfaceManaging {
     private var surfacesByTabID: [UUID: GhosttySurfaceHandle] = [:]
     private var hostViewsByTabID: [UUID: TerminalSurfaceHostNSView] = [:]
     private var exitMonitorsByTabID: [UUID: Task<Void, Never>] = [:]
-    public var onSurfaceExited: ((UUID) -> Void)?
+    public var onSurfaceExited: ((UUID, Int32?) -> Void)?
 
     public init(adapter: any GhosttyAdapter = LiveGhosttyAdapter()) {
         self.adapter = adapter
@@ -17,12 +17,7 @@ public final class TerminalHostController: WorkspaceTerminalSurfaceManaging {
     public func createSurface(for tab: WorkspaceTab) async throws -> GhosttySurfaceHandle {
         if let existing = surfacesByTabID[tab.id] { return existing }
 
-        let configuration = GhosttyLaunchConfiguration(
-            workingDirectory: tab.workingDirectory,
-            command: tab.launchCommand,
-            arguments: Self.decodeArguments(from: tab.launchArgumentsJSON),
-            appearance: .nordDefault
-        )
+        let configuration = GhosttyLaunchConfiguration(tab: tab)
         try await adapter.initializeIfNeeded()
         let surface = try await adapter.createSurface(configuration: configuration)
         surfacesByTabID[tab.id] = surface
@@ -61,6 +56,9 @@ public final class TerminalHostController: WorkspaceTerminalSurfaceManaging {
     public func releaseSurface(for tabID: UUID) {
         exitMonitorsByTabID[tabID]?.cancel()
         exitMonitorsByTabID[tabID] = nil
+        if let surface = surfacesByTabID[tabID] {
+            adapter.destroySurface(surface)
+        }
         surfacesByTabID[tabID] = nil
         hostViewsByTabID[tabID]?.detachSurface()
         hostViewsByTabID[tabID] = nil
@@ -90,26 +88,24 @@ public final class TerminalHostController: WorkspaceTerminalSurfaceManaging {
         }
     }
 
-    private static func decodeArguments(from json: String?) -> [String] {
-        guard let json,
-              let data = json.data(using: .utf8),
-              let arguments = try? JSONDecoder().decode([String].self, from: data)
-        else { return [] }
-        return arguments
-    }
-
     private func startExitMonitoring(tabID: UUID) {
         exitMonitorsByTabID[tabID]?.cancel()
         exitMonitorsByTabID[tabID] = Task { @MainActor [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
                 if await self.hasExited(tabID: tabID) {
-                    self.onSurfaceExited?(tabID)
+                    let exitStatus = await self.exitStatus(tabID: tabID)
+                    self.onSurfaceExited?(tabID, exitStatus)
                     return
                 }
                 try? await Task.sleep(for: .milliseconds(500))
             }
         }
+    }
+
+    private func exitStatus(tabID: UUID) async -> Int32? {
+        guard let surface = surfacesByTabID[tabID] else { return nil }
+        return await adapter.exitStatus(surface: surface)
     }
 
     private func configureResizeCallback(for hostView: TerminalSurfaceHostNSView, tabID: UUID) {

@@ -9,6 +9,7 @@ struct ContentView: View {
     @State private var didRequestRestore = false
     @State private var isRestoring = true
     @State private var restoreResult: RestoreWorkspaceResult?
+    @State private var pilotDiagnostics: PilotDiagnostics?
     @State private var userMessage: UserMessage?
 
     var body: some View {
@@ -44,6 +45,16 @@ struct ContentView: View {
                 }
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
+
+            if !isRestoring, let pilotDiagnostics, !pilotDiagnostics.releaseBlockingReasons.isEmpty {
+                VStack {
+                    Spacer()
+                    PilotDiagnosticsView(diagnostics: pilotDiagnostics)
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 18)
+                }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
         }
         .navigationTitle("Native Mac ADE")
         .frame(minWidth: 1_040, minHeight: 680)
@@ -58,6 +69,7 @@ struct ContentView: View {
             } catch {
                 userMessage = UserMessage(title: "Restore unavailable", detail: String(describing: error))
             }
+            pilotDiagnostics = commandService.pilotDiagnostics()
             isRestoring = false
         }
         .alert(userMessage?.title ?? "Workspace message", isPresented: userMessagePresented) {
@@ -69,6 +81,35 @@ struct ContentView: View {
 
     private var userMessagePresented: Binding<Bool> {
         Binding(get: { userMessage != nil }, set: { if !$0 { userMessage = nil } })
+    }
+}
+
+struct PilotDiagnosticsView: View {
+    let diagnostics: PilotDiagnostics
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("Pilot diagnostics need attention", systemImage: "waveform.path.ecg.rectangle")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(NordTheme.auroraYellow.color)
+            Text(diagnostics.releaseBlockingReasons.joined(separator: " • "))
+                .font(.caption)
+                .foregroundStyle(NordTheme.secondaryText.color)
+            Text("Restore failures: \(percent(diagnostics.restoreFailureRate)) · Terminal failures: \(percent(diagnostics.terminalSurfaceFailureRate))")
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(NordTheme.mutedText.color)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(NordTheme.elevatedBackground.color.opacity(0.96), in: RoundedRectangle(cornerRadius: 12))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12).stroke(NordTheme.activeBorder.color.opacity(0.35), lineWidth: 1)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func percent(_ value: Double) -> String {
+        value.formatted(.percent.precision(.fractionLength(0...2)))
     }
 }
 
@@ -302,6 +343,7 @@ struct SessionListView: View {
     let commandService: any WorkspaceCommandService
     @Binding var userMessage: UserMessage?
     @State private var renameDraft: SessionRenameDraft?
+    @State private var availableShortcuts: [SessionShortcut] = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -313,6 +355,14 @@ struct SessionListView: View {
                 action: createSession
             )
             .disabled(store.selectedProjectID == nil)
+
+            if store.selectedProjectID != nil, !availableShortcuts.isEmpty {
+                SessionShortcutPicker(shortcuts: availableShortcuts) { shortcut in
+                    createSession(shortcutID: shortcut?.id)
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 10)
+            }
 
             if store.selectedProjectID == nil {
                 EmptyStateView(
@@ -358,6 +408,9 @@ struct SessionListView: View {
                 renameDraft = nil
             }
         }
+        .task(id: store.selectedProjectID) {
+            await loadShortcuts()
+        }
     }
 
     private var selectedSessionBinding: Binding<WorkspaceSession.ID?> {
@@ -365,13 +418,29 @@ struct SessionListView: View {
     }
 
     private func createSession() {
+        createSession(shortcutID: nil)
+    }
+
+    private func createSession(shortcutID: UUID?) {
         guard let selectedProjectID = store.selectedProjectID else { return }
         Task {
             do {
-                _ = try await commandService.createSession(projectID: selectedProjectID, shortcutID: nil)
+                _ = try await commandService.createSession(projectID: selectedProjectID, shortcutID: shortcutID)
             } catch {
                 userMessage = UserMessage(title: "Session could not be created", detail: String(describing: error))
             }
+        }
+    }
+
+    private func loadShortcuts() async {
+        guard store.selectedProjectID != nil else {
+            availableShortcuts = []
+            return
+        }
+        do {
+            availableShortcuts = try await commandService.availableSessionShortcuts()
+        } catch {
+            userMessage = UserMessage(title: "Shortcuts could not be loaded", detail: String(describing: error))
         }
     }
 
@@ -383,6 +452,27 @@ struct SessionListView: View {
                 userMessage = UserMessage(title: "Session selection could not be saved", detail: String(describing: error))
             }
         }
+    }
+}
+
+struct SessionShortcutPicker: View {
+    let shortcuts: [SessionShortcut]
+    let onPick: (SessionShortcut?) -> Void
+
+    var body: some View {
+        Menu {
+            Button("Plain session") { onPick(nil) }
+            Divider()
+            ForEach(shortcuts) { shortcut in
+                Button(shortcut.label) { onPick(shortcut) }
+            }
+        } label: {
+            Label("Start with shortcut", systemImage: "bolt.rectangle")
+                .font(.caption.weight(.semibold))
+        }
+        .menuStyle(.button)
+        .controlSize(.small)
+        .help("Start a session with an optional lightweight launch profile")
     }
 }
 

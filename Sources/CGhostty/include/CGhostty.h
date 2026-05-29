@@ -35,6 +35,7 @@ typedef struct ade_ghostty_surface {
     bool close_allowed;
     bool has_inherited_context;
     uint64_t inherited_surface_id;
+    int32_t exit_status;
     int32_t columns;
     int32_t rows;
 } ade_ghostty_surface_t;
@@ -70,5 +71,7 @@ void ade_ghostty_focus_surface(ade_ghostty_surface_t *surface, bool focused);
 void ade_ghostty_resize_surface(ade_ghostty_surface_t *surface, int32_t columns, int32_t rows);
 bool ade_ghostty_surface_can_close(ade_ghostty_surface_t surface);
 bool ade_ghostty_surface_has_exited(ade_ghostty_surface_t surface);
+int32_t ade_ghostty_surface_exit_status(ade_ghostty_surface_t surface);
+void ade_ghostty_destroy_surface(ade_ghostty_surface_t *surface);
 
 #endif

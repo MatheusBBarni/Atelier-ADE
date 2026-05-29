@@ -129,6 +129,23 @@ public struct SessionShortcut: Identifiable, Equatable, Sendable {
         self.secretRef = secretRef
         self.isBuiltIn = isBuiltIn
     }
+
+    public static let builtInDefaults: [SessionShortcut] = [
+        SessionShortcut(
+            id: UUID(uuidString: "11111111-1111-4111-8111-111111111111")!,
+            label: "Codex",
+            launchCommand: "codex",
+            launchArgumentsJSON: "[]",
+            isBuiltIn: true
+        ),
+        SessionShortcut(
+            id: UUID(uuidString: "22222222-2222-4222-8222-222222222222")!,
+            label: "Claude",
+            launchCommand: "claude",
+            launchArgumentsJSON: "[]",
+            isBuiltIn: true
+        )
+    ]
 }
 
 public struct RestoreSnapshot: Equatable, Sendable {

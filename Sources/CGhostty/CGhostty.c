@@ -83,6 +83,7 @@ ade_ghostty_surface_result_t ade_ghostty_create_surface(
             .close_allowed = true,
             .has_inherited_context = inherited_id > 0,
             .inherited_surface_id = inherited_id,
+            .exit_status = 0,
             .columns = 80,
             .rows = 24
         }
@@ -106,4 +107,13 @@ bool ade_ghostty_surface_can_close(ade_ghostty_surface_t surface) {
 
 bool ade_ghostty_surface_has_exited(ade_ghostty_surface_t surface) {
     return surface.exited;
+}
+
+int32_t ade_ghostty_surface_exit_status(ade_ghostty_surface_t surface) {
+    return surface.exit_status;
+}
+
+void ade_ghostty_destroy_surface(ade_ghostty_surface_t *surface) {
+    if (surface == NULL) { return; }
+    memset(surface, 0, sizeof(*surface));
 }

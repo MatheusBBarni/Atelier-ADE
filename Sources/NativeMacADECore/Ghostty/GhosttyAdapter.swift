@@ -21,6 +21,15 @@ public struct GhosttyLaunchConfiguration: Equatable, Sendable {
         self.appearance = appearance
     }
 
+    public init(tab: WorkspaceTab, appearance: TerminalAppearance = .nordDefault) {
+        self.init(
+            workingDirectory: tab.workingDirectory,
+            command: tab.launchCommand,
+            arguments: Self.decodeArguments(from: tab.launchArgumentsJSON),
+            appearance: appearance
+        )
+    }
+
     public static func inheritedTab(
         from parent: GhosttySurfaceHandle,
         workingDirectory: String,
@@ -33,6 +42,14 @@ public struct GhosttyLaunchConfiguration: Equatable, Sendable {
             arguments: arguments,
             inheritedSurfaceID: parent.id
         )
+    }
+
+    public static func decodeArguments(from json: String?) -> [String] {
+        guard let json,
+              let data = json.data(using: .utf8),
+              let arguments = try? JSONDecoder().decode([String].self, from: data)
+        else { return [] }
+        return arguments
     }
 }
 
@@ -138,6 +155,8 @@ public protocol GhosttyAdapter {
     func resize(surface: GhosttySurfaceHandle, columns: Int, rows: Int)
     func canClose(surface: GhosttySurfaceHandle) async -> Bool
     func hasExited(surface: GhosttySurfaceHandle) async -> Bool
+    func exitStatus(surface: GhosttySurfaceHandle) async -> Int32?
+    func destroySurface(_ surface: GhosttySurfaceHandle)
 }
 
 @MainActor
@@ -209,6 +228,18 @@ public final class LiveGhosttyAdapter: GhosttyAdapter {
         let exited = runtime.hasExited(surface: rawSurface)
         if exited { callbacks.surfaceExited?(surface) }
         return exited
+    }
+
+    public func exitStatus(surface: GhosttySurfaceHandle) async -> Int32? {
+        guard let rawSurface = surfaces[surface.id] else { return nil }
+        return runtime.exitStatus(surface: rawSurface)
+    }
+
+    public func destroySurface(_ surface: GhosttySurfaceHandle) {
+        if var rawSurface = surfaces[surface.id] {
+            runtime.destroy(surface: &rawSurface)
+        }
+        surfaces[surface.id] = nil
     }
 
     private func createSurface(
