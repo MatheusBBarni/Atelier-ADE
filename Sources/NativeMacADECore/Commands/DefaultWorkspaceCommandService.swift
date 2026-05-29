@@ -97,20 +97,21 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
 
         let removedSessionIDs = Set(store.sessions.filter { $0.projectID == id }.map(\.id))
         let removedTabs = store.tabs.filter { removedSessionIDs.contains($0.sessionID) }
-        for tab in removedTabs {
-            if let surface = surfacesByTabID[tab.id] ?? terminalSurfaceManager.surface(for: tab.id) {
+        let removedTerminalTabs = removedTabs.filter { $0.kind == .terminal }
+        for tab in removedTerminalTabs {
+            if let surface = terminalSurface(for: tab) {
                 guard await terminalSurfaceManager.canClose(surface: surface) else {
                     throw WorkspaceCommandError.closeRejected(tab.id)
                 }
             }
         }
-        let removedTabIDs = Set(removedTabs.map(\.id))
+        let removedTerminalTabIDs = Set(removedTerminalTabs.map(\.id))
 
         try await persist { try await persistenceStore.deleteProject(id: id) }
-        for tabID in removedTabIDs {
-            terminalSurfaceManager.releaseSurface(for: tabID)
+        for tab in removedTerminalTabs {
+            releaseTerminalSurface(for: tab)
         }
-        surfacesByTabID = surfacesByTabID.filter { tabID, _ in !removedTabIDs.contains(tabID) }
+        surfacesByTabID = surfacesByTabID.filter { tabID, _ in !removedTerminalTabIDs.contains(tabID) }
         store.removeProject(id: id)
         try await persistSnapshot()
     }
@@ -126,12 +127,11 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
             return
         }
 
-        let removedTabs = store.tabs.filter { $0.sessionID == id }
+        let removedTerminalTabs = store.terminalTabs(in: id)
 
         try await persist { try await persistenceStore.deleteSession(id: id) }
-        for tab in removedTabs {
-            terminalSurfaceManager.releaseSurface(for: tab.id)
-            surfacesByTabID[tab.id] = nil
+        for tab in removedTerminalTabs {
+            releaseTerminalSurface(for: tab)
         }
         store.removeSession(id: id)
         try await persistSnapshot()
@@ -407,6 +407,52 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
         return tab
     }
 
+    public func openFileTab(sessionID: UUID, path: String) async throws -> WorkspaceTab {
+        guard let session = store.sessions.first(where: { $0.id == sessionID }) else {
+            throw WorkspaceCommandError.missingSession(sessionID)
+        }
+        guard let project = store.projects.first(where: { $0.id == session.projectID }) else {
+            throw WorkspaceCommandError.missingProject(session.projectID)
+        }
+
+        let standardizedPath = URL(fileURLWithPath: path).standardizedFileURL.path
+        let standardizedProjectPath = URL(fileURLWithPath: project.path).standardizedFileURL.path
+        try validateOpenFilePath(standardizedPath, projectRoot: standardizedProjectPath, originalPath: path)
+
+        if let existingTab = store.fileTabs(in: session.id).first(where: { tab in
+            guard let fileReference = tab.fileReference else { return false }
+            return URL(fileURLWithPath: fileReference.path).standardizedFileURL.path == standardizedPath
+        }) {
+            try await activateSelection { $0.selectTab(id: existingTab.id) }
+            return store.tab(id: existingTab.id) ?? existingTab
+        }
+
+        let timestamp = now()
+        let tab = WorkspaceTab(
+            sessionID: session.id,
+            kind: .file,
+            workingDirectory: standardizedProjectPath,
+            fileReference: WorkspaceFileReference(
+                path: standardizedPath,
+                projectRoot: standardizedProjectPath
+            ),
+            ordinal: store.nextTabOrdinal(for: session.id),
+            createdAt: timestamp,
+            lastActivatedAt: timestamp
+        )
+
+        try await persist { try await persistenceStore.save(tab: tab) }
+        store.upsertTab(tab)
+        try await persistSnapshot()
+        logger.emit("file_tab_opened", fields: [
+            "project_id": project.id.uuidString,
+            "session_id": session.id.uuidString,
+            "tab_id": tab.id.uuidString,
+            "hashed_path": WorkspacePrivacy.hashIdentifier(standardizedPath)
+        ])
+        return tab
+    }
+
     @discardableResult
     public func restoreWorkspace() async throws -> RestoreWorkspaceResult {
         let startedAt = now()
@@ -436,7 +482,7 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
             selection: restoredStore.selection
         )
         surfacesByTabID.removeAll()
-        for tab in store.tabs {
+        for tab in store.tabs where tab.kind == .terminal {
             let surfaceStartedAt = now()
             do {
                 let surface = try await createSurface(for: tab)
@@ -482,19 +528,18 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
     }
 
     public func closeTab(tabID: UUID, force: Bool) async throws {
-        guard store.tabs.contains(where: { $0.id == tabID }) else {
+        guard let tab = store.tab(id: tabID) else {
             throw WorkspaceCommandError.missingTab(tabID)
         }
-        let surface = surfacesByTabID[tabID] ?? terminalSurfaceManager.surface(for: tabID)
-        if !force, let surface {
+        let surface = terminalSurface(for: tab)
+        if tab.kind == .terminal, !force, let surface {
             let canClose = await terminalSurfaceManager.canClose(surface: surface)
             metrics.recordCloseConfirmation(accepted: canClose)
             guard canClose else { throw WorkspaceCommandError.closeRejected(tabID) }
         }
 
         try await persist { try await persistenceStore.deleteTab(id: tabID) }
-        surfacesByTabID[tabID] = nil
-        terminalSurfaceManager.releaseSurface(for: tabID)
+        releaseTerminalSurface(for: tab)
         store.removeTab(id: tabID)
         try await persistSnapshot()
     }
@@ -788,6 +833,31 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
         return fileManager.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue
     }
 
+    private func validateOpenFilePath(_ path: String, projectRoot: String, originalPath: String) throws {
+        guard (originalPath as NSString).isAbsolutePath else {
+            throw WorkspaceCommandError.invalidFilePath(originalPath)
+        }
+        guard isPath(path, containedBy: projectRoot) else {
+            throw WorkspaceCommandError.filePathOutsideProject(filePath: path, projectRoot: projectRoot)
+        }
+
+        var isDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: path, isDirectory: &isDirectory),
+              !isDirectory.boolValue,
+              fileManager.isReadableFile(atPath: path)
+        else {
+            throw WorkspaceCommandError.invalidFilePath(originalPath)
+        }
+    }
+
+    private func isPath(_ path: String, containedBy projectRoot: String) -> Bool {
+        let standardizedPath = URL(fileURLWithPath: path).standardizedFileURL.path
+        let standardizedRoot = URL(fileURLWithPath: projectRoot, isDirectory: true).standardizedFileURL.path
+        guard standardizedPath != standardizedRoot else { return false }
+        let rootPrefix = standardizedRoot.hasSuffix("/") ? standardizedRoot : "\(standardizedRoot)/"
+        return standardizedPath.hasPrefix(rootPrefix)
+    }
+
     private func requireProject(id: UUID) throws -> WorkspaceProject {
         guard let project = store.projects.first(where: { $0.id == id }) else {
             throw WorkspaceCommandError.missingProject(id)
@@ -842,6 +912,10 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
     }
 
     private func createSurface(for tab: WorkspaceTab) async throws -> GhosttySurfaceHandle {
+        guard tab.kind == .terminal else {
+            throw WorkspaceCommandError.invalidFileTab(tab.id, "File tabs do not support terminal surfaces")
+        }
+
         do {
             return try await terminalSurfaceManager.createSurface(for: tab)
         } catch let error as GhosttyAdapterError {
@@ -851,6 +925,17 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
         } catch {
             throw WorkspaceCommandError.terminalUnavailable(String(describing: error))
         }
+    }
+
+    private func terminalSurface(for tab: WorkspaceTab) -> GhosttySurfaceHandle? {
+        guard tab.kind == .terminal else { return nil }
+        return surfacesByTabID[tab.id] ?? terminalSurfaceManager.surface(for: tab.id)
+    }
+
+    private func releaseTerminalSurface(for tab: WorkspaceTab) {
+        guard tab.kind == .terminal else { return }
+        surfacesByTabID[tab.id] = nil
+        terminalSurfaceManager.releaseSurface(for: tab.id)
     }
 
     private func persist<T>(_ operation: () async throws -> T) async throws -> T {

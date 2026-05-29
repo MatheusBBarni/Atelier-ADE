@@ -620,6 +620,51 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
     }
 
     @Test
+    func mixedFileTabMetadataPersistsThroughSelectionRestoreAndCloseSnapshotUpdates() async throws {
+        let harness = try makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+        let fileURL = try makeTemporaryProjectFile(in: projectPath, relativePath: "Sources/File.swift")
+        let project = try await harness.service.openProject(path: projectPath)
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let terminalTab = try #require(harness.store.tabs.first)
+
+        let fileTab = try await harness.service.openFileTab(sessionID: session.id, path: fileURL.path)
+        try await harness.service.selectTab(id: terminalTab.id)
+        let snapshotAfterSelection = try #require(try await harness.persistence.loadRestoreSnapshot())
+        let persistedFileTab = try #require(try await harness.persistence.loadTabs().first { $0.id == fileTab.id })
+
+        #expect(persistedFileTab.kind == .file)
+        #expect(persistedFileTab.fileReference?.path == fileURL.path)
+        #expect(snapshotAfterSelection.selectedTabID == terminalTab.id)
+        #expect(snapshotAfterSelection.tabOrder == [terminalTab.id, fileTab.id])
+        #expect(harness.terminal.createdTabs.map(\.id) == [terminalTab.id])
+
+        let restoredStore = WorkspaceStore()
+        let restoredTerminal = FakeIntegrationTerminalSurfaceManager()
+        let restoredService = DefaultWorkspaceCommandService(
+            store: restoredStore,
+            persistenceStore: harness.persistence,
+            restoreCoordinator: RestoreCoordinator(persistenceStore: harness.persistence),
+            terminalSurfaceManager: restoredTerminal
+        )
+        try await restoredService.restoreWorkspace()
+
+        #expect(restoredStore.tabsForSelectedSession.map(\.id) == [terminalTab.id, fileTab.id])
+        #expect(restoredStore.tabsForSelectedSession.map(\.kind) == [.terminal, .file])
+        #expect(restoredStore.selectedTabID == terminalTab.id)
+        #expect(restoredTerminal.createdTabs.map(\.id) == [terminalTab.id])
+
+        try await restoredService.closeTab(tabID: fileTab.id, force: false)
+        let snapshotAfterClose = try #require(try await harness.persistence.loadRestoreSnapshot())
+
+        #expect(try await harness.persistence.loadTabs().map(\.id) == [terminalTab.id])
+        #expect(snapshotAfterClose.selectedTabID == terminalTab.id)
+        #expect(snapshotAfterClose.tabOrder == [terminalTab.id])
+        #expect(restoredTerminal.closeRequests.isEmpty)
+        #expect(restoredTerminal.releasedTabIDs.isEmpty)
+    }
+
+    @Test
     func closingLastTabRemovesPersistenceAndClearsSelectedTab() async throws {
         let harness = try makeHarness()
         let projectPath = try makeTemporaryProjectDirectory()
@@ -742,6 +787,17 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
             .appendingPathComponent(name, isDirectory: true)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url.path
+    }
+
+    private func makeTemporaryProjectFile(in projectPath: String, relativePath: String) throws -> URL {
+        let fileURL = URL(fileURLWithPath: projectPath, isDirectory: true)
+            .appendingPathComponent(relativePath)
+        try FileManager.default.createDirectory(
+            at: fileURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try "let value = 1\n".write(to: fileURL, atomically: true, encoding: .utf8)
+        return fileURL
     }
 
     private func managedKeybindingOverrides() -> [AppCommandID: KeybindingOverride] {

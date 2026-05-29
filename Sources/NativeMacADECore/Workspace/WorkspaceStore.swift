@@ -63,9 +63,36 @@ public final class WorkspaceStore {
 
     public var tabsForSelectedSession: [WorkspaceTab] {
         guard let selectedSessionID else { return [] }
+        return tabs(for: selectedSessionID)
+    }
+
+    public func tab(id: UUID) -> WorkspaceTab? {
+        tabs.first { $0.id == id }
+    }
+
+    public func tabs(for sessionID: UUID) -> [WorkspaceTab] {
+        tabs
+            .filter { $0.sessionID == sessionID }
+            .sorted(by: Self.tabDisplaySort)
+    }
+
+    public func tabs(ofKind kind: WorkspaceTabKind, in sessionID: UUID) -> [WorkspaceTab] {
+        tabs(for: sessionID).filter { $0.kind == kind }
+    }
+
+    public func terminalTabs(in sessionID: UUID) -> [WorkspaceTab] {
+        tabs(ofKind: .terminal, in: sessionID)
+    }
+
+    public func fileTabs(in sessionID: UUID) -> [WorkspaceTab] {
+        tabs(ofKind: .file, in: sessionID)
+    }
+
+    public func tabs(forProject projectID: UUID) -> [WorkspaceTab] {
+        let sessionIDs = Set(sessions.filter { $0.projectID == projectID }.map(\.id))
         return tabs
-            .filter { $0.sessionID == selectedSessionID }
-            .sorted { $0.ordinal < $1.ordinal }
+            .filter { sessionIDs.contains($0.sessionID) }
+            .sorted(by: Self.tabSnapshotSort)
     }
 
     public func selectProject(id: UUID?) {
@@ -222,7 +249,7 @@ public final class WorkspaceStore {
             selectedProjectID: selectedProjectID,
             selectedSessionID: selectedSessionID,
             selectedTabID: selectedTabID,
-            tabOrder: tabs.sorted { $0.ordinal < $1.ordinal }.map(\.id),
+            tabOrder: tabs.sorted(by: Self.tabSnapshotSort).map(\.id),
             updatedAt: updatedAt
         )
     }
@@ -349,6 +376,22 @@ public final class WorkspaceStore {
         }
 
         return lhs.id.uuidString > rhs.id.uuidString
+    }
+
+    private static func tabDisplaySort(_ lhs: WorkspaceTab, _ rhs: WorkspaceTab) -> Bool {
+        if lhs.ordinal != rhs.ordinal {
+            return lhs.ordinal < rhs.ordinal
+        }
+
+        return lhs.id.uuidString < rhs.id.uuidString
+    }
+
+    private static func tabSnapshotSort(_ lhs: WorkspaceTab, _ rhs: WorkspaceTab) -> Bool {
+        if lhs.sessionID != rhs.sessionID {
+            return lhs.sessionID.uuidString < rhs.sessionID.uuidString
+        }
+
+        return tabDisplaySort(lhs, rhs)
     }
 
     public static func defaultSessionTitle(date: Date) -> String {

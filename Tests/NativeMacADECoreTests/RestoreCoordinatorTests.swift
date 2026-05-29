@@ -138,6 +138,68 @@ struct RestoreCoordinatorTests {
         #expect(result.store.selectedTabID == secondTabID)
     }
 
+    @Test
+    func mixedFileTabRestorePreservesSnapshotOrderAndSkipsUnreadableFiles() async throws {
+        let projectPath = try makeTemporaryProjectDirectory()
+        let sourceDirectory = URL(fileURLWithPath: projectPath, isDirectory: true)
+            .appendingPathComponent("Sources", isDirectory: true)
+        try FileManager.default.createDirectory(at: sourceDirectory, withIntermediateDirectories: true)
+        let readableFile = sourceDirectory.appendingPathComponent("App.swift")
+        try "let app = 1\n".write(to: readableFile, atomically: true, encoding: .utf8)
+        let missingFile = sourceDirectory.appendingPathComponent("Missing.swift")
+        let projectID = UUID()
+        let sessionID = UUID()
+        let terminalTabID = UUID()
+        let readableFileTabID = UUID()
+        let missingFileTabID = UUID()
+        let project = WorkspaceProject(id: projectID, path: projectPath, displayName: "ade")
+        let session = WorkspaceSession(id: sessionID, projectID: projectID, title: "Mixed")
+        let terminalTab = WorkspaceTab(id: terminalTabID, sessionID: sessionID, workingDirectory: projectPath, ordinal: 0)
+        let readableFileTab = WorkspaceTab(
+            id: readableFileTabID,
+            sessionID: sessionID,
+            kind: .file,
+            workingDirectory: projectPath,
+            fileReference: WorkspaceFileReference(path: readableFile.path, projectRoot: projectPath),
+            ordinal: 1
+        )
+        let missingFileTab = WorkspaceTab(
+            id: missingFileTabID,
+            sessionID: sessionID,
+            kind: .file,
+            workingDirectory: projectPath,
+            fileReference: WorkspaceFileReference(path: missingFile.path, projectRoot: projectPath),
+            ordinal: 2
+        )
+        let persistence = InMemoryWorkspacePersistenceStore(
+            projects: [project],
+            sessions: [session],
+            tabs: [terminalTab, missingFileTab, readableFileTab],
+            restoreSnapshot: RestoreSnapshot(
+                selectedProjectID: projectID,
+                selectedSessionID: sessionID,
+                selectedTabID: readableFileTabID,
+                tabOrder: [readableFileTabID, terminalTabID, missingFileTabID]
+            )
+        )
+        let coordinator = RestoreCoordinator(persistenceStore: persistence)
+
+        let result = try await coordinator.restoreWorkspace()
+
+        #expect(result.store.selectedProjectID == projectID)
+        #expect(result.store.selectedSessionID == sessionID)
+        #expect(result.store.selectedTabID == readableFileTabID)
+        #expect(result.store.tabsForSelectedSession.map(\.id) == [readableFileTabID, terminalTabID])
+        #expect(result.store.tabsForSelectedSession.map(\.kind) == [.file, .terminal])
+        #expect(result.store.tabsForSelectedSession.map(\.ordinal) == [0, 1])
+        #expect(result.diagnostics.contains { diagnostic in
+            diagnostic.severity == .warning &&
+                diagnostic.message.contains(missingFileTabID.uuidString) &&
+                diagnostic.message.contains("missing or unreadable")
+        })
+        #expect(result.hasRecoveryItems)
+    }
+
     private func makeTemporaryProjectDirectory() throws -> String {
         let url = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
             .appendingPathComponent("native-mac-ade-restore-\(UUID().uuidString)", isDirectory: true)

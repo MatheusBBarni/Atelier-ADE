@@ -749,6 +749,54 @@ struct DefaultWorkspaceCommandServiceTests {
     }
 
     @Test
+    func restoringMixedSessionCreatesTerminalSurfacesOnlyForTerminalTabs() async throws {
+        let projectPath = try makeTemporaryProjectDirectory()
+        let fileURL = try makeTemporaryProjectFile(in: projectPath, relativePath: "Sources/App.swift")
+        let projectID = UUID()
+        let sessionID = UUID()
+        let terminalTabID = UUID()
+        let fileTabID = UUID()
+        let project = WorkspaceProject(id: projectID, path: projectPath, displayName: "mixed")
+        let session = WorkspaceSession(id: sessionID, projectID: projectID, title: "Mixed")
+        let terminalTab = WorkspaceTab(id: terminalTabID, sessionID: sessionID, workingDirectory: projectPath, ordinal: 0)
+        let fileTab = WorkspaceTab(
+            id: fileTabID,
+            sessionID: sessionID,
+            kind: .file,
+            workingDirectory: projectPath,
+            fileReference: WorkspaceFileReference(path: fileURL.path, projectRoot: projectPath),
+            ordinal: 1
+        )
+        let store = WorkspaceStore()
+        let persistence = InMemoryWorkspacePersistenceStore(
+            projects: [project],
+            sessions: [session],
+            tabs: [terminalTab, fileTab],
+            restoreSnapshot: RestoreSnapshot(
+                selectedProjectID: projectID,
+                selectedSessionID: sessionID,
+                selectedTabID: fileTabID,
+                tabOrder: [terminalTabID, fileTabID]
+            )
+        )
+        let terminal = FakeTerminalSurfaceManager()
+        let service = DefaultWorkspaceCommandService(
+            store: store,
+            persistenceStore: persistence,
+            restoreCoordinator: RestoreCoordinator(persistenceStore: persistence),
+            terminalSurfaceManager: terminal
+        )
+
+        let result = try await service.restoreWorkspace()
+
+        #expect(store.tabsForSelectedSession.map(\.id) == [terminalTabID, fileTabID])
+        #expect(store.selectedTabID == fileTabID)
+        #expect(result.store.tabsForSelectedSession.map(\.kind) == [.terminal, .file])
+        #expect(terminal.createdTabs.map(\.id) == [terminalTabID])
+        #expect(service.metrics.terminalSurfaceCreationCount == 1)
+    }
+
+    @Test
     func closingLiveTabHonorsConfirmQuitBeforeRemovingMetadata() async throws {
         let harness = makeHarness()
         let project = try await harness.service.openProject(path: makeTemporaryProjectDirectory())
@@ -767,6 +815,27 @@ struct DefaultWorkspaceCommandServiceTests {
     }
 
     @Test
+    func closingFileTabBypassesTerminalCloseProtectionAndRemovesMetadata() async throws {
+        let harness = makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+        let fileURL = try makeTemporaryProjectFile(in: projectPath, relativePath: "Sources/File.swift")
+        let project = try await harness.service.openProject(path: projectPath)
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let terminalTab = try #require(harness.store.tabs.first)
+        let fileTab = try await harness.service.openFileTab(sessionID: session.id, path: fileURL.path)
+        harness.terminal.canCloseResult = false
+        harness.terminal.surfacesByTabID[fileTab.id] = GhosttySurfaceHandle()
+
+        try await harness.service.closeTab(tabID: fileTab.id, force: false)
+
+        #expect(harness.store.tabs.map(\.id) == [terminalTab.id])
+        #expect(harness.store.selectedTabID == terminalTab.id)
+        #expect(try await harness.persistence.loadTabs().map(\.id) == [terminalTab.id])
+        #expect(harness.terminal.canCloseRequestCount == 0)
+        #expect(harness.terminal.releasedTabIDs.isEmpty)
+    }
+
+    @Test
     func removingSessionForceClosesTabsAndClearsSelection() async throws {
         let harness = makeHarness()
         let project = try await harness.service.openProject(path: makeTemporaryProjectDirectory())
@@ -782,6 +851,46 @@ struct DefaultWorkspaceCommandServiceTests {
         #expect(harness.store.selectedSessionID == nil)
         #expect(harness.store.selectedTabID == nil)
         #expect(Set(harness.terminal.releasedTabIDs) == Set([firstTab.id, tab.id]))
+    }
+
+    @Test
+    func removingSessionWithMixedTabsReleasesOnlyTerminalSurfaces() async throws {
+        let harness = makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+        let fileURL = try makeTemporaryProjectFile(in: projectPath, relativePath: "Sources/File.swift")
+        let project = try await harness.service.openProject(path: projectPath)
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let terminalTab = try #require(harness.store.tabs.first)
+        let fileTab = try await harness.service.openFileTab(sessionID: session.id, path: fileURL.path)
+        harness.terminal.surfacesByTabID[fileTab.id] = GhosttySurfaceHandle()
+
+        try await harness.service.removeSession(id: session.id)
+
+        #expect(harness.store.sessions.isEmpty)
+        #expect(harness.store.tabs.isEmpty)
+        #expect(harness.store.selectedSessionID == nil)
+        #expect(harness.store.selectedTabID == nil)
+        #expect(harness.terminal.releasedTabIDs == [terminalTab.id])
+    }
+
+    @Test
+    func removingProjectWithMixedTabsChecksAndReleasesOnlyTerminalSurfaces() async throws {
+        let harness = makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+        let fileURL = try makeTemporaryProjectFile(in: projectPath, relativePath: "Sources/File.swift")
+        let project = try await harness.service.openProject(path: projectPath)
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let terminalTab = try #require(harness.store.tabs.first)
+        let fileTab = try await harness.service.openFileTab(sessionID: session.id, path: fileURL.path)
+        harness.terminal.surfacesByTabID[fileTab.id] = GhosttySurfaceHandle()
+
+        try await harness.service.removeProject(id: project.id)
+
+        #expect(harness.store.projects.isEmpty)
+        #expect(harness.store.sessions.isEmpty)
+        #expect(harness.store.tabs.isEmpty)
+        #expect(harness.terminal.canCloseRequestCount == 1)
+        #expect(harness.terminal.releasedTabIDs == [terminalTab.id])
     }
 
     @Test
@@ -904,6 +1013,17 @@ struct DefaultWorkspaceCommandServiceTests {
         return url.path
     }
 
+    private func makeTemporaryProjectFile(in projectPath: String, relativePath: String) throws -> URL {
+        let fileURL = URL(fileURLWithPath: projectPath, isDirectory: true)
+            .appendingPathComponent(relativePath)
+        try FileManager.default.createDirectory(
+            at: fileURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try "let value = 1\n".write(to: fileURL, atomically: true, encoding: .utf8)
+        return fileURL
+    }
+
     private func managedKeybindingOverrides() -> [AppCommandID: KeybindingOverride] {
         AppCommandRegistry.managedCommandIDs.enumerated().reduce(into: [:]) { overrides, pair in
             let index = pair.offset + 1
@@ -931,6 +1051,7 @@ private final class FakeTerminalSurfaceManager: WorkspaceTerminalSurfaceManaging
     private(set) var focusedTabIDs: [UUID] = []
     private(set) var resizedTabIDs: [UUID] = []
     private(set) var releasedTabIDs: [UUID] = []
+    private(set) var canCloseRequestCount = 0
     var surfaceCreationError: Error?
     var surfacesByTabID: [UUID: GhosttySurfaceHandle] = [:]
     var canCloseResult = true
@@ -951,7 +1072,8 @@ private final class FakeTerminalSurfaceManager: WorkspaceTerminalSurfaceManaging
     }
 
     func canClose(surface: GhosttySurfaceHandle) async -> Bool {
-        canCloseResult
+        canCloseRequestCount += 1
+        return canCloseResult
     }
 
     func focus(tabID: UUID) {

@@ -41,6 +41,65 @@ struct RestoreCoordinatorIntegrationTests {
     }
 
     @Test
+    func relaunchMixedSessionRestoresOrderSelectionAndSkipsUnreadableFileTabs() async throws {
+        let harness = try makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+        let readableFile = try makeTemporaryProjectFile(in: projectPath, relativePath: "Sources/App.swift")
+        let missingFile = URL(fileURLWithPath: projectPath, isDirectory: true)
+            .appendingPathComponent("Sources/Missing.swift")
+        let projectID = UUID()
+        let sessionID = UUID()
+        let terminalTabID = UUID()
+        let readableFileTabID = UUID()
+        let missingFileTabID = UUID()
+        let project = WorkspaceProject(id: projectID, path: projectPath, displayName: "restore")
+        let session = WorkspaceSession(id: sessionID, projectID: projectID, title: "Mixed Relaunch")
+        let terminalTab = WorkspaceTab(id: terminalTabID, sessionID: sessionID, workingDirectory: projectPath, ordinal: 0)
+        let readableFileTab = WorkspaceTab(
+            id: readableFileTabID,
+            sessionID: sessionID,
+            kind: .file,
+            workingDirectory: projectPath,
+            fileReference: WorkspaceFileReference(path: readableFile.path, projectRoot: projectPath),
+            ordinal: 1
+        )
+        let missingFileTab = WorkspaceTab(
+            id: missingFileTabID,
+            sessionID: sessionID,
+            kind: .file,
+            workingDirectory: projectPath,
+            fileReference: WorkspaceFileReference(path: missingFile.path, projectRoot: projectPath),
+            ordinal: 2
+        )
+        try await harness.persistence.save(project: project)
+        try await harness.persistence.save(session: session)
+        try await harness.persistence.save(tab: terminalTab)
+        try await harness.persistence.save(tab: readableFileTab)
+        try await harness.persistence.save(tab: missingFileTab)
+        try await harness.persistence.save(snapshot: RestoreSnapshot(
+            selectedProjectID: projectID,
+            selectedSessionID: sessionID,
+            selectedTabID: readableFileTabID,
+            tabOrder: [terminalTabID, readableFileTabID, missingFileTabID]
+        ))
+
+        let result = try await harness.service.restoreWorkspace()
+
+        #expect(harness.store.selectedProjectID == projectID)
+        #expect(harness.store.selectedSessionID == sessionID)
+        #expect(harness.store.selectedTabID == readableFileTabID)
+        #expect(harness.store.tabsForSelectedSession.map(\.id) == [terminalTabID, readableFileTabID])
+        #expect(harness.store.tabsForSelectedSession.map(\.kind) == [.terminal, .file])
+        #expect(harness.terminal.createdTabs.map(\.id) == [terminalTabID])
+        #expect(result.diagnostics.contains { diagnostic in
+            diagnostic.severity == .warning &&
+                diagnostic.message.contains(missingFileTabID.uuidString) &&
+                diagnostic.message.contains("missing or unreadable")
+        })
+        #expect(result.hasRecoveryItems)
+    }
+
+    @Test
     func missingProjectPathRestoresRemainingContextAndReportsRecovery() async throws {
         let harness = try makeHarness()
         let validPath = try makeTemporaryProjectDirectory()
@@ -226,6 +285,17 @@ struct RestoreCoordinatorIntegrationTests {
             .appendingPathComponent("native-mac-ade-restore-project-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url.path
+    }
+
+    private func makeTemporaryProjectFile(in projectPath: String, relativePath: String) throws -> URL {
+        let fileURL = URL(fileURLWithPath: projectPath, isDirectory: true)
+            .appendingPathComponent(relativePath)
+        try FileManager.default.createDirectory(
+            at: fileURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try "let restored = true\n".write(to: fileURL, atomically: true, encoding: .utf8)
+        return fileURL
     }
 
     private func corruptRestoreSnapshot(at path: String) throws {

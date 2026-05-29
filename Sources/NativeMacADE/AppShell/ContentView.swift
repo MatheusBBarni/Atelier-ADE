@@ -1215,7 +1215,7 @@ struct TabItemView: View {
     var body: some View {
         HStack(spacing: 6) {
             Button(action: onSelect) {
-                Label(title, systemImage: isActive ? "terminal.fill" : "terminal")
+                Label(title, systemImage: iconName)
                     .labelStyle(.titleAndIcon)
                     .lineLimit(1)
             }
@@ -1226,7 +1226,7 @@ struct TabItemView: View {
                 .labelStyle(.iconOnly)
                 .buttonStyle(.borderless)
                 .foregroundStyle(isActive ? theme.selectedText.color : theme.mutedText.color)
-                .help("Close terminal tab")
+                .help(closeHelp)
         }
         .padding(.leading, 10)
         .padding(.trailing, 6)
@@ -1237,13 +1237,45 @@ struct TabItemView: View {
                 .stroke(isActive ? theme.activeBorder.color : theme.border.color, lineWidth: 1)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Terminal tab in \(tab.workingDirectory)")
+        .accessibilityLabel(accessibilityLabel)
         .accessibilityValue(isActive ? "Active tab" : "Tab")
     }
 
     private var title: String {
+        if tab.kind == .file, let filePath = tab.fileReference?.path {
+            let fileName = URL(fileURLWithPath: filePath).lastPathComponent
+            return fileName.isEmpty ? filePath : fileName
+        }
+
         let directoryName = URL(fileURLWithPath: tab.workingDirectory).lastPathComponent
         return directoryName.isEmpty ? tab.workingDirectory : directoryName
+    }
+
+    private var iconName: String {
+        switch tab.kind {
+        case .terminal:
+            return isActive ? "terminal.fill" : "terminal"
+        case .file:
+            return isActive ? "doc.text.fill" : "doc.text"
+        }
+    }
+
+    private var closeHelp: String {
+        switch tab.kind {
+        case .terminal:
+            return "Close terminal tab"
+        case .file:
+            return "Close file tab"
+        }
+    }
+
+    private var accessibilityLabel: String {
+        switch tab.kind {
+        case .terminal:
+            return "Terminal tab in \(tab.workingDirectory)"
+        case .file:
+            return "File tab \(tab.fileReference?.path ?? tab.workingDirectory)"
+        }
     }
 }
 
@@ -1257,7 +1289,7 @@ struct TerminalHostAreaView: View {
     var body: some View {
         ZStack {
             theme.contentBackground.color
-            if let selectedTab = store.selectedTab {
+            if let selectedTab = store.selectedTab, selectedTab.kind == .terminal {
                 TerminalHostView(
                     tab: selectedTab,
                     isActive: selectedTab.id == store.selectedTabID,
@@ -1266,17 +1298,19 @@ struct TerminalHostAreaView: View {
                 )
                 .id(selectedTab.id)
                 .padding(12)
+            } else if let selectedTab = store.selectedTab, selectedTab.kind == .file {
+                FileTabPlaceholderView(tab: selectedTab)
             } else {
                 TerminalPlaceholderView(selectedProject: store.selectedProject, selectedSession: store.selectedSession)
             }
         }
-        .task(id: store.tabsForSelectedSession.map(\.id)) {
+        .task(id: store.tabsForSelectedSession.map { "\($0.id.uuidString):\($0.kind.rawValue)" }) {
             await ensureVisibleSessionSurfaces()
         }
     }
 
     private func ensureVisibleSessionSurfaces() async {
-        for tab in store.tabsForSelectedSession {
+        for tab in store.tabsForSelectedSession where tab.kind == .terminal {
             do {
                 try await terminalHostController.createSurface(for: tab)
             } catch {
@@ -1284,6 +1318,37 @@ struct TerminalHostAreaView: View {
                 return
             }
         }
+    }
+}
+
+struct FileTabPlaceholderView: View {
+    let tab: WorkspaceTab
+    @Environment(\.shellThemePalette) private var theme
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "doc.text")
+                .font(.system(size: 42))
+                .foregroundStyle(theme.accent.color)
+            Text(title)
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(theme.primaryText.color)
+                .lineLimit(1)
+            Text(tab.fileReference?.path ?? tab.workingDirectory)
+                .font(.callout.monospaced())
+                .foregroundStyle(theme.secondaryText.color)
+                .multilineTextAlignment(.center)
+                .textSelection(.enabled)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(28)
+        .background(theme.contentBackground.color)
+    }
+
+    private var title: String {
+        guard let path = tab.fileReference?.path else { return "File tab" }
+        let fileName = URL(fileURLWithPath: path).lastPathComponent
+        return fileName.isEmpty ? path : fileName
     }
 }
 

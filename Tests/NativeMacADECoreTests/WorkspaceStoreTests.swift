@@ -178,6 +178,56 @@ struct WorkspaceStoreTests {
     }
 
     @Test
+    func selectingAndActivatingMixedFileTabKeepsOneSessionScopedOrder() {
+        let projectID = UUID()
+        let sessionID = UUID()
+        let terminalTabID = UUID()
+        let fileTabID = UUID()
+        let projectPath = "/tmp/project"
+        let activatedAt = Date(timeIntervalSince1970: 800)
+        let terminalTab = WorkspaceTab(
+            id: terminalTabID,
+            sessionID: sessionID,
+            workingDirectory: projectPath,
+            ordinal: 0,
+            lastActivatedAt: Date(timeIntervalSince1970: 100)
+        )
+        let fileTab = WorkspaceTab(
+            id: fileTabID,
+            sessionID: sessionID,
+            kind: .file,
+            workingDirectory: projectPath,
+            fileReference: WorkspaceFileReference(
+                path: "/tmp/project/Sources/App.swift",
+                projectRoot: projectPath
+            ),
+            ordinal: 1,
+            lastActivatedAt: Date(timeIntervalSince1970: 200)
+        )
+        let store = WorkspaceStore(
+            projects: [
+                WorkspaceProject(id: projectID, path: projectPath, displayName: "project")
+            ],
+            sessions: [
+                WorkspaceSession(id: sessionID, projectID: projectID, title: "Mixed")
+            ],
+            tabs: [fileTab, terminalTab]
+        )
+
+        store.selectTab(id: fileTabID)
+        store.markTabActivated(id: fileTabID, at: activatedAt)
+
+        #expect(store.selectedProjectID == projectID)
+        #expect(store.selectedSessionID == sessionID)
+        #expect(store.selectedTabID == fileTabID)
+        #expect(store.tabsForSelectedSession.map(\.id) == [terminalTabID, fileTabID])
+        #expect(store.terminalTabs(in: sessionID).map(\.id) == [terminalTabID])
+        #expect(store.fileTabs(in: sessionID).map(\.id) == [fileTabID])
+        #expect(store.tab(id: fileTabID)?.lastActivatedAt == activatedAt)
+        #expect(store.snapshot(updatedAt: activatedAt).tabOrder == [terminalTabID, fileTabID])
+    }
+
+    @Test
     func restoreCoordinatorHydratesStoreFromPersistenceBoundary() async throws {
         let projectID = UUID()
         let sessionID = UUID()

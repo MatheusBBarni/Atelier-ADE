@@ -2,6 +2,9 @@ import Foundation
 
 public enum WorkspaceCommandError: Error, Equatable, Sendable {
     case invalidProjectPath(String)
+    case invalidFilePath(String)
+    case filePathOutsideProject(filePath: String, projectRoot: String)
+    case invalidFileTab(UUID, String)
     case invalidSessionTitle(String)
     case missingProject(UUID)
     case missingSession(UUID)
@@ -42,6 +45,7 @@ public protocol WorkspaceCommandService: AppShellStartupServicing {
     func createSession(projectID: UUID, shortcutID: UUID?) async throws -> WorkspaceSession
     func renameSession(sessionID: UUID, title: String) async throws
     func createTab(sessionID: UUID) async throws -> WorkspaceTab
+    func openFileTab(sessionID: UUID, path: String) async throws -> WorkspaceTab
     @discardableResult
     func restoreWorkspace() async throws -> RestoreWorkspaceResult
     func closeTab(tabID: UUID, force: Bool) async throws

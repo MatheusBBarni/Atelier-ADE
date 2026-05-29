@@ -52,16 +52,24 @@ public struct SkippedRestoredProject: Identifiable, Equatable, Sendable {
 public struct RestoreCoordinator {
     private let persistenceStore: any WorkspacePersistenceStore
     private let directoryIsAccessible: @Sendable (String) -> Bool
+    private let fileIsReadable: @Sendable (String) -> Bool
 
     public init(
         persistenceStore: any WorkspacePersistenceStore,
         directoryIsAccessible: @escaping @Sendable (String) -> Bool = { path in
             var isDirectory: ObjCBool = false
             return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue
+        },
+        fileIsReadable: @escaping @Sendable (String) -> Bool = { path in
+            var isDirectory: ObjCBool = false
+            return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) &&
+                !isDirectory.boolValue &&
+                FileManager.default.isReadableFile(atPath: path)
         }
     ) {
         self.persistenceStore = persistenceStore
         self.directoryIsAccessible = directoryIsAccessible
+        self.fileIsReadable = fileIsReadable
     }
 
     public func restoreStore() async throws -> WorkspaceStore {
@@ -108,7 +116,13 @@ public struct RestoreCoordinator {
 
         let restoredSessions = sessions.filter { accessibleProjectIDs.contains($0.projectID) }
         let restoredSessionIDs = Set(restoredSessions.map(\.id))
-        let restoredTabs = orderedTabs(tabs.filter { restoredSessionIDs.contains($0.sessionID) }, snapshot: snapshot)
+        let validatedTabs = validateRestoredTabs(
+            tabs.filter { restoredSessionIDs.contains($0.sessionID) },
+            sessions: restoredSessions,
+            projects: accessibleProjects
+        )
+        diagnostics.append(contentsOf: validatedTabs.diagnostics)
+        let restoredTabs = orderedTabs(validatedTabs.tabs, snapshot: snapshot)
 
         let restoredStore = WorkspaceStore()
         restoredStore.restore(
@@ -131,6 +145,67 @@ public struct RestoreCoordinator {
             store: restoredStore,
             diagnostics: diagnostics,
             skippedProjects: skippedProjects
+        )
+    }
+
+    private func validateRestoredTabs(
+        _ tabs: [WorkspaceTab],
+        sessions: [WorkspaceSession],
+        projects: [WorkspaceProject]
+    ) -> (tabs: [WorkspaceTab], diagnostics: [RestoreDiagnostic]) {
+        let sessionsByID = Dictionary(uniqueKeysWithValues: sessions.map { ($0.id, $0) })
+        let projectsByID = Dictionary(uniqueKeysWithValues: projects.map { ($0.id, $0) })
+        var restoredTabs: [WorkspaceTab] = []
+        var diagnostics: [RestoreDiagnostic] = []
+
+        for tab in tabs {
+            switch tab.kind {
+            case .terminal:
+                restoredTabs.append(tab)
+            case .file:
+                guard let session = sessionsByID[tab.sessionID],
+                      let project = projectsByID[session.projectID]
+                else {
+                    diagnostics.append(fileTabDiagnostic(tabID: tab.id, reason: "owning project or session is unavailable."))
+                    continue
+                }
+                guard let fileReference = tab.fileReference else {
+                    diagnostics.append(fileTabDiagnostic(tabID: tab.id, reason: "file metadata is missing."))
+                    continue
+                }
+
+                let projectRoot = URL(fileURLWithPath: project.path, isDirectory: true).standardizedFileURL.path
+                let workingDirectory = URL(fileURLWithPath: tab.workingDirectory, isDirectory: true).standardizedFileURL.path
+                let referenceRoot = URL(fileURLWithPath: fileReference.projectRoot, isDirectory: true).standardizedFileURL.path
+                let filePath = URL(fileURLWithPath: fileReference.path).standardizedFileURL.path
+
+                guard workingDirectory == projectRoot, referenceRoot == projectRoot else {
+                    diagnostics.append(fileTabDiagnostic(tabID: tab.id, reason: "project root metadata does not match the restored project."))
+                    continue
+                }
+                guard isPath(filePath, containedBy: projectRoot) else {
+                    diagnostics.append(fileTabDiagnostic(tabID: tab.id, reason: "file path is outside the restored project."))
+                    continue
+                }
+                guard fileIsReadable(filePath) else {
+                    diagnostics.append(fileTabDiagnostic(tabID: tab.id, reason: "file is missing or unreadable."))
+                    continue
+                }
+
+                var normalizedTab = tab
+                normalizedTab.workingDirectory = projectRoot
+                normalizedTab.fileReference = WorkspaceFileReference(path: filePath, projectRoot: projectRoot)
+                restoredTabs.append(normalizedTab)
+            }
+        }
+
+        return (restoredTabs, diagnostics)
+    }
+
+    private func fileTabDiagnostic(tabID: UUID, reason: String) -> RestoreDiagnostic {
+        RestoreDiagnostic(
+            severity: .warning,
+            message: "Skipped restored file tab \(tabID.uuidString): \(reason)"
         )
     }
 
@@ -159,5 +234,13 @@ public struct RestoreCoordinator {
             orderedTab.ordinal = offset
             return orderedTab
         }
+    }
+
+    private func isPath(_ path: String, containedBy projectRoot: String) -> Bool {
+        let standardizedPath = URL(fileURLWithPath: path).standardizedFileURL.path
+        let standardizedRoot = URL(fileURLWithPath: projectRoot, isDirectory: true).standardizedFileURL.path
+        guard standardizedPath != standardizedRoot else { return false }
+        let rootPrefix = standardizedRoot.hasSuffix("/") ? standardizedRoot : "\(standardizedRoot)/"
+        return standardizedPath.hasPrefix(rootPrefix)
     }
 }

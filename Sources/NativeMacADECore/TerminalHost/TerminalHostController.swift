@@ -23,6 +23,10 @@ public final class TerminalHostController: WorkspaceTerminalSurfaceManaging {
 
     @discardableResult
     public func createSurface(for tab: WorkspaceTab) async throws -> GhosttySurfaceHandle {
+        guard tab.kind == .terminal else {
+            throw WorkspaceCommandError.invalidFileTab(tab.id, "File tabs do not support terminal surfaces")
+        }
+
         if let existing = surfacesByTabID[tab.id] { return existing }
 
         let configuration = GhosttyLaunchConfiguration(tab: tab, appearance: currentAppearance)
