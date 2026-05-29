@@ -138,10 +138,7 @@ struct ContentView: View {
 
         Task {
             do {
-                let session = try await commandService.createSession(projectID: projectID, shortcutID: option.shortcutID)
-                if option.shortcutID == nil {
-                    _ = try await commandService.createTab(sessionID: session.id)
-                }
+                _ = try await commandService.createSession(projectID: projectID, shortcutID: option.shortcutID)
             } catch {
                 userMessage = UserMessage(title: "Session could not be created", detail: String(describing: error))
             }
@@ -303,7 +300,6 @@ struct ProjectSidebarView: View {
     @State private var renameDraft: SessionRenameDraft?
     @State private var expandedProjectIDs: Set<UUID> = []
     @State private var hoveredSessionID: UUID?
-    @State private var initializingSessionIDs: Set<UUID> = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -476,18 +472,7 @@ struct ProjectSidebarView: View {
         Task {
             do {
                 expandProject(projectID)
-                let session = try await commandService.createSession(projectID: projectID, shortcutID: shortcutID)
-                if shortcutID == nil {
-                    initializingSessionIDs.insert(session.id)
-                    do {
-                        _ = try await commandService.createTab(sessionID: session.id)
-                    } catch {
-                        initializingSessionIDs.remove(session.id)
-                        try? await commandService.removeSession(id: session.id)
-                        throw error
-                    }
-                    initializingSessionIDs.remove(session.id)
-                }
+                _ = try await commandService.createSession(projectID: projectID, shortcutID: shortcutID)
             } catch {
                 userMessage = UserMessage(title: "Session could not be created", detail: String(describing: error))
             }
@@ -498,16 +483,6 @@ struct ProjectSidebarView: View {
         Task {
             do {
                 try await commandService.selectSession(id: id)
-                if let id,
-                   !initializingSessionIDs.contains(id),
-                   !store.tabs.contains(where: { $0.sessionID == id }) {
-                    do {
-                        _ = try await commandService.createTab(sessionID: id)
-                    } catch {
-                        try? await commandService.removeSession(id: id)
-                        throw error
-                    }
-                }
             } catch {
                 userMessage = UserMessage(title: "Session selection could not be saved", detail: String(describing: error))
             }

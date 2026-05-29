@@ -28,8 +28,8 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
 
         #expect(harness.store.tabs == tabsBefore)
         #expect(persistedTabsAfter == persistedTabsBefore)
-        #expect(harness.store.selectedTabID == nil)
-        #expect(snapshotAfter?.selectedTabID == nil)
+        #expect(harness.store.selectedTabID == tabsBefore.first?.id)
+        #expect(snapshotAfter?.selectedTabID == tabsBefore.first?.id)
         #expect(harness.service.metrics.terminalSurfaceFailureCount == 1)
         #expect(harness.service.metrics.diagnostics().releaseBlockingReasons.contains("terminal surface failure rate above 1%"))
         #expect(harness.service.logger.events.contains { event in
@@ -52,9 +52,11 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
 
         let session = try await harness.service.createSession(projectID: project.id, shortcutID: shortcut.id)
         let launchedTab = try #require(harness.terminal.createdTabs.first)
+        let persistedSessions = try await harness.persistence.loadSessions()
         let persistedTabs = try await harness.persistence.loadTabs()
 
         #expect(session.shortcutID == shortcut.id)
+        #expect(persistedSessions.map(\.id) == [session.id])
         #expect(launchedTab.sessionID == session.id)
         #expect(launchedTab.workingDirectory == project.path)
         #expect(launchedTab.launchCommand == "codex")
@@ -66,7 +68,34 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
     }
 
     @Test
-    func creatingTabInShortcutSessionPersistsPlainShellLaunchIntent() async throws {
+    func creatingSessionWithoutExplicitShortcutUsesSavedDefaultProfile() async throws {
+        let harness = try makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+        let project = try await harness.service.openProject(path: projectPath)
+        let shortcut = SessionShortcut(
+            label: "Claude Default",
+            launchCommand: "claude",
+            launchArgumentsJSON: "[\"--continue\"]",
+            isBuiltIn: true
+        )
+        try await harness.persistence.save(shortcut: shortcut)
+        try await harness.persistence.save(appPreferences: AppPreferences(defaultSessionShortcutID: shortcut.id))
+
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let launchedTab = try #require(harness.terminal.createdTabs.first)
+        let persistedSessions = try await harness.persistence.loadSessions()
+        let persistedTabs = try await harness.persistence.loadTabs()
+
+        #expect(session.shortcutID == shortcut.id)
+        #expect(persistedSessions.map(\.id) == [session.id])
+        #expect(persistedTabs.map(\.id) == [launchedTab.id])
+        #expect(launchedTab.launchCommand == "claude")
+        #expect(launchedTab.launchArgumentsJSON == "[\"--continue\"]")
+        #expect(harness.store.selectedTabID == launchedTab.id)
+    }
+
+    @Test
+    func creatingTabInShortcutSessionPersistsStoredLaunchIntent() async throws {
         let harness = try makeHarness()
         let projectPath = try makeTemporaryProjectDirectory()
         let project = try await harness.service.openProject(path: projectPath)
@@ -82,22 +111,20 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
         let tab = try await harness.service.createTab(sessionID: session.id)
         let persistedTab = try #require(try await harness.persistence.loadTabs().first { $0.id == tab.id })
 
-        #expect(tab.launchCommand == nil)
-        #expect(tab.launchArgumentsJSON == nil)
-        #expect(persistedTab.launchCommand == nil)
-        #expect(persistedTab.launchArgumentsJSON == nil)
+        #expect(tab.launchCommand == "claude")
+        #expect(tab.launchArgumentsJSON == "[\"--continue\"]")
+        #expect(persistedTab.launchCommand == "claude")
+        #expect(persistedTab.launchArgumentsJSON == "[\"--continue\"]")
     }
 
     @Test
-    func shortcutSessionCreationRollsBackSessionWhenFirstTabSurfaceFails() async throws {
+    func sessionCreationRollsBackSessionWhenFirstTabSurfaceFails() async throws {
         let harness = try makeHarness()
         let project = try await harness.service.openProject(path: makeTemporaryProjectDirectory())
-        let shortcut = SessionShortcut(label: "Codex", launchCommand: "codex", launchArgumentsJSON: "[]", isBuiltIn: true)
-        try await harness.persistence.save(shortcut: shortcut)
         harness.terminal.surfaceCreationError = GhosttyAdapterError.surfaceCreationFailed("first tab failed")
 
         await #expect(throws: WorkspaceCommandError.terminalUnavailable("first tab failed")) {
-            _ = try await harness.service.createSession(projectID: project.id, shortcutID: shortcut.id)
+            _ = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
         }
 
         #expect(harness.store.sessions.isEmpty)
@@ -220,12 +247,58 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
     }
 
     @Test
+    func restoringPersistedTabKeepsOriginalLaunchIntentAfterDefaultProfileChanges() async throws {
+        let harness = try makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+        let projectID = UUID()
+        let originalShortcut = SessionShortcut(
+            label: "Original Codex",
+            launchCommand: "codex",
+            launchArgumentsJSON: "[\"exec\"]",
+            isBuiltIn: true
+        )
+        let newDefaultShortcut = SessionShortcut(
+            label: "New Claude",
+            launchCommand: "claude",
+            launchArgumentsJSON: "[\"--continue\"]",
+            isBuiltIn: true
+        )
+        let sessionID = UUID()
+        let tabID = UUID()
+        try await harness.persistence.save(project: WorkspaceProject(id: projectID, path: projectPath, displayName: "restore-default-change"))
+        try await harness.persistence.save(shortcut: originalShortcut)
+        try await harness.persistence.save(shortcut: newDefaultShortcut)
+        try await harness.persistence.save(appPreferences: AppPreferences(defaultSessionShortcutID: newDefaultShortcut.id))
+        try await harness.persistence.save(session: WorkspaceSession(id: sessionID, projectID: projectID, title: "Original", shortcutID: originalShortcut.id))
+        try await harness.persistence.save(tab: WorkspaceTab(
+            id: tabID,
+            sessionID: sessionID,
+            workingDirectory: projectPath,
+            launchCommand: originalShortcut.launchCommand,
+            launchArgumentsJSON: originalShortcut.launchArgumentsJSON,
+            ordinal: 0
+        ))
+        try await harness.persistence.save(snapshot: RestoreSnapshot(
+            selectedProjectID: projectID,
+            selectedSessionID: sessionID,
+            selectedTabID: tabID,
+            tabOrder: [tabID]
+        ))
+
+        try await harness.service.restoreWorkspace()
+        let restoredTab = try #require(harness.terminal.createdTabs.first)
+
+        #expect(restoredTab.launchCommand == "codex")
+        #expect(restoredTab.launchArgumentsJSON == "[\"exec\"]")
+    }
+
+    @Test
     func closingLastTabRemovesPersistenceAndClearsSelectedTab() async throws {
         let harness = try makeHarness()
         let projectPath = try makeTemporaryProjectDirectory()
         let project = try await harness.service.openProject(path: projectPath)
         let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
-        let tab = try await harness.service.createTab(sessionID: session.id)
+        let tab = try #require(harness.store.tabs.first)
 
         try await harness.service.closeTab(tabID: tab.id, force: false)
         let persistedTabs = try await harness.persistence.loadTabs()
@@ -246,16 +319,17 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
         let harness = try makeHarness()
         let project = try await harness.service.openProject(path: makeTemporaryProjectDirectory())
         let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let initialTab = try #require(harness.store.tabs.first)
         let exitedTab = try await harness.service.createTab(sessionID: session.id)
         let remainingTab = try await harness.service.createTab(sessionID: session.id)
 
         try await harness.service.closeTab(tabID: exitedTab.id, force: true)
 
-        #expect(harness.store.tabs.map(\.id) == [remainingTab.id])
+        #expect(harness.store.tabs.map(\.id) == [initialTab.id, remainingTab.id])
         #expect(harness.store.selectedProjectID == project.id)
         #expect(harness.store.selectedSessionID == session.id)
         #expect(harness.store.selectedTabID == remainingTab.id)
-        #expect(try await harness.persistence.loadTabs().map(\.id) == [remainingTab.id])
+        #expect(try await harness.persistence.loadTabs().map(\.id) == [initialTab.id, remainingTab.id])
         #expect(harness.terminal.closeRequests.isEmpty)
         #expect(harness.terminal.releasedTabIDs == [exitedTab.id])
     }
@@ -264,8 +338,8 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
     func removingProjectDeletesDependentGraphAndClearsPersistedSelection() async throws {
         let harness = try makeHarness()
         let project = try await harness.service.openProject(path: makeTemporaryProjectDirectory())
-        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
-        let tab = try await harness.service.createTab(sessionID: session.id)
+        _ = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let tab = try #require(harness.store.tabs.first)
 
         try await harness.service.removeProject(id: project.id)
         let persistedProjects = try await harness.persistence.loadProjects()
@@ -294,7 +368,7 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
         let harness = try makeHarness()
         let project = try await harness.service.openProject(path: makeTemporaryProjectDirectory())
         let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
-        let tab = try await harness.service.createTab(sessionID: session.id)
+        let tab = try #require(harness.store.tabs.first)
         harness.terminal.canCloseResult = false
 
         try await harness.service.removeSession(id: session.id)

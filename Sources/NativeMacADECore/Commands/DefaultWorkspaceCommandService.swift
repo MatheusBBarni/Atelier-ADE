@@ -163,81 +163,68 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
     }
 
     public func createSession(projectID: UUID, shortcutID: UUID?) async throws -> WorkspaceSession {
+        let startedAt = now()
         guard store.projects.contains(where: { $0.id == projectID }) else {
             throw WorkspaceCommandError.missingProject(projectID)
         }
-        let selectedShortcut: SessionShortcut?
-        if let shortcutID {
-            let shortcuts = try await loadSessionShortcutsIncludingBuiltIns()
-            guard let shortcut = shortcuts.first(where: { $0.id == shortcutID }) else {
-                throw WorkspaceCommandError.missingShortcut(shortcutID)
-            }
-            selectedShortcut = shortcut
-        } else {
-            selectedShortcut = nil
+        let project = try requireProject(id: projectID)
+        let launchIntent = try await resolveLaunchIntent(explicitShortcutID: shortcutID)
+        if let shortcut = launchIntent.shortcut {
+            try await persist { try await persistenceStore.save(shortcut: shortcut) }
         }
 
         let timestamp = now()
         let session = WorkspaceSession(
             projectID: projectID,
-            shortcutID: shortcutID,
+            shortcutID: launchIntent.shortcutID,
             createdAt: timestamp,
             lastActivatedAt: timestamp
         )
-        var fields = [
-            "project_id": projectID.uuidString,
-            "session_id": session.id.uuidString
-        ]
-        if let selectedShortcut {
-            fields["shortcut_id"] = selectedShortcut.id.uuidString
-            fields["launch_profile_label"] = selectedShortcut.label
-            let project = try requireProject(id: projectID)
-            let tab = WorkspaceTab(
-                sessionID: session.id,
-                workingDirectory: project.path,
-                launchCommand: selectedShortcut.launchCommand,
-                launchArgumentsJSON: selectedShortcut.launchArgumentsJSON,
-                ordinal: 0,
-                createdAt: timestamp,
-                lastActivatedAt: timestamp
-            )
-            let surface: GhosttySurfaceHandle
-            do {
-                surface = try await createSurface(for: tab)
-            } catch {
-                metrics.recordTerminalSurfaceFailure()
-                logger.emit("terminal_surface_failed", fields: [
-                    "tab_id": tab.id.uuidString,
-                    "session_id": session.id.uuidString,
-                    "reason": String(describing: error)
-                ])
-                throw error
-            }
-            do {
-                try await persist { try await persistenceStore.save(session: session, firstTab: tab) }
-            } catch {
-                terminalSurfaceManager.releaseSurface(for: tab.id)
-                throw error
-            }
-            surfacesByTabID[tab.id] = surface
-            store.upsertSession(session)
-            store.upsertTab(tab)
-            try await persistSnapshot()
-            metrics.recordTabCreation(duration: now().timeIntervalSince(timestamp))
-            logger.emit("tab_created", fields: [
-                "project_id": project.id.uuidString,
+        let firstTab = WorkspaceTab(
+            sessionID: session.id,
+            workingDirectory: project.path,
+            launchCommand: launchIntent.launchCommand,
+            launchArgumentsJSON: launchIntent.launchArgumentsJSON,
+            ordinal: 0,
+            createdAt: timestamp,
+            lastActivatedAt: timestamp
+        )
+        let surface: GhosttySurfaceHandle
+        do {
+            surface = try await createSurface(for: firstTab)
+        } catch {
+            metrics.recordTerminalSurfaceFailure()
+            logger.emit("terminal_surface_failed", fields: [
+                "tab_id": firstTab.id.uuidString,
                 "session_id": session.id.uuidString,
-                "tab_id": tab.id.uuidString,
-                "launch_profile_label": selectedShortcut.label,
-                "duration_ms": String(Int((now().timeIntervalSince(timestamp) * 1_000).rounded()))
+                "reason": String(describing: error)
             ])
-        } else {
-            try await persist { try await persistenceStore.save(session: session) }
-            store.upsertSession(session)
-            try await persistSnapshot()
+            throw error
         }
+        do {
+            try await persist { try await persistenceStore.save(session: session, firstTab: firstTab) }
+        } catch {
+            terminalSurfaceManager.releaseSurface(for: firstTab.id)
+            throw error
+        }
+        surfacesByTabID[firstTab.id] = surface
+        store.upsertSession(session)
+        store.upsertTab(firstTab)
+        try await persistSnapshot()
+        metrics.recordTabCreation(duration: now().timeIntervalSince(startedAt))
         metrics.recordSessionCreate()
-        logger.emit("session_created", fields: fields)
+        logger.emit("tab_created", fields: tabLogFields(
+            projectID: project.id,
+            sessionID: session.id,
+            tabID: firstTab.id,
+            launchIntent: launchIntent,
+            startedAt: startedAt
+        ))
+        logger.emit("session_created", fields: sessionLogFields(
+            projectID: projectID,
+            sessionID: session.id,
+            launchIntent: launchIntent
+        ))
         return session
     }
 
@@ -264,13 +251,14 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
         guard let project = store.projects.first(where: { $0.id == session.projectID }) else {
             throw WorkspaceCommandError.missingProject(session.projectID)
         }
+        let launchIntent = try await resolveStoredLaunchIntent(for: session)
 
         let timestamp = now()
         let tab = WorkspaceTab(
             sessionID: session.id,
             workingDirectory: project.path,
-            launchCommand: nil,
-            launchArgumentsJSON: nil,
+            launchCommand: launchIntent.launchCommand,
+            launchArgumentsJSON: launchIntent.launchArgumentsJSON,
             ordinal: store.nextTabOrdinal(for: session.id),
             createdAt: timestamp,
             lastActivatedAt: timestamp
@@ -298,13 +286,13 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
         store.upsertTab(tab)
         try await persistSnapshot()
         metrics.recordTabCreation(duration: now().timeIntervalSince(startedAt))
-        logger.emit("tab_created", fields: [
-            "project_id": project.id.uuidString,
-            "session_id": session.id.uuidString,
-            "tab_id": tab.id.uuidString,
-            "launch_profile_label": "plain",
-            "duration_ms": String(Int((now().timeIntervalSince(startedAt) * 1_000).rounded()))
-        ])
+        logger.emit("tab_created", fields: tabLogFields(
+            projectID: project.id,
+            sessionID: session.id,
+            tabID: tab.id,
+            launchIntent: launchIntent,
+            startedAt: startedAt
+        ))
         return tab
     }
 
@@ -420,14 +408,79 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
         metrics.diagnostics()
     }
 
-    private func loadSessionShortcutsIncludingBuiltIns() async throws -> [SessionShortcut] {
+    private func loadSessionShortcutsIncludingBuiltIns(seedMissingBuiltIns: Bool = true) async throws -> [SessionShortcut] {
         var shortcuts = try await persist { try await persistenceStore.loadSessionShortcuts() }
         let existingIDs = Set(shortcuts.map(\.id))
         for shortcut in SessionShortcut.builtInDefaults where !existingIDs.contains(shortcut.id) {
-            try await persist { try await persistenceStore.save(shortcut: shortcut) }
+            if seedMissingBuiltIns {
+                try await persist { try await persistenceStore.save(shortcut: shortcut) }
+            }
             shortcuts.append(shortcut)
         }
         return shortcuts.sorted { $0.label < $1.label }
+    }
+
+    private func resolveLaunchIntent(explicitShortcutID: UUID?) async throws -> ResolvedLaunchIntent {
+        if let explicitShortcutID {
+            let shortcuts = try await loadSessionShortcutsIncludingBuiltIns(seedMissingBuiltIns: false)
+            guard let shortcut = shortcuts.first(where: { $0.id == explicitShortcutID }) else {
+                throw WorkspaceCommandError.missingShortcut(explicitShortcutID)
+            }
+            return ResolvedLaunchIntent(source: .explicit, shortcut: shortcut)
+        }
+
+        let preferences = try await persist { try await persistenceStore.loadAppPreferences() }
+        guard let defaultShortcutID = preferences.defaultSessionShortcutID else {
+            return ResolvedLaunchIntent(source: .plain, shortcut: nil)
+        }
+
+        let shortcuts = try await loadSessionShortcutsIncludingBuiltIns(seedMissingBuiltIns: false)
+        guard let shortcut = shortcuts.first(where: { $0.id == defaultShortcutID }) else {
+            logger.emit("default_profile_resolution_failed", fields: [
+                "shortcut_id": defaultShortcutID.uuidString,
+                "reason": "missing_shortcut"
+            ])
+            return ResolvedLaunchIntent(source: .plain, shortcut: nil)
+        }
+        return ResolvedLaunchIntent(source: .savedDefault, shortcut: shortcut)
+    }
+
+    private func resolveStoredLaunchIntent(for session: WorkspaceSession) async throws -> ResolvedLaunchIntent {
+        guard let shortcutID = session.shortcutID else {
+            return ResolvedLaunchIntent(source: .plain, shortcut: nil)
+        }
+
+        let shortcuts = try await loadSessionShortcutsIncludingBuiltIns(seedMissingBuiltIns: false)
+        guard let shortcut = shortcuts.first(where: { $0.id == shortcutID }) else {
+            throw WorkspaceCommandError.missingShortcut(shortcutID)
+        }
+        return ResolvedLaunchIntent(source: .storedSession, shortcut: shortcut)
+    }
+
+    private func sessionLogFields(
+        projectID: UUID,
+        sessionID: UUID,
+        launchIntent: ResolvedLaunchIntent
+    ) -> [String: String] {
+        var fields = launchIntent.logFields
+        fields["project_id"] = projectID.uuidString
+        fields["session_id"] = sessionID.uuidString
+        return fields
+    }
+
+    private func tabLogFields(
+        projectID: UUID,
+        sessionID: UUID,
+        tabID: UUID,
+        launchIntent: ResolvedLaunchIntent,
+        startedAt: Date
+    ) -> [String: String] {
+        var fields = launchIntent.logFields
+        fields["project_id"] = projectID.uuidString
+        fields["session_id"] = sessionID.uuidString
+        fields["tab_id"] = tabID.uuidString
+        fields["duration_ms"] = String(Int((now().timeIntervalSince(startedAt) * 1_000).rounded()))
+        return fields
     }
 
     private func directoryExists(at path: String) -> Bool {
@@ -512,5 +565,33 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
     private func persistSnapshot() async throws {
         let snapshot = store.snapshot(updatedAt: now())
         try await persist { try await persistenceStore.save(snapshot: snapshot) }
+    }
+}
+
+private enum LaunchProfileSource: String {
+    case explicit
+    case savedDefault = "default"
+    case plain
+    case storedSession = "session"
+}
+
+private struct ResolvedLaunchIntent {
+    var source: LaunchProfileSource
+    var shortcut: SessionShortcut?
+
+    var shortcutID: UUID? { shortcut?.id }
+    var launchCommand: String? { shortcut?.launchCommand }
+    var launchArgumentsJSON: String? { shortcut?.launchArgumentsJSON }
+
+    var logFields: [String: String] {
+        var fields = [
+            "launch_profile_source": source.rawValue,
+            "launch_profile_label": shortcut?.label ?? "plain"
+        ]
+        if let shortcut {
+            fields["shortcut_id"] = shortcut.id.uuidString
+            fields["launch_profile_id"] = shortcut.id.uuidString
+        }
+        return fields
     }
 }
