@@ -137,6 +137,35 @@ struct WorkspaceModelsTests {
     }
 
     @Test
+    func inMemoryPersistencePreservesMixedTabMetadata() async throws {
+        let sessionID = UUID()
+        let projectRoot = "/Users/example/project"
+        let terminalTab = WorkspaceTab(
+            sessionID: sessionID,
+            workingDirectory: projectRoot,
+            ordinal: 0
+        )
+        let fileReference = WorkspaceFileReference(
+            path: "/Users/example/project/Package.swift",
+            projectRoot: projectRoot
+        )
+        let fileTab = WorkspaceTab(
+            sessionID: sessionID,
+            kind: .file,
+            workingDirectory: projectRoot,
+            fileReference: fileReference,
+            ordinal: 1
+        )
+        let store = InMemoryWorkspacePersistenceStore(tabs: [fileTab, terminalTab])
+
+        let loadedTabs = try await store.loadTabs()
+
+        #expect(loadedTabs.map(\.id) == [terminalTab.id, fileTab.id])
+        #expect(loadedTabs.map(\.kind) == [.terminal, .file])
+        #expect(loadedTabs.last?.fileReference == fileReference)
+    }
+
+    @Test
     func defaultSessionNamingUsesMonthDayHourMinuteUntilRename() {
         let date = Date(timeIntervalSince1970: 1_717_393_500) // 2024-06-03 05:45 UTC
         let projectID = UUID()
@@ -180,6 +209,59 @@ struct WorkspaceModelsTests {
         #expect(tab.ordinal == 2)
         #expect(tab.createdAt == createdAt)
         #expect(tab.lastActivatedAt == activatedAt)
+        #expect(tab.kind == .terminal)
+        #expect(tab.fileReference == nil)
+    }
+
+    @Test
+    func terminalTabCodableRoundTripDefaultsToTerminalKindWithoutFileMetadata() throws {
+        let tab = WorkspaceTab(
+            sessionID: UUID(),
+            workingDirectory: "/Users/example/project",
+            launchCommand: "codex",
+            launchArgumentsJSON: "[]",
+            ordinal: 0,
+            createdAt: Date(timeIntervalSince1970: 100),
+            lastActivatedAt: Date(timeIntervalSince1970: 200)
+        )
+
+        let encoded = try JSONEncoder().encode(tab)
+        var legacyPayload = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        legacyPayload.removeValue(forKey: "kind")
+        legacyPayload.removeValue(forKey: "fileReference")
+        let legacyEncoded = try JSONSerialization.data(withJSONObject: legacyPayload)
+
+        let decoded = try JSONDecoder().decode(WorkspaceTab.self, from: legacyEncoded)
+
+        #expect(decoded == tab)
+        #expect(decoded.kind == .terminal)
+        #expect(decoded.fileReference == nil)
+    }
+
+    @Test
+    func fileTabCodableRoundTripPreservesFileReferenceFields() throws {
+        let projectRoot = "/Users/example/project"
+        let fileReference = WorkspaceFileReference(
+            path: "/Users/example/project/Sources/App.swift",
+            projectRoot: projectRoot
+        )
+        let tab = WorkspaceTab(
+            sessionID: UUID(),
+            kind: .file,
+            workingDirectory: projectRoot,
+            fileReference: fileReference,
+            ordinal: 1,
+            createdAt: Date(timeIntervalSince1970: 300),
+            lastActivatedAt: Date(timeIntervalSince1970: 400)
+        )
+
+        let encoded = try JSONEncoder().encode(tab)
+        let decoded = try JSONDecoder().decode(WorkspaceTab.self, from: encoded)
+
+        #expect(decoded == tab)
+        #expect(decoded.kind == .file)
+        #expect(decoded.fileReference?.path == fileReference.path)
+        #expect(decoded.fileReference?.projectRoot == fileReference.projectRoot)
     }
 
     @Test

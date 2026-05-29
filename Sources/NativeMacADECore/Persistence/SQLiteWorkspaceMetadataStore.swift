@@ -72,16 +72,27 @@ public actor SQLiteWorkspaceMetadataStore: WorkspacePersistenceStore {
     }
 
     public func loadTabs() async throws -> [WorkspaceTab] {
-        try query("SELECT id, session_id, working_directory, launch_command, launch_arguments_json, ordinal, created_at, last_activated_at FROM tabs ORDER BY session_id ASC, ordinal ASC") { statement in
-            try WorkspaceTab(
-                id: uuid(statement, 0),
+        try query("SELECT id, session_id, working_directory, launch_command, launch_arguments_json, kind, file_path, ordinal, created_at, last_activated_at FROM tabs ORDER BY session_id ASC, ordinal ASC") { statement in
+            let tabID = try uuid(statement, 0)
+            let workingDirectory = try text(statement, 2)
+            let kind = try workspaceTabKind(statement, 5)
+            let filePath = optionalText(statement, 6)
+            return try WorkspaceTab(
+                id: tabID,
                 sessionID: uuid(statement, 1),
-                workingDirectory: text(statement, 2),
+                kind: kind,
+                workingDirectory: workingDirectory,
                 launchCommand: optionalText(statement, 3),
                 launchArgumentsJSON: optionalText(statement, 4),
-                ordinal: int(statement, 5),
-                createdAt: date(statement, 6),
-                lastActivatedAt: date(statement, 7)
+                fileReference: workspaceFileReference(
+                    tabID: tabID,
+                    kind: kind,
+                    filePath: filePath,
+                    workingDirectory: workingDirectory
+                ),
+                ordinal: int(statement, 7),
+                createdAt: date(statement, 8),
+                lastActivatedAt: date(statement, 9)
             )
         }
     }
@@ -183,14 +194,17 @@ public actor SQLiteWorkspaceMetadataStore: WorkspacePersistenceStore {
     }
 
     private func saveTab(_ tab: WorkspaceTab) throws {
+        let filePath = try persistedFilePath(for: tab)
         try execute("""
-            INSERT INTO tabs (id, session_id, working_directory, launch_command, launch_arguments_json, ordinal, created_at, last_activated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO tabs (id, session_id, working_directory, launch_command, launch_arguments_json, kind, file_path, ordinal, created_at, last_activated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 session_id = excluded.session_id,
                 working_directory = excluded.working_directory,
                 launch_command = excluded.launch_command,
                 launch_arguments_json = excluded.launch_arguments_json,
+                kind = excluded.kind,
+                file_path = excluded.file_path,
                 ordinal = excluded.ordinal,
                 created_at = excluded.created_at,
                 last_activated_at = excluded.last_activated_at
@@ -200,9 +214,11 @@ public actor SQLiteWorkspaceMetadataStore: WorkspacePersistenceStore {
             bind(statement, tab.workingDirectory, 3)
             bind(statement, tab.launchCommand, 4)
             bind(statement, tab.launchArgumentsJSON, 5)
-            bind(statement, tab.ordinal, 6)
-            bind(statement, tab.createdAt, 7)
-            bind(statement, tab.lastActivatedAt, 8)
+            bind(statement, tab.kind.rawValue, 6)
+            bind(statement, filePath, 7)
+            bind(statement, tab.ordinal, 8)
+            bind(statement, tab.createdAt, 9)
+            bind(statement, tab.lastActivatedAt, 10)
         }
     }
 
@@ -379,6 +395,27 @@ public actor SQLiteWorkspaceMetadataStore: WorkspacePersistenceStore {
     private func lastErrorMessage() -> String {
         database.map { String(cString: sqlite3_errmsg($0)) } ?? "Unknown SQLite error"
     }
+
+    private func persistedFilePath(for tab: WorkspaceTab) throws -> String? {
+        switch tab.kind {
+        case .terminal:
+            guard tab.fileReference == nil else {
+                throw SQLiteWorkspaceMetadataStoreError.invalidStoredValue("Terminal tab \(tab.id.uuidString) cannot persist file metadata")
+            }
+            return nil
+        case .file:
+            guard let fileReference = tab.fileReference else {
+                throw SQLiteWorkspaceMetadataStoreError.invalidStoredValue("File tab \(tab.id.uuidString) requires file metadata")
+            }
+            guard !fileReference.path.isEmpty else {
+                throw SQLiteWorkspaceMetadataStoreError.invalidStoredValue("File tab \(tab.id.uuidString) requires a non-empty file path")
+            }
+            guard fileReference.projectRoot == tab.workingDirectory else {
+                throw SQLiteWorkspaceMetadataStoreError.invalidStoredValue("File tab \(tab.id.uuidString) project root must match working_directory")
+            }
+            return fileReference.path
+        }
+    }
 }
 
 private let transientDestructor = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
@@ -464,4 +501,32 @@ private func int(_ statement: OpaquePointer?, _ index: Int32) -> Int {
 
 private func bool(_ statement: OpaquePointer?, _ index: Int32) -> Bool {
     sqlite3_column_int(statement, index) != 0
+}
+
+private func workspaceTabKind(_ statement: OpaquePointer?, _ index: Int32) throws -> WorkspaceTabKind {
+    let value = try text(statement, index)
+    guard let kind = WorkspaceTabKind(rawValue: value) else {
+        throw SQLiteWorkspaceMetadataStoreError.invalidStoredValue("Invalid workspace tab kind '\(value)' at column \(index)")
+    }
+    return kind
+}
+
+private func workspaceFileReference(
+    tabID: UUID,
+    kind: WorkspaceTabKind,
+    filePath: String?,
+    workingDirectory: String
+) throws -> WorkspaceFileReference? {
+    switch kind {
+    case .terminal:
+        guard filePath == nil else {
+            throw SQLiteWorkspaceMetadataStoreError.invalidStoredValue("Terminal tab \(tabID.uuidString) cannot have file_path metadata")
+        }
+        return nil
+    case .file:
+        guard let filePath, !filePath.isEmpty else {
+            throw SQLiteWorkspaceMetadataStoreError.invalidStoredValue("File tab \(tabID.uuidString) is missing file_path metadata")
+        }
+        return WorkspaceFileReference(path: filePath, projectRoot: workingDirectory)
+    }
 }

@@ -134,6 +134,50 @@ struct WorkspaceStoreTests {
     }
 
     @Test
+    func mixedTabSnapshotPreservesSingleOrderedTabNamespace() {
+        let projectID = UUID()
+        let sessionID = UUID()
+        let terminalTabID = UUID()
+        let fileTabID = UUID()
+        let secondTerminalTabID = UUID()
+        let projectPath = "/tmp/project"
+        let fileReference = WorkspaceFileReference(
+            path: "/tmp/project/Sources/App.swift",
+            projectRoot: projectPath
+        )
+        let store = WorkspaceStore(
+            projects: [
+                WorkspaceProject(id: projectID, path: projectPath, displayName: "project")
+            ],
+            sessions: [
+                WorkspaceSession(id: sessionID, projectID: projectID, title: "Mixed")
+            ],
+            tabs: [
+                WorkspaceTab(id: secondTerminalTabID, sessionID: sessionID, workingDirectory: projectPath, ordinal: 2),
+                WorkspaceTab(
+                    id: fileTabID,
+                    sessionID: sessionID,
+                    kind: .file,
+                    workingDirectory: projectPath,
+                    fileReference: fileReference,
+                    ordinal: 1
+                ),
+                WorkspaceTab(id: terminalTabID, sessionID: sessionID, workingDirectory: projectPath, ordinal: 0)
+            ],
+            selectedProjectID: projectID,
+            selectedSessionID: sessionID,
+            selectedTabID: fileTabID
+        )
+
+        let snapshot = store.snapshot(updatedAt: Date(timeIntervalSince1970: 500))
+
+        #expect(store.tabsForSelectedSession.map(\.id) == [terminalTabID, fileTabID, secondTerminalTabID])
+        #expect(store.tabsForSelectedSession.map(\.kind) == [.terminal, .file, .terminal])
+        #expect(snapshot.selectedTabID == fileTabID)
+        #expect(snapshot.tabOrder == [terminalTabID, fileTabID, secondTerminalTabID])
+    }
+
+    @Test
     func restoreCoordinatorHydratesStoreFromPersistenceBoundary() async throws {
         let projectID = UUID()
         let sessionID = UUID()

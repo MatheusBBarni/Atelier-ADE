@@ -73,12 +73,29 @@ public struct Session: Identifiable, Equatable, Sendable {
 
 public typealias WorkspaceSession = Session
 
-public struct Tab: Identifiable, Equatable, Sendable {
+public enum WorkspaceTabKind: String, Codable, Sendable {
+    case terminal
+    case file
+}
+
+public struct WorkspaceFileReference: Equatable, Codable, Sendable {
+    public var path: String
+    public var projectRoot: String
+
+    public init(path: String, projectRoot: String) {
+        self.path = path
+        self.projectRoot = projectRoot
+    }
+}
+
+public struct Tab: Identifiable, Equatable, Codable, Sendable {
     public let id: UUID
     public var sessionID: UUID
+    public var kind: WorkspaceTabKind
     public var workingDirectory: String
     public var launchCommand: String?
     public var launchArgumentsJSON: String?
+    public var fileReference: WorkspaceFileReference?
     public var ordinal: Int
     public var createdAt: Date
     public var lastActivatedAt: Date
@@ -86,21 +103,52 @@ public struct Tab: Identifiable, Equatable, Sendable {
     public init(
         id: UUID = UUID(),
         sessionID: UUID,
+        kind: WorkspaceTabKind = .terminal,
         workingDirectory: String,
         launchCommand: String? = nil,
         launchArgumentsJSON: String? = nil,
+        fileReference: WorkspaceFileReference? = nil,
         ordinal: Int,
         createdAt: Date = Date(),
         lastActivatedAt: Date = Date()
     ) {
         self.id = id
         self.sessionID = sessionID
+        self.kind = kind
         self.workingDirectory = workingDirectory
         self.launchCommand = launchCommand
         self.launchArgumentsJSON = launchArgumentsJSON
+        self.fileReference = fileReference
         self.ordinal = ordinal
         self.createdAt = createdAt
         self.lastActivatedAt = lastActivatedAt
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case sessionID
+        case kind
+        case workingDirectory
+        case launchCommand
+        case launchArgumentsJSON
+        case fileReference
+        case ordinal
+        case createdAt
+        case lastActivatedAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        sessionID = try container.decode(UUID.self, forKey: .sessionID)
+        kind = try container.decodeIfPresent(WorkspaceTabKind.self, forKey: .kind) ?? .terminal
+        workingDirectory = try container.decode(String.self, forKey: .workingDirectory)
+        launchCommand = try container.decodeIfPresent(String.self, forKey: .launchCommand)
+        launchArgumentsJSON = try container.decodeIfPresent(String.self, forKey: .launchArgumentsJSON)
+        fileReference = try container.decodeIfPresent(WorkspaceFileReference.self, forKey: .fileReference)
+        ordinal = try container.decode(Int.self, forKey: .ordinal)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        lastActivatedAt = try container.decode(Date.self, forKey: .lastActivatedAt)
     }
 }
 

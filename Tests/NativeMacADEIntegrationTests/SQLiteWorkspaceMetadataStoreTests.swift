@@ -15,6 +15,7 @@ struct SQLiteWorkspaceMetadataStoreTests {
 
         #expect(tables == WorkspaceMigrations.metadataTables)
         #expect(try inspectColumnNames(path: path, tableName: "session_shortcuts").contains("has_user_override"))
+        #expect(try inspectColumnNames(path: path, tableName: "tabs").isSuperset(of: ["kind", "file_path"]))
         #expect(try inspectUserVersion(path: path) == WorkspaceMigrations.currentUserVersion)
         #expect(try inspectAppPreferencesRowCount(path: path) == 1)
         #expect(preferences == .defaults)
@@ -159,6 +160,50 @@ struct SQLiteWorkspaceMetadataStoreTests {
     }
 
     @Test
+    func mixedTabSessionRoundTripPreservesKindFilePathOrdinalAndActivation() async throws {
+        let path = temporaryDatabasePath()
+        let store = try SQLiteWorkspaceMetadataStore(path: path)
+        let project = WorkspaceProject(path: "/Users/example/mixed", displayName: "mixed")
+        let session = WorkspaceSession(projectID: project.id, title: "Mixed")
+        let terminalTab = WorkspaceTab(
+            sessionID: session.id,
+            workingDirectory: project.path,
+            launchCommand: "codex",
+            launchArgumentsJSON: "[]",
+            ordinal: 0,
+            createdAt: Date(timeIntervalSince1970: 100),
+            lastActivatedAt: Date(timeIntervalSince1970: 200)
+        )
+        let fileReference = WorkspaceFileReference(
+            path: "/Users/example/mixed/Sources/App.swift",
+            projectRoot: project.path
+        )
+        let fileTab = WorkspaceTab(
+            sessionID: session.id,
+            kind: .file,
+            workingDirectory: project.path,
+            fileReference: fileReference,
+            ordinal: 1,
+            createdAt: Date(timeIntervalSince1970: 300),
+            lastActivatedAt: Date(timeIntervalSince1970: 400)
+        )
+
+        try await store.save(project: project)
+        try await store.save(session: session)
+        try await store.save(tab: fileTab)
+        try await store.save(tab: terminalTab)
+
+        let loadedTabs = try await store.loadTabs()
+
+        #expect(loadedTabs.map(\.id) == [terminalTab.id, fileTab.id])
+        #expect(loadedTabs.map(\.kind) == [.terminal, .file])
+        #expect(loadedTabs.first?.fileReference == nil)
+        #expect(loadedTabs.last?.fileReference == fileReference)
+        #expect(loadedTabs.last?.ordinal == 1)
+        #expect(loadedTabs.last?.lastActivatedAt == Date(timeIntervalSince1970: 400))
+    }
+
+    @Test
     func versionOneDatabaseUpgradesToVersionTwoWithoutMutatingWorkspaceMetadata() async throws {
         let path = temporaryDatabasePath()
         let fixture = try createVersionOneDatabase(path: path)
@@ -168,6 +213,7 @@ struct SQLiteWorkspaceMetadataStoreTests {
         #expect(try inspectUserVersion(path: path) == 2)
         #expect(try inspectUserTableNames(path: path) == WorkspaceMigrations.metadataTables)
         #expect(try inspectColumnNames(path: path, tableName: "session_shortcuts").contains("has_user_override"))
+        #expect(try inspectColumnNames(path: path, tableName: "tabs").isSuperset(of: ["kind", "file_path"]))
         #expect(try inspectAppPreferencesRowCount(path: path) == 1)
         #expect(try await store.loadProjects() == [fixture.project])
         #expect(try await store.loadSessions() == [fixture.session])
@@ -175,6 +221,58 @@ struct SQLiteWorkspaceMetadataStoreTests {
         #expect(try await store.loadSessionShortcuts() == [fixture.shortcut])
         #expect(try await store.loadRestoreSnapshot() == fixture.restoreSnapshot)
         #expect(try await store.loadAppPreferences() == .defaults)
+    }
+
+    @Test
+    func legacyVersionTwoDatabaseMissingTabMetadataColumnsRepairsWithoutLosingWorkspaceMetadata() async throws {
+        let path = temporaryDatabasePath()
+        let fixture = try createVersionOneDatabase(path: path)
+        try execute(path: path, """
+        ALTER TABLE session_shortcuts ADD COLUMN has_user_override INTEGER NOT NULL DEFAULT 0 CHECK (has_user_override IN (0, 1));
+        CREATE TABLE app_preferences (
+            id INTEGER PRIMARY KEY NOT NULL CHECK (id = 1),
+            theme_id TEXT NOT NULL,
+            default_session_shortcut_id TEXT REFERENCES session_shortcuts(id) ON DELETE SET NULL,
+            keybindings_json TEXT NOT NULL,
+            updated_at REAL NOT NULL
+        );
+        INSERT INTO app_preferences (id, theme_id, default_session_shortcut_id, keybindings_json, updated_at)
+        VALUES (1, '\(AppPreferences.defaultThemeID)', NULL, '[]', 0);
+        PRAGMA user_version = 2;
+        """)
+
+        let store = try SQLiteWorkspaceMetadataStore(path: path)
+
+        #expect(try inspectUserVersion(path: path) == WorkspaceMigrations.currentUserVersion)
+        #expect(try inspectColumnNames(path: path, tableName: "tabs").isSuperset(of: ["kind", "file_path"]))
+        #expect(try await store.loadTabs() == [fixture.tab])
+        #expect(try await store.loadRestoreSnapshot() == fixture.restoreSnapshot)
+    }
+
+    @Test
+    func invalidStoredMixedTabValuesFailWithDescriptivePersistenceError() async throws {
+        let path = temporaryDatabasePath()
+        let store = try SQLiteWorkspaceMetadataStore(path: path)
+        let project = WorkspaceProject(path: "/Users/example/invalid", displayName: "invalid")
+        let session = WorkspaceSession(projectID: project.id, title: "Invalid")
+        let tabID = UUID()
+
+        try await store.save(project: project)
+        try await store.save(session: session)
+        try execute(path: path, """
+        INSERT INTO tabs (id, session_id, working_directory, launch_command, launch_arguments_json, kind, file_path, ordinal, created_at, last_activated_at)
+        VALUES ('\(tabID.uuidString)', '\(session.id.uuidString)', '\(project.path)', NULL, NULL, 'file', NULL, 0, 10, 20)
+        """)
+
+        do {
+            _ = try await store.loadTabs()
+            Issue.record("Expected invalid file tab metadata to fail during load")
+        } catch SQLiteWorkspaceMetadataStoreError.invalidStoredValue(let message) {
+            #expect(message.contains(tabID.uuidString))
+            #expect(message.contains("file_path"))
+        } catch {
+            Issue.record("Unexpected error: \(error)")
+        }
     }
 
     @Test
@@ -491,6 +589,15 @@ struct SQLiteWorkspaceMetadataStoreTests {
             sqlite3_free(error)
             throw SQLiteWorkspaceMetadataStoreError.stepFailed(message)
         }
+    }
+
+    private func execute(path: String, _ sql: String) throws {
+        var database: OpaquePointer?
+        guard sqlite3_open_v2(path, &database, SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK else {
+            throw SQLiteWorkspaceMetadataStoreError.openFailed("Unable to open writable inspection database")
+        }
+        defer { sqlite3_close(database) }
+        try execute(database, sql)
     }
 
     private func inspect<T>(path: String, sql: String, map: (OpaquePointer?) throws -> T?) throws -> Set<T> where T: Hashable {

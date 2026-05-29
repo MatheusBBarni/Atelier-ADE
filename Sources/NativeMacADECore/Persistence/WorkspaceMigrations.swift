@@ -3,6 +3,7 @@ import SQLite3
 
 public enum WorkspaceMigrationError: Error, Equatable, Sendable {
     case sqlite(String)
+    case unsupportedUserVersion(Int32, current: Int32)
 }
 
 public enum WorkspaceMigrations {
@@ -19,18 +20,20 @@ public enum WorkspaceMigrations {
     static func bootstrap(database: OpaquePointer?) throws {
         try execute(database, "PRAGMA foreign_keys = ON")
         let existingUserVersion = try userVersion(database)
+        guard existingUserVersion <= currentUserVersion else {
+            throw WorkspaceMigrationError.unsupportedUserVersion(existingUserVersion, current: currentUserVersion)
+        }
         try execute(database, projectsSQL)
         try execute(database, sessionsSQL)
         try execute(database, tabsSQL)
         try execute(database, sessionShortcutsSQL)
         try execute(database, appPreferencesSQL)
         try execute(database, restoreSnapshotSQL)
-        if existingUserVersion < 2 {
+        if existingUserVersion < currentUserVersion {
             try migrateToV2(database)
         }
-        if existingUserVersion <= currentUserVersion {
-            try execute(database, "PRAGMA user_version = \(currentUserVersion)")
-        }
+        try repairVersionTwoTabMetadataIfNeeded(database)
+        try execute(database, "PRAGMA user_version = \(currentUserVersion)")
     }
 
     static func execute(_ database: OpaquePointer?, _ sql: String) throws {
@@ -73,6 +76,8 @@ public enum WorkspaceMigrations {
         working_directory TEXT NOT NULL,
         launch_command TEXT,
         launch_arguments_json TEXT,
+        kind TEXT NOT NULL DEFAULT 'terminal' CHECK (kind IN ('terminal', 'file')),
+        file_path TEXT,
         ordinal INTEGER NOT NULL,
         created_at REAL NOT NULL,
         last_activated_at REAL NOT NULL,
@@ -115,6 +120,7 @@ public enum WorkspaceMigrations {
 
     private static func migrateToV2(_ database: OpaquePointer?) throws {
         try execute(database, appPreferencesSQL)
+        try addV2TabMetadataColumnsIfNeeded(database)
         if try !table("session_shortcuts", hasColumn: "has_user_override", database: database) {
             try execute(database, "ALTER TABLE session_shortcuts ADD COLUMN has_user_override INTEGER NOT NULL DEFAULT 0 CHECK (has_user_override IN (0, 1))")
         }
@@ -122,6 +128,19 @@ public enum WorkspaceMigrations {
         INSERT OR IGNORE INTO app_preferences (id, theme_id, default_session_shortcut_id, keybindings_json, updated_at)
         VALUES (1, '\(AppPreferences.defaultThemeID)', NULL, '[]', 0)
         """)
+    }
+
+    private static func repairVersionTwoTabMetadataIfNeeded(_ database: OpaquePointer?) throws {
+        try addV2TabMetadataColumnsIfNeeded(database)
+    }
+
+    private static func addV2TabMetadataColumnsIfNeeded(_ database: OpaquePointer?) throws {
+        if try !table("tabs", hasColumn: "kind", database: database) {
+            try execute(database, "ALTER TABLE tabs ADD COLUMN kind TEXT NOT NULL DEFAULT 'terminal' CHECK (kind IN ('terminal', 'file'))")
+        }
+        if try !table("tabs", hasColumn: "file_path", database: database) {
+            try execute(database, "ALTER TABLE tabs ADD COLUMN file_path TEXT")
+        }
     }
 
     private static func userVersion(_ database: OpaquePointer?) throws -> Int32 {
