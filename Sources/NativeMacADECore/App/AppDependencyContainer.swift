@@ -73,11 +73,11 @@ public struct AppDependencyContainer {
                 appropriateFor: nil,
                 create: true
             )
-            let appDirectory = applicationSupport.appendingPathComponent("NativeMacADE", isDirectory: true)
+            let appDirectory = applicationSupport.appendingPathComponent("Atelier", isDirectory: true)
             try FileManager.default.createDirectory(at: appDirectory, withIntermediateDirectories: true)
             return try SQLiteWorkspaceMetadataStore(path: appDirectory.appendingPathComponent("Workspace.sqlite").path)
         } catch {
-            preconditionFailure("Native Mac ADE requires durable workspace metadata persistence: \(error)")
+            preconditionFailure("Atelier requires durable workspace metadata persistence: \(error)")
         }
     }
 }

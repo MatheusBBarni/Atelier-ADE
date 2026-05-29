@@ -202,6 +202,7 @@ public final class TerminalHostController: WorkspaceTerminalSurfaceManaging {
 
 @MainActor
 public final class TerminalSurfaceHostNSView: NSView {
+    private static let contentInsets = NSEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
     public private(set) var tabID: UUID?
     public private(set) var attachedSurface: GhosttySurfaceHandle?
     public private(set) var terminalAppearance: TerminalAppearance = .nordDefault
@@ -266,13 +267,13 @@ public final class TerminalSurfaceHostNSView: NSView {
     public override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         layoutEmbeddedSurfaceView()
-        onResize?(newSize)
+        onResize?(contentBounds.size)
     }
 
     public override func layout() {
         super.layout()
         layoutEmbeddedSurfaceView()
-        onResize?(bounds.size)
+        onResize?(contentBounds.size)
     }
 
     public func focusTerminal() {
@@ -298,20 +299,24 @@ public final class TerminalSurfaceHostNSView: NSView {
     }
 
     private func layoutEmbeddedSurfaceView() {
-        embeddedSurfaceView?.frame = bounds
+        embeddedSurfaceView?.frame = contentBounds
     }
 
     private func embedSurfaceView(_ surfaceView: NSView, terminalView: LocalProcessTerminalView?) {
         if embeddedSurfaceView !== surfaceView {
             embeddedSurfaceView?.removeFromSuperview()
             surfaceView.removeFromSuperview()
-            surfaceView.frame = bounds
+            surfaceView.frame = contentBounds
             surfaceView.autoresizingMask = [.width, .height]
             addSubview(surfaceView)
             embeddedSurfaceView = surfaceView
         }
         localProcessTerminalView = terminalView
         layoutEmbeddedSurfaceView()
+    }
+
+    private var contentBounds: NSRect {
+        bounds.insetBy(dx: Self.contentInsets.left, dy: Self.contentInsets.top)
     }
 }
 
@@ -413,7 +418,7 @@ final class TerminalSessionDriver: NSObject {
     private func launchBanner() -> String {
         let commandDescription = resolvedCommandDescription()
 
-        return "Another ADE terminal\nWorking directory: \(tab.workingDirectory)\nCommand: \(commandDescription)\n\n"
+        return "Atelier terminal\nWorking directory: \(tab.workingDirectory)\nCommand: \(commandDescription)\n\n"
     }
 
     private func applyAppearance(_ appearance: TerminalAppearance) {

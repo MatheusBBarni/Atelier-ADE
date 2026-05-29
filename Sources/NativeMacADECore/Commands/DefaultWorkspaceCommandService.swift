@@ -127,13 +127,6 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
         }
 
         let removedTabs = store.tabs.filter { $0.sessionID == id }
-        for tab in removedTabs {
-            if let surface = surfacesByTabID[tab.id] ?? terminalSurfaceManager.surface(for: tab.id) {
-                guard await terminalSurfaceManager.canClose(surface: surface) else {
-                    throw WorkspaceCommandError.closeRejected(tab.id)
-                }
-            }
-        }
 
         try await persist { try await persistenceStore.deleteSession(id: id) }
         for tab in removedTabs {
@@ -272,25 +265,12 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
             throw WorkspaceCommandError.missingProject(session.projectID)
         }
 
-        var launchCommand: String?
-        var launchArgumentsJSON: String?
-        var launchProfileLabel = "default"
-        if let shortcutID = session.shortcutID {
-            let shortcuts = try await loadSessionShortcutsIncludingBuiltIns()
-            guard let shortcut = shortcuts.first(where: { $0.id == shortcutID }) else {
-                throw WorkspaceCommandError.missingShortcut(shortcutID)
-            }
-            launchCommand = shortcut.launchCommand
-            launchArgumentsJSON = shortcut.launchArgumentsJSON
-            launchProfileLabel = shortcut.label
-        }
-
         let timestamp = now()
         let tab = WorkspaceTab(
             sessionID: session.id,
             workingDirectory: project.path,
-            launchCommand: launchCommand,
-            launchArgumentsJSON: launchArgumentsJSON,
+            launchCommand: nil,
+            launchArgumentsJSON: nil,
             ordinal: store.nextTabOrdinal(for: session.id),
             createdAt: timestamp,
             lastActivatedAt: timestamp
@@ -322,7 +302,7 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
             "project_id": project.id.uuidString,
             "session_id": session.id.uuidString,
             "tab_id": tab.id.uuidString,
-            "launch_profile_label": launchProfileLabel,
+            "launch_profile_label": "plain",
             "duration_ms": String(Int((now().timeIntervalSince(startedAt) * 1_000).rounded()))
         ])
         return tab

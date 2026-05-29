@@ -66,6 +66,29 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
     }
 
     @Test
+    func creatingTabInShortcutSessionPersistsPlainShellLaunchIntent() async throws {
+        let harness = try makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+        let project = try await harness.service.openProject(path: projectPath)
+        let shortcut = SessionShortcut(
+            label: "Claude Continue",
+            launchCommand: "claude",
+            launchArgumentsJSON: "[\"--continue\"]",
+            isBuiltIn: true
+        )
+        try await harness.persistence.save(shortcut: shortcut)
+
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: shortcut.id)
+        let tab = try await harness.service.createTab(sessionID: session.id)
+        let persistedTab = try #require(try await harness.persistence.loadTabs().first { $0.id == tab.id })
+
+        #expect(tab.launchCommand == nil)
+        #expect(tab.launchArgumentsJSON == nil)
+        #expect(persistedTab.launchCommand == nil)
+        #expect(persistedTab.launchArgumentsJSON == nil)
+    }
+
+    @Test
     func shortcutSessionCreationRollsBackSessionWhenFirstTabSurfaceFails() async throws {
         let harness = try makeHarness()
         let project = try await harness.service.openProject(path: makeTemporaryProjectDirectory())
@@ -264,6 +287,23 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
         #expect(snapshot?.selectedTabID == nil)
         #expect(snapshot?.tabOrder.isEmpty == true)
         #expect(harness.terminal.createdTabs == [tab])
+    }
+
+    @Test
+    func removingSessionClosesRunningTabsAndDeletesSessionMetadata() async throws {
+        let harness = try makeHarness()
+        let project = try await harness.service.openProject(path: makeTemporaryProjectDirectory())
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let tab = try await harness.service.createTab(sessionID: session.id)
+        harness.terminal.canCloseResult = false
+
+        try await harness.service.removeSession(id: session.id)
+
+        #expect(harness.store.sessions.isEmpty)
+        #expect(harness.store.tabs.isEmpty)
+        #expect(try await harness.persistence.loadSessions().isEmpty)
+        #expect(try await harness.persistence.loadTabs().isEmpty)
+        #expect(harness.terminal.releasedTabIDs == [tab.id])
     }
 
     private func makeHarness(now: @escaping @MainActor () -> Date = Date.init) throws -> CommandServiceIntegrationHarness {

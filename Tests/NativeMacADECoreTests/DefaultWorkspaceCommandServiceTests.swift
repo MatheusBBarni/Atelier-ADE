@@ -91,6 +91,33 @@ struct DefaultWorkspaceCommandServiceTests {
     }
 
     @Test
+    func creatingTabInShortcutSessionStartsPlainShell() async throws {
+        let harness = makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+        let project = try await harness.service.openProject(path: projectPath)
+        let shortcut = SessionShortcut(
+            label: "Claude Continue",
+            launchCommand: "claude",
+            launchArgumentsJSON: "[\"--continue\"]",
+            isBuiltIn: true
+        )
+        try await harness.persistence.save(shortcut: shortcut)
+
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: shortcut.id)
+        let tab = try await harness.service.createTab(sessionID: session.id)
+
+        #expect(tab.launchCommand == nil)
+        #expect(tab.launchArgumentsJSON == nil)
+        #expect(harness.terminal.createdTabs.last == tab)
+        #expect(harness.store.selectedTabID == tab.id)
+        #expect(harness.service.logger.events.contains { event in
+            event.name == "tab_created" &&
+            event.fields["tab_id"] == tab.id.uuidString &&
+            event.fields["launch_profile_label"] == "plain"
+        })
+    }
+
+    @Test
     func shortcutLaunchMappingProducesExpectedGhosttyLaunchConfiguration() throws {
         let shortcut = SessionShortcut(
             label: "Claude",
@@ -252,6 +279,23 @@ struct DefaultWorkspaceCommandServiceTests {
         #expect(harness.store.tabs == [tab])
         #expect(harness.store.selectedTabID == tab.id)
         #expect(try await harness.persistence.loadTabs() == [tab])
+    }
+
+    @Test
+    func removingSessionForceClosesTabsAndClearsSelection() async throws {
+        let harness = makeHarness()
+        let project = try await harness.service.openProject(path: makeTemporaryProjectDirectory())
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let tab = try await harness.service.createTab(sessionID: session.id)
+        harness.terminal.canCloseResult = false
+
+        try await harness.service.removeSession(id: session.id)
+
+        #expect(harness.store.sessions.isEmpty)
+        #expect(harness.store.tabs.isEmpty)
+        #expect(harness.store.selectedSessionID == nil)
+        #expect(harness.store.selectedTabID == nil)
+        #expect(harness.terminal.releasedTabIDs == [tab.id])
     }
 
     @Test

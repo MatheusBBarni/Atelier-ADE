@@ -4,9 +4,9 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PRODUCT="NativeMacADE"
-APP_NAME="Another ADE"
-APP_BUNDLE_NAME="Another ADE"
-BUNDLE_ID="com.matheusbbarni.NativeMacADE"
+APP_NAME="Atelier"
+APP_BUNDLE_NAME="Atelier"
+BUNDLE_ID="com.matheusbbarni.Atelier"
 MIN_MACOS_VERSION="15.0"
 ICON_SOURCE="$ROOT_DIR/Sources/NativeMacADE/Resources/AppIcon.png"
 MODE="${1:-run}"
@@ -124,8 +124,8 @@ case "$MODE" in
     cat <<'EOF'
 Usage: ./scripts/run.sh [run|build|bundle|test] [swift arguments...]
 
-  run    Build a .app bundle and launch NativeMacADE (default)
-  build  Build NativeMacADE without launching it
+  run    Build a .app bundle and launch Atelier (default)
+  build  Build Atelier without launching it
   bundle Build the .app bundle and print its path
   test   Run the Swift test suite
 EOF

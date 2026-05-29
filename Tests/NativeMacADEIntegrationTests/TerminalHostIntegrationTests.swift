@@ -33,12 +33,12 @@ struct TerminalHostIntegrationTests {
         controller.resize(tabID: tab.id, columns: 132, rows: 43)
         view.setFrameSize(NSSize(width: 960, height: 384))
         try await waitUntil("ghostty resize callback") {
-            adapter.resizeRequests.contains(ResizeRequest(surface: surface, columns: 120, rows: 24))
+            adapter.resizeRequests.contains(ResizeRequest(surface: surface, columns: 118, rows: 23))
         }
 
         #expect(adapter.focusedSurfaces == [surface])
         #expect(adapter.resizeRequests.contains(ResizeRequest(surface: surface, columns: 132, rows: 43)))
-        #expect(adapter.resizeRequests.contains(ResizeRequest(surface: surface, columns: 120, rows: 24)))
+        #expect(adapter.resizeRequests.contains(ResizeRequest(surface: surface, columns: 118, rows: 23)))
     }
 
     @Test

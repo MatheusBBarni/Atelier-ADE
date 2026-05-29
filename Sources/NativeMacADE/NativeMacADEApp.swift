@@ -3,7 +3,7 @@ import NativeMacADECore
 import SwiftUI
 
 @main
-struct NativeMacADEApp: App {
+struct AtelierApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var workspaceStore: WorkspaceStore
     private let commandService: any WorkspaceCommandService
@@ -23,8 +23,10 @@ struct NativeMacADEApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView(store: workspaceStore, commandService: commandService, terminalHostController: terminalHostController)
+                .toolbar(removing: .title)
         }
-        .windowStyle(.titleBar)
+        .windowStyle(.hiddenTitleBar)
+        .windowToolbarStyle(.unified(showsTitle: false))
         .commands {
             CommandGroup(replacing: .newItem) {
                 Button("Toggle Sidebar") {
@@ -32,11 +34,10 @@ struct NativeMacADEApp: App {
                 }
                 .keyboardShortcut("b", modifiers: [.command])
 
-                Button("New Session") {
-                    guard let selectedProjectID = workspaceStore.selectedProjectID else { return }
-                    Task { try? await commandService.createSession(projectID: selectedProjectID, shortcutID: nil) }
+                Button("Start Session…") {
+                    NotificationCenter.default.post(name: .showSessionCommandPalette, object: nil)
                 }
-                .keyboardShortcut("n", modifiers: [.command, .shift])
+                .keyboardShortcut("p", modifiers: [.command, .shift])
                 .disabled(workspaceStore.selectedProject == nil)
 
                 Button("New Tab") {
@@ -69,5 +70,6 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 extension Notification.Name {
-    static let toggleWorkspaceSidebar = Notification.Name("NativeMacADE.toggleWorkspaceSidebar")
+    static let toggleWorkspaceSidebar = Notification.Name("Atelier.toggleWorkspaceSidebar")
+    static let showSessionCommandPalette = Notification.Name("Atelier.showSessionCommandPalette")
 }

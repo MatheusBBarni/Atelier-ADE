@@ -12,13 +12,20 @@ struct ContentView: View {
     @State private var pilotDiagnostics: PilotDiagnostics?
     @State private var userMessage: UserMessage?
     @State private var splitViewVisibility: NavigationSplitViewVisibility = .all
+    @State private var sessionCommandPalette: SessionCommandPaletteState?
 
     var body: some View {
         ZStack {
             NavigationSplitView(columnVisibility: $splitViewVisibility) {
                 ProjectSidebarView(store: store, commandService: commandService, userMessage: $userMessage)
             } detail: {
-                WorkspaceDetailView(store: store, commandService: commandService, terminalHostController: terminalHostController, userMessage: $userMessage)
+                WorkspaceDetailView(
+                    store: store,
+                    commandService: commandService,
+                    terminalHostController: terminalHostController,
+                    userMessage: $userMessage,
+                    isSidebarCollapsed: splitViewVisibility == .detailOnly
+                )
             }
             .disabled(isRestoring)
 
@@ -54,8 +61,16 @@ struct ContentView: View {
                 }
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
+
+            if let sessionCommandPalette {
+                SessionCommandPaletteOverlay(
+                    state: sessionCommandPalette,
+                    onClose: { self.sessionCommandPalette = nil },
+                    onSelect: startSession(using:)
+                )
+                .transition(.opacity.combined(with: .scale(scale: 0.98)))
+            }
         }
-        .navigationTitle("Another ADE")
         .frame(minWidth: 1_040, minHeight: 680)
         .background(NordTheme.shellBackground.color)
         .preferredColorScheme(.dark)
@@ -79,6 +94,9 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .toggleWorkspaceSidebar)) { _ in
             toggleSidebar()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .showSessionCommandPalette)) { _ in
+            showSessionCommandPalette()
+        }
     }
 
     private var userMessagePresented: Binding<Bool> {
@@ -89,6 +107,81 @@ struct ContentView: View {
         withAnimation(.easeInOut(duration: 0.16)) {
             splitViewVisibility = splitViewVisibility == .detailOnly ? .all : .detailOnly
         }
+    }
+
+    private func showSessionCommandPalette() {
+        guard let project = store.selectedProject else {
+            userMessage = UserMessage(title: "Project required", detail: "Select a project before starting a session.")
+            return
+        }
+
+        sessionCommandPalette = SessionCommandPaletteState(project: project, isLoading: true)
+        Task {
+            do {
+                let options = try await loadSessionCommandOptions()
+                await MainActor.run {
+                    guard sessionCommandPalette?.projectID == project.id else { return }
+                    sessionCommandPalette = SessionCommandPaletteState(project: project, options: options, isLoading: false)
+                }
+            } catch {
+                await MainActor.run {
+                    sessionCommandPalette = nil
+                    userMessage = UserMessage(title: "Session commands unavailable", detail: String(describing: error))
+                }
+            }
+        }
+    }
+
+    private func startSession(using option: SessionCommandOption) {
+        guard let projectID = sessionCommandPalette?.projectID else { return }
+        sessionCommandPalette = nil
+
+        Task {
+            do {
+                let session = try await commandService.createSession(projectID: projectID, shortcutID: option.shortcutID)
+                if option.shortcutID == nil {
+                    _ = try await commandService.createTab(sessionID: session.id)
+                }
+            } catch {
+                userMessage = UserMessage(title: "Session could not be created", detail: String(describing: error))
+            }
+        }
+    }
+
+    private func loadSessionCommandOptions() async throws -> [SessionCommandOption] {
+        let shortcuts = try await commandService.availableSessionShortcuts()
+        var options: [SessionCommandOption] = [
+            SessionCommandOption(
+                title: "Plain Session",
+                subtitle: "Start a shell in the selected project",
+                systemImage: "terminal",
+                shortcutID: nil
+            )
+        ]
+
+        if let codexShortcut = shortcuts.first(where: { $0.label.caseInsensitiveCompare("Codex") == .orderedSame || $0.launchCommand.caseInsensitiveCompare("codex") == .orderedSame }) {
+            options.append(
+                SessionCommandOption(
+                    title: "Codex",
+                    subtitle: "Start a session with the Codex profile",
+                    systemImage: "sparkles",
+                    shortcutID: codexShortcut.id
+                )
+            )
+        }
+
+        if let claudeShortcut = shortcuts.first(where: { $0.label.caseInsensitiveCompare("Claude") == .orderedSame || $0.launchCommand.caseInsensitiveCompare("claude") == .orderedSame }) {
+            options.append(
+                SessionCommandOption(
+                    title: "Claude",
+                    subtitle: "Start a session with the Claude profile",
+                    systemImage: "bubble.left.and.bubble.right",
+                    shortcutID: claudeShortcut.id
+                )
+            )
+        }
+
+        return options
     }
 }
 
@@ -208,7 +301,6 @@ struct ProjectSidebarView: View {
     @Binding var userMessage: UserMessage?
     @State private var pendingRemoval: WorkspaceProject?
     @State private var renameDraft: SessionRenameDraft?
-    @State private var availableShortcuts: [SessionShortcut] = []
     @State private var expandedProjectIDs: Set<UUID> = []
     @State private var hoveredSessionID: UUID?
     @State private var initializingSessionIDs: Set<UUID> = []
@@ -254,16 +346,6 @@ struct ProjectSidebarView: View {
 
                                 if isExpanded {
                                     VStack(alignment: .leading, spacing: 12) {
-                                        Text("Sessions")
-                                            .font(.caption.weight(.semibold))
-                                            .foregroundStyle(NordTheme.mutedText.color)
-
-                                        if !availableShortcuts.isEmpty {
-                                            SessionShortcutPicker(shortcuts: availableShortcuts) { shortcut in
-                                                createSession(projectID: project.id, shortcutID: shortcut?.id)
-                                            }
-                                        }
-
                                         if projectSessions.isEmpty {
                                             SidebarInlineEmptyState(
                                                 title: "No sessions yet",
@@ -345,9 +427,6 @@ struct ProjectSidebarView: View {
                 renameDraft = nil
             }
         }
-        .task(id: store.selectedProjectID) {
-            await loadShortcuts()
-        }
     }
 
     private var removalDialogBinding: Binding<Bool> {
@@ -412,18 +491,6 @@ struct ProjectSidebarView: View {
             } catch {
                 userMessage = UserMessage(title: "Session could not be created", detail: String(describing: error))
             }
-        }
-    }
-
-    private func loadShortcuts() async {
-        guard store.selectedProjectID != nil else {
-            availableShortcuts = []
-            return
-        }
-        do {
-            availableShortcuts = try await commandService.availableSessionShortcuts()
-        } catch {
-            userMessage = UserMessage(title: "Shortcuts could not be loaded", detail: String(describing: error))
         }
     }
 
@@ -518,14 +585,6 @@ struct ProjectRowView: View {
                             .lineLimit(1)
                     }
                     Spacer(minLength: 8)
-                    if isActive {
-                        Text("Active")
-                            .font(.caption2.weight(.bold))
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 4)
-                            .background(NordTheme.activeBorder.color.opacity(0.22), in: Capsule())
-                            .foregroundStyle(NordTheme.snowStorm2.color)
-                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
@@ -570,7 +629,6 @@ struct SessionListView: View {
     let commandService: any WorkspaceCommandService
     @Binding var userMessage: UserMessage?
     @State private var renameDraft: SessionRenameDraft?
-    @State private var availableShortcuts: [SessionShortcut] = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -582,14 +640,6 @@ struct SessionListView: View {
                 action: createSession
             )
             .disabled(store.selectedProjectID == nil)
-
-            if store.selectedProjectID != nil, !availableShortcuts.isEmpty {
-                SessionShortcutPicker(shortcuts: availableShortcuts) { shortcut in
-                    createSession(shortcutID: shortcut?.id)
-                }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 10)
-            }
 
             if store.selectedProjectID == nil {
                 EmptyStateView(
@@ -640,9 +690,6 @@ struct SessionListView: View {
                 renameDraft = nil
             }
         }
-        .task(id: store.selectedProjectID) {
-            await loadShortcuts()
-        }
     }
 
     private var selectedSessionBinding: Binding<WorkspaceSession.ID?> {
@@ -661,18 +708,6 @@ struct SessionListView: View {
             } catch {
                 userMessage = UserMessage(title: "Session could not be created", detail: String(describing: error))
             }
-        }
-    }
-
-    private func loadShortcuts() async {
-        guard store.selectedProjectID != nil else {
-            availableShortcuts = []
-            return
-        }
-        do {
-            availableShortcuts = try await commandService.availableSessionShortcuts()
-        } catch {
-            userMessage = UserMessage(title: "Shortcuts could not be loaded", detail: String(describing: error))
         }
     }
 
@@ -711,24 +746,161 @@ struct SidebarInlineEmptyState: View {
     }
 }
 
-struct SessionShortcutPicker: View {
-    let shortcuts: [SessionShortcut]
-    let onPick: (SessionShortcut?) -> Void
+struct SessionCommandOption: Identifiable, Equatable {
+    let title: String
+    let subtitle: String
+    let systemImage: String
+    let shortcutID: UUID?
+
+    var id: String {
+        shortcutID?.uuidString ?? "plain-session"
+    }
+}
+
+struct SessionCommandPaletteState: Equatable {
+    let projectID: UUID
+    let projectName: String
+    let options: [SessionCommandOption]
+    let isLoading: Bool
+
+    init(project: WorkspaceProject, options: [SessionCommandOption] = [], isLoading: Bool = true) {
+        self.projectID = project.id
+        self.projectName = project.displayName
+        self.options = options
+        self.isLoading = isLoading
+    }
+}
+
+struct SessionCommandPaletteOverlay: View {
+    let state: SessionCommandPaletteState
+    let onClose: () -> Void
+    let onSelect: (SessionCommandOption) -> Void
+    @State private var query = ""
+    @FocusState private var isSearchFocused: Bool
+
+    private var filteredOptions: [SessionCommandOption] {
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedQuery.isEmpty else { return state.options }
+        return state.options.filter {
+            $0.title.localizedCaseInsensitiveContains(trimmedQuery) ||
+            $0.subtitle.localizedCaseInsensitiveContains(trimmedQuery)
+        }
+    }
 
     var body: some View {
-        Menu {
-            Button("Plain session") { onPick(nil) }
-            Divider()
-            ForEach(shortcuts) { shortcut in
-                Button(shortcut.label) { onPick(shortcut) }
+        ZStack {
+            Color.black.opacity(0.45)
+                .ignoresSafeArea()
+                .onTapGesture(perform: onClose)
+
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 12) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(NordTheme.mutedText.color)
+                    TextField("Start session…", text: $query)
+                        .textFieldStyle(.plain)
+                        .font(.title3)
+                        .foregroundStyle(NordTheme.primaryText.color)
+                        .focused($isSearchFocused)
+                        .onSubmit {
+                            if let first = filteredOptions.first {
+                                onSelect(first)
+                            }
+                        }
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 18)
+
+                Divider().overlay(NordTheme.polarNight3.color)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Commands for \(state.projectName)")
+                        .font(.caption)
+                        .foregroundStyle(NordTheme.mutedText.color)
+
+                    if state.isLoading {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                            Text("Loading session commands…")
+                                .foregroundStyle(NordTheme.secondaryText.color)
+                        }
+                        .padding(.vertical, 16)
+                    } else if filteredOptions.isEmpty {
+                        Text("No matching commands")
+                            .foregroundStyle(NordTheme.secondaryText.color)
+                            .padding(.vertical, 16)
+                    } else {
+                        ForEach(filteredOptions) { option in
+                            Button(action: { onSelect(option) }) {
+                                SessionCommandPaletteRow(option: option)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                .padding(16)
+
+                Divider().overlay(NordTheme.polarNight3.color)
+
+                HStack {
+                    Text("↩︎ Start first match")
+                        .font(.caption2)
+                        .foregroundStyle(NordTheme.mutedText.color)
+                    Spacer()
+                    Button("Cancel", action: onClose)
+                        .buttonStyle(.plain)
+                        .keyboardShortcut(.cancelAction)
+                        .foregroundStyle(NordTheme.secondaryText.color)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
             }
-        } label: {
-            Label("Start with shortcut", systemImage: "bolt.rectangle")
-                .font(.caption.weight(.semibold))
+            .frame(width: 720)
+            .background(NordTheme.shellBackground.color, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(NordTheme.polarNight3.color, lineWidth: 1)
+            }
+            .shadow(color: .black.opacity(0.35), radius: 30, y: 12)
         }
-        .menuStyle(.button)
-        .controlSize(.small)
-        .help("Start a session with an optional lightweight launch profile")
+        .task {
+            isSearchFocused = true
+        }
+    }
+}
+
+struct SessionCommandPaletteRow: View {
+    let option: SessionCommandOption
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Image(systemName: option.systemImage)
+                .font(.headline)
+                .foregroundStyle(NordTheme.snowStorm2.color)
+                .frame(width: 18)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(option.title)
+                    .font(.headline)
+                    .foregroundStyle(NordTheme.primaryText.color)
+                Text(option.subtitle)
+                    .font(.callout)
+                    .foregroundStyle(NordTheme.secondaryText.color)
+            }
+
+            Spacer(minLength: 12)
+            Image(systemName: "arrow.turn.down.left")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(NordTheme.mutedText.color)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(NordTheme.elevatedBackground.color.opacity(0.92), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(NordTheme.polarNight3.color, lineWidth: 1)
+        }
     }
 }
 
@@ -747,22 +919,13 @@ struct SessionRowView: View {
                     Image(systemName: isActive ? "rectangle.stack.fill" : "rectangle.stack")
                         .foregroundStyle(isActive ? NordTheme.snowStorm2.color : NordTheme.frost0.color)
                         .frame(width: 20)
-                    VStack(alignment: .leading, spacing: 4) {
+                    VStack(alignment: .leading, spacing: 0) {
                         Text(session.title)
                             .font(.headline)
                             .foregroundStyle(NordTheme.primaryText.color)
                             .lineLimit(1)
-                        Text(session.isUserNamed ? "User named • Resume ready" : "Default timestamp title • Resume ready")
-                            .font(.caption)
-                            .foregroundStyle(NordTheme.mutedText.color)
-                            .lineLimit(1)
                     }
                     Spacer(minLength: 8)
-                    if isActive {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(NordTheme.auroraGreen.color)
-                            .accessibilityHidden(true)
-                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
@@ -780,6 +943,7 @@ struct SessionRowView: View {
                         .background(NordTheme.shellBackground.color.opacity(0.85), in: Circle())
                 }
                 .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
                 .fixedSize()
                 .help("Session actions")
             }
@@ -848,10 +1012,16 @@ struct WorkspaceDetailView: View {
     let commandService: any WorkspaceCommandService
     let terminalHostController: TerminalHostController
     @Binding var userMessage: UserMessage?
+    let isSidebarCollapsed: Bool
 
     var body: some View {
         VStack(spacing: 0) {
-            ActiveContextBanner(project: store.selectedProject, session: store.selectedSession)
+            ActiveContextBanner(
+                project: store.selectedProject,
+                session: store.selectedSession,
+                onShowSessionCommands: showSessionCommandPalette,
+                isSidebarCollapsed: isSidebarCollapsed
+            )
             TabChromeView(store: store, commandService: commandService, userMessage: $userMessage)
             Divider().overlay(NordTheme.polarNight3.color)
             TerminalHostAreaView(
@@ -862,30 +1032,19 @@ struct WorkspaceDetailView: View {
             )
         }
         .background(NordTheme.contentBackground.color)
-        .toolbar {
-            ToolbarItem {
-                Button("New Tab", systemImage: "plus") { createTab() }
-                    .disabled(store.selectedSessionID == nil)
-                    .keyboardShortcut("t", modifiers: [.command])
-            }
-        }
+        .ignoresSafeArea(.container, edges: .top)
     }
 
-    private func createTab() {
-        guard let selectedSessionID = store.selectedSessionID else { return }
-        Task {
-            do {
-                _ = try await commandService.createTab(sessionID: selectedSessionID)
-            } catch {
-                userMessage = UserMessage(title: "Tab could not be created", detail: String(describing: error))
-            }
-        }
+    private func showSessionCommandPalette() {
+        NotificationCenter.default.post(name: .showSessionCommandPalette, object: nil)
     }
 }
 
 struct ActiveContextBanner: View {
     let project: WorkspaceProject?
     let session: WorkspaceSession?
+    let onShowSessionCommands: () -> Void
+    let isSidebarCollapsed: Bool
 
     var body: some View {
         HStack(spacing: 12) {
@@ -896,11 +1055,22 @@ struct ActiveContextBanner: View {
             Label(session?.title ?? "No session selected", systemImage: session == nil ? "rectangle.stack" : "rectangle.stack.fill")
                 .font(.subheadline.weight(.semibold))
             Spacer()
-            Text("New tabs inherit this context")
+            Text("⌘T opens a plain shell • ⌘⇧P starts session commands")
                 .font(.caption.weight(.medium))
                 .foregroundStyle(NordTheme.mutedText.color)
+                .lineLimit(1)
+            Button(action: onShowSessionCommands) {
+                Image(systemName: "plus")
+                    .font(.system(size: 13, weight: .semibold))
+                    .frame(width: 30, height: 30)
+                    .background(NordTheme.shellBackground.color.opacity(0.7), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(NordTheme.primaryText.color)
+            .help("Start session commands (⌘⇧P)")
         }
-        .padding(.horizontal, 16)
+        .padding(.leading, isSidebarCollapsed ? 150 : 16)
+        .padding(.trailing, 16)
         .padding(.vertical, 12)
         .foregroundStyle(NordTheme.primaryText.color)
         .background(NordTheme.elevatedBackground.color)
@@ -914,7 +1084,7 @@ struct TabChromeView: View {
 
     var body: some View {
         ScrollView(.horizontal) {
-            HStack(spacing: 8) {
+            HStack(spacing: 6) {
                 if store.tabsForSelectedSession.isEmpty {
                     Text(store.selectedSessionID == nil ? "Select a session to see tabs" : "No tabs in this session yet")
                         .font(.callout)
@@ -929,10 +1099,25 @@ struct TabChromeView: View {
                         )
                     }
                 }
+
+                Button(action: createTab) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 12, weight: .semibold))
+                        .frame(width: 24, height: 24)
+                        .background(NordTheme.elevatedBackground.color.opacity(store.selectedSessionID == nil ? 0.38 : 0.9), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .stroke(NordTheme.polarNight3.color, lineWidth: 1)
+                        }
+                }
+                .buttonStyle(.plain)
+                .disabled(store.selectedSessionID == nil)
+                .help("New tab (⌘T)")
             }
-            .padding(12)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
         }
-        .frame(height: 56)
+        .frame(height: 38)
         .background(NordTheme.polarNight1.color)
     }
 
@@ -954,6 +1139,17 @@ struct TabChromeView: View {
                 userMessage = UserMessage(title: "Tab is still running", detail: "This terminal still has a live process. Close was cancelled to avoid interrupting work.")
             } catch {
                 userMessage = UserMessage(title: "Tab could not be closed", detail: String(describing: error))
+            }
+        }
+    }
+
+    private func createTab() {
+        guard let selectedSessionID = store.selectedSessionID else { return }
+        Task {
+            do {
+                _ = try await commandService.createTab(sessionID: selectedSessionID)
+            } catch {
+                userMessage = UserMessage(title: "Tab could not be created", detail: String(describing: error))
             }
         }
     }
@@ -984,9 +1180,10 @@ struct TabItemView: View {
         .padding(.leading, 10)
         .padding(.trailing, 6)
         .padding(.vertical, 6)
-        .background(isActive ? NordTheme.activeBackground.color.opacity(0.38) : NordTheme.elevatedBackground.color.opacity(0.72), in: Capsule())
+        .background(isActive ? NordTheme.contentBackground.color : NordTheme.elevatedBackground.color.opacity(0.8), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
         .overlay {
-            Capsule().stroke(isActive ? NordTheme.activeBorder.color : NordTheme.polarNight3.color, lineWidth: 1)
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .stroke(isActive ? NordTheme.activeBorder.color : NordTheme.polarNight3.color, lineWidth: 1)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Terminal tab in \(tab.workingDirectory)")
@@ -1127,7 +1324,9 @@ struct SidebarHeader: View {
                 .controlSize(.small)
                 .accessibilityLabel(actionTitle)
         }
-        .padding(16)
+        .padding(.horizontal, 16)
+        .padding(.top, 0)
+        .padding(.bottom, 10)
         .background(NordTheme.polarNight1.color)
     }
 }
@@ -1186,7 +1385,7 @@ enum ProjectDirectoryPicker {
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
         panel.prompt = "Open Project"
-        panel.message = "Choose a project folder to keep in the Native Mac ADE sidebar."
+        panel.message = "Choose a project folder to keep in the Atelier sidebar."
         return panel.runModal() == .OK ? panel.url?.path : nil
     }
 }

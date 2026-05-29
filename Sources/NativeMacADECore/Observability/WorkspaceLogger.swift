@@ -17,7 +17,7 @@ public struct WorkspaceLogEvent: Equatable, Sendable {
 public final class WorkspaceLogger {
     public private(set) var events: [WorkspaceLogEvent] = []
     private let now: @MainActor () -> Date
-    private let osLogger = Logger(subsystem: "NativeMacADE", category: "Workspace")
+    private let osLogger = Logger(subsystem: "Atelier", category: "Workspace")
 
     public init(now: @escaping @MainActor () -> Date = Date.init) {
         self.now = now
