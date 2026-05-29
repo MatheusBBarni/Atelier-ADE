@@ -11,6 +11,10 @@ public final class WorkspaceStore {
     public private(set) var selectedSessionID: UUID?
     public private(set) var selectedTabID: UUID?
 
+    public var selection: WorkspaceSelection {
+        WorkspaceSelection(projectID: selectedProjectID, sessionID: selectedSessionID, tabID: selectedTabID)
+    }
+
     public init(
         projects: [WorkspaceProject] = [],
         sessions: [WorkspaceSession] = [],
@@ -72,6 +76,121 @@ public final class WorkspaceStore {
 
         selectedSessionID = sessionsForSelectedProject.first?.id
         ensureSelectedTabBelongsToSelectedSession()
+    }
+
+    public func restore(
+        projects: [WorkspaceProject],
+        sessions: [WorkspaceSession],
+        tabs: [WorkspaceTab],
+        selection: WorkspaceSelection
+    ) {
+        self.projects = projects
+        self.sessions = sessions
+        self.tabs = tabs
+        selectedProjectID = selection.projectID
+        selectedSessionID = selection.sessionID
+        selectedTabID = selection.tabID
+        normalizeSelection()
+    }
+
+    public func upsertProject(_ project: WorkspaceProject, select: Bool = true) {
+        if let index = projects.firstIndex(where: { $0.id == project.id }) {
+            projects[index] = project
+        } else {
+            projects.append(project)
+        }
+        projects.sort {
+            if $0.sortIndex == $1.sortIndex { return $0.lastOpenedAt > $1.lastOpenedAt }
+            return $0.sortIndex < $1.sortIndex
+        }
+        if select { selectProject(id: project.id) }
+    }
+
+    public func upsertSession(_ session: WorkspaceSession, select: Bool = true) {
+        if let index = sessions.firstIndex(where: { $0.id == session.id }) {
+            sessions[index] = session
+        } else {
+            sessions.append(session)
+        }
+        if select { selectSession(id: session.id) } else { normalizeSelection() }
+    }
+
+    public func upsertTab(_ tab: WorkspaceTab, select: Bool = true) {
+        if let index = tabs.firstIndex(where: { $0.id == tab.id }) {
+            tabs[index] = tab
+        } else {
+            tabs.append(tab)
+        }
+        if select { selectTab(id: tab.id) } else { normalizeSelection() }
+    }
+
+    public func removeTab(id: UUID) {
+        let removed = tabs.first { $0.id == id }
+        tabs.removeAll { $0.id == id }
+
+        if selectedTabID == id {
+            selectedTabID = nil
+        }
+
+        if let removed, selectedSessionID == removed.sessionID {
+            ensureSelectedTabBelongsToSelectedSession()
+        } else {
+            normalizeSelection()
+        }
+    }
+
+    public func removeProject(id: UUID) {
+        let removedSessionIDs = Set(sessions.filter { $0.projectID == id }.map(\.id))
+        projects.removeAll { $0.id == id }
+        sessions.removeAll { $0.projectID == id }
+        tabs.removeAll { removedSessionIDs.contains($0.sessionID) }
+
+        if selectedProjectID == id {
+            selectedProjectID = nil
+            selectedSessionID = nil
+            selectedTabID = nil
+            return
+        }
+
+        normalizeSelection()
+    }
+
+    public func removeSession(id: UUID) {
+        let removed = sessions.first { $0.id == id }
+        sessions.removeAll { $0.id == id }
+        tabs.removeAll { $0.sessionID == id }
+
+        if selectedSessionID == id {
+            selectedSessionID = nil
+            selectedTabID = nil
+        }
+
+        if let removed, selectedProjectID == removed.projectID {
+            selectedSessionID = sessionsForSelectedProject.first?.id
+            ensureSelectedTabBelongsToSelectedSession()
+        } else {
+            normalizeSelection()
+        }
+    }
+
+    public func project(matchingPath path: String) -> WorkspaceProject? {
+        let standardizedPath = URL(fileURLWithPath: path).standardizedFileURL.path
+        return projects.first { URL(fileURLWithPath: $0.path).standardizedFileURL.path == standardizedPath }
+    }
+
+    public func nextTabOrdinal(for sessionID: UUID) -> Int {
+        let ordinals = tabs.filter { $0.sessionID == sessionID }.map(\.ordinal)
+        return (ordinals.max() ?? -1) + 1
+    }
+
+    public func snapshot(updatedAt: Date = Date()) -> RestoreSnapshot {
+        RestoreSnapshot(
+            selectedProjectID: selectedProjectID,
+            selectedSessionID: selectedSessionID,
+            selectedTabID: selectedTabID,
+            tabOrder: tabs.sorted { $0.ordinal < $1.ordinal }.map(\.id),
+            updatedAt: updatedAt
+        )
     }
 
     public func selectSession(id: UUID?) {
@@ -148,6 +267,26 @@ public final class WorkspaceStore {
         }
 
         selectedTabID = tabsForSelectedSession.first?.id
+    }
+
+    private func normalizeSelection() {
+        guard let selectedProjectID,
+              projects.contains(where: { $0.id == selectedProjectID })
+        else {
+            self.selectedProjectID = nil
+            self.selectedSessionID = nil
+            self.selectedTabID = nil
+            return
+        }
+
+        if let selectedSessionID,
+           sessions.contains(where: { $0.id == selectedSessionID && $0.projectID == selectedProjectID }) {
+            ensureSelectedTabBelongsToSelectedSession()
+            return
+        }
+
+        self.selectedSessionID = sessionsForSelectedProject.first?.id
+        ensureSelectedTabBelongsToSelectedSession()
     }
 
     public static func defaultSessionTitle(date: Date) -> String {
