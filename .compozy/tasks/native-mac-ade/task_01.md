@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Scaffold native macOS app workspace"
 type: infra
 complexity: high
@@ -7,6 +7,12 @@ dependencies: []
 ---
 
 # Task 01: Scaffold native macOS app workspace
+
+## Implementation Evidence
+
+- Added SwiftPM macOS workspace with `NativeMacADE` executable target, `NativeMacADECore` library target, and separate core/integration test targets.
+- Added SwiftUI app shell, dependency container, workspace model/store scaffold, command service protocol, terminal host boundary, Ghostty adapter seam, persistence placeholder, restore coordinator, and scaffold tests.
+- Validation commands run after implementation: `swift build`, `swift test`, and `xcodebuild -scheme NativeMacADE -destination 'platform=macOS' test`.
 
 ## Overview
 Create the greenfield macOS application scaffold that every later task will build on. This task establishes the single app target, test bundles, root SwiftUI shell, and minimal folder/layout conventions required by the TechSpec without over-designing the repo.

@@ -4,7 +4,7 @@
 
 | # | Title | Status | Complexity | Dependencies |
 |---|-------|--------|------------|--------------|
-| 01 | Scaffold native macOS app workspace | pending | high | — |
+| 01 | Scaffold native macOS app workspace | completed | high | — |
 | 02 | Pin Ghostty and build the adapter boundary | pending | high | task_01 |
 | 03 | Implement workspace domain models and SQLite metadata store | pending | high | task_01 |
 | 04 | Implement workspace store and command services | pending | high | task_03 |
