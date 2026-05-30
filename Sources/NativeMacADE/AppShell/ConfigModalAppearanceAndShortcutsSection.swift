@@ -481,7 +481,7 @@ private extension AppCommandID {
         case .zoomOutTerminal:
             return "Zoom Out Terminal"
         case .toggleRightSidebar:
-            return "Toggle Left Sidebar"
+            return "Toggle Right Sidebar"
         case .openSettings:
             return "Open Settings"
         }

@@ -55,6 +55,7 @@ struct WorkspaceModelsTests {
             .openSettings
         ])
         #expect(AppCommandID.openSettings.defaultKeybinding.keyEquivalent == ",")
+        #expect(AppCommandID.toggleRightSidebar.defaultKeybinding.keyEquivalent == "l")
         #expect(AppCommandID.toggleRightSidebar.defaultKeybinding.modifiers == [.command])
     }
 

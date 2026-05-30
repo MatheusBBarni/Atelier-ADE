@@ -41,6 +41,7 @@ struct ConfigModalView: View {
                 }
                 .padding(20)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
             Divider().overlay(theme.border.color)
 
@@ -52,8 +53,7 @@ struct ConfigModalView: View {
             }
             .padding(20)
         }
-        .frame(width: 760)
-        .frame(minHeight: 620)
+        .frame(width: 760, height: 620)
         .background(theme.elevatedBackground.color)
         .task {
             commandService.recordSettingsOpened(surface: "config_modal")

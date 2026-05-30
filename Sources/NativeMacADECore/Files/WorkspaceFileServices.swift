@@ -34,6 +34,77 @@ public struct WorkspaceFileNode: Equatable, Sendable {
     }
 }
 
+private enum LocalWorkspaceFileIO {
+    static func enumerateProjectFiles(projectRoot root: String) throws -> [WorkspaceFileNode] {
+        let rootURL = URL(fileURLWithPath: root, isDirectory: true)
+        let fileManager = FileManager.default
+        guard let enumerator = fileManager.enumerator(
+            at: rootURL,
+            includingPropertiesForKeys: [.isDirectoryKey, .isRegularFileKey],
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        ) else {
+            throw WorkspaceFileAccessError.enumerationFailed(projectRoot: root, reason: "Unable to create directory enumerator")
+        }
+
+        var nodes: [WorkspaceFileNode] = []
+        while let url = enumerator.nextObject() as? URL {
+            let path = url.standardizedFileURL.resolvingSymlinksInPath().path
+            do {
+                try ensure(path, isContainedBy: root)
+                let resourceValues = try url.resourceValues(forKeys: [.isDirectoryKey, .isRegularFileKey])
+                let isDirectory = resourceValues.isDirectory == true
+                guard isDirectory || resourceValues.isRegularFile == true else { continue }
+                nodes.append(WorkspaceFileNode(
+                    reference: WorkspaceFileReference(path: path, projectRoot: root),
+                    isDirectory: isDirectory
+                ))
+            } catch let error as WorkspaceFileAccessError {
+                throw error
+            } catch {
+                throw WorkspaceFileAccessError.enumerationFailed(projectRoot: root, reason: String(describing: error))
+            }
+        }
+
+        return nodes.sorted {
+            if $0.reference.path == $1.reference.path { return !$0.isDirectory && $1.isDirectory }
+            return $0.reference.path < $1.reference.path
+        }
+    }
+
+    static func loadTextFile(at path: String) throws -> String {
+        let url = URL(fileURLWithPath: path)
+        do {
+            let data = try Data(contentsOf: url, options: [.mappedIfSafe])
+            guard let text = String(data: data, encoding: .utf8) else {
+                throw WorkspaceFileAccessError.unsupportedFile(path)
+            }
+            return text
+        } catch let error as WorkspaceFileAccessError {
+            throw error
+        } catch {
+            throw WorkspaceFileAccessError.unreadableFile(path)
+        }
+    }
+
+    static func saveTextFile(_ text: String, to path: String) throws {
+        do {
+            try Data(text.utf8).write(to: URL(fileURLWithPath: path), options: [.atomic])
+        } catch {
+            throw WorkspaceFileAccessError.writeFailed(path: path, reason: String(describing: error))
+        }
+    }
+
+    private static func ensure(_ path: String, isContainedBy projectRoot: String) throws {
+        guard path != projectRoot else {
+            throw WorkspaceFileAccessError.filePathOutsideProject(filePath: path, projectRoot: projectRoot)
+        }
+        let rootPrefix = projectRoot.hasSuffix("/") ? projectRoot : "\(projectRoot)/"
+        guard path.hasPrefix(rootPrefix) else {
+            throw WorkspaceFileAccessError.filePathOutsideProject(filePath: path, projectRoot: projectRoot)
+        }
+    }
+}
+
 @MainActor
 public protocol WorkspaceFileAccessing: AnyObject {
     func validatedFileReference(path: String, projectRoot: String) async throws -> WorkspaceFileReference
@@ -121,38 +192,9 @@ public final class LocalWorkspaceFileAccess: WorkspaceFileAccessing {
 
     public func enumerateProjectFiles(projectRoot: String) async throws -> [WorkspaceFileNode] {
         let root = try validatedProjectRoot(projectRoot)
-        let rootURL = URL(fileURLWithPath: root, isDirectory: true)
-        guard let enumerator = fileManager.enumerator(
-            at: rootURL,
-            includingPropertiesForKeys: [.isDirectoryKey, .isRegularFileKey],
-            options: [.skipsHiddenFiles, .skipsPackageDescendants]
-        ) else {
-            throw WorkspaceFileAccessError.enumerationFailed(projectRoot: root, reason: "Unable to create directory enumerator")
-        }
-
-        var nodes: [WorkspaceFileNode] = []
-        while let url = enumerator.nextObject() as? URL {
-            let path = url.standardizedFileURL.resolvingSymlinksInPath().path
-            do {
-                try ensure(path, isContainedBy: root)
-                let resourceValues = try url.resourceValues(forKeys: [.isDirectoryKey, .isRegularFileKey])
-                let isDirectory = resourceValues.isDirectory == true
-                guard isDirectory || resourceValues.isRegularFile == true else { continue }
-                nodes.append(WorkspaceFileNode(
-                    reference: WorkspaceFileReference(path: path, projectRoot: root),
-                    isDirectory: isDirectory
-                ))
-            } catch let error as WorkspaceFileAccessError {
-                throw error
-            } catch {
-                throw WorkspaceFileAccessError.enumerationFailed(projectRoot: root, reason: String(describing: error))
-            }
-        }
-
-        return nodes.sorted {
-            if $0.reference.path == $1.reference.path { return !$0.isDirectory && $1.isDirectory }
-            return $0.reference.path < $1.reference.path
-        }
+        return try await Task.detached(priority: .userInitiated) {
+            try LocalWorkspaceFileIO.enumerateProjectFiles(projectRoot: root)
+        }.value
     }
 
     public func loadTextFile(_ reference: WorkspaceFileReference) async throws -> String {
@@ -160,18 +202,9 @@ public final class LocalWorkspaceFileAccess: WorkspaceFileAccessing {
             path: reference.path,
             projectRoot: reference.projectRoot
         )
-        let url = URL(fileURLWithPath: validatedReference.path)
-        do {
-            let data = try Data(contentsOf: url, options: [.mappedIfSafe])
-            guard let text = String(data: data, encoding: .utf8) else {
-                throw WorkspaceFileAccessError.unsupportedFile(validatedReference.path)
-            }
-            return text
-        } catch let error as WorkspaceFileAccessError {
-            throw error
-        } catch {
-            throw WorkspaceFileAccessError.unreadableFile(validatedReference.path)
-        }
+        return try await Task.detached(priority: .userInitiated) {
+            try LocalWorkspaceFileIO.loadTextFile(at: validatedReference.path)
+        }.value
     }
 
     public func saveTextFile(_ text: String, to reference: WorkspaceFileReference) async throws {
@@ -183,11 +216,9 @@ public final class LocalWorkspaceFileAccess: WorkspaceFileAccessing {
             throw WorkspaceFileAccessError.unwritableFile(validatedReference.path)
         }
 
-        do {
-            try Data(text.utf8).write(to: URL(fileURLWithPath: validatedReference.path), options: [.atomic])
-        } catch {
-            throw WorkspaceFileAccessError.writeFailed(path: validatedReference.path, reason: String(describing: error))
-        }
+        try await Task.detached(priority: .userInitiated) {
+            try LocalWorkspaceFileIO.saveTextFile(text, to: validatedReference.path)
+        }.value
     }
 
     private func validatedProjectRoot(_ projectRoot: String) throws -> String {

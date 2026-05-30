@@ -27,7 +27,7 @@ private extension ThemeColorScheme {
 }
 
 struct ContentView: View {
-    @Bindable var shellState: AppShellState
+    let shellState: AppShellState
     let store: WorkspaceStore
     let commandService: any WorkspaceCommandService
     let terminalHostController: TerminalHostController
@@ -125,7 +125,7 @@ struct ContentView: View {
             }
             isRestoring = false
         }
-        .sheet(isPresented: $shellState.isSettingsPresented, onDismiss: shellState.dismissSettings) {
+        .sheet(isPresented: settingsPresentedBinding, onDismiss: shellState.dismissSettings) {
             ConfigModalView(
                 store: store,
                 commandService: commandService,
@@ -160,6 +160,17 @@ struct ContentView: View {
 
     private var userMessagePresented: Binding<Bool> {
         Binding(get: { userMessage != nil }, set: { if !$0 { userMessage = nil } })
+    }
+
+    private var settingsPresentedBinding: Binding<Bool> {
+        Binding(
+            get: { shellState.isSettingsPresented },
+            set: { isPresented in
+                if !isPresented {
+                    shellState.dismissSettings()
+                }
+            }
+        )
     }
 
     private func applyActiveTheme() {
@@ -1167,7 +1178,7 @@ struct WorkspaceDetailView: View {
     let onOpenSettings: () -> Void
     let isSidebarCollapsed: Bool
     @Environment(\.shellThemePalette) private var theme
-    @State private var fileBufferRevision = 0
+    @State private var isFileWorkspaceSidebarVisible = true
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1182,7 +1193,6 @@ struct WorkspaceDetailView: View {
                 store: store,
                 commandService: commandService,
                 fileBufferController: fileBufferController,
-                fileBufferRevision: fileBufferRevision,
                 userMessage: $userMessage
             )
             Divider().overlay(theme.border.color)
@@ -1200,22 +1210,35 @@ struct WorkspaceDetailView: View {
                     store: store,
                     commandService: commandService,
                     fileAccessService: fileAccessService,
-                    fileBufferController: fileBufferController,
-                    fileBufferRevision: fileBufferRevision,
                     userMessage: $userMessage
                 )
-                .frame(minWidth: 280, idealWidth: 340, maxWidth: 460)
+                .frame(
+                    minWidth: isFileWorkspaceSidebarVisible ? 280 : 0,
+                    idealWidth: isFileWorkspaceSidebarVisible ? 340 : 0,
+                    maxWidth: isFileWorkspaceSidebarVisible ? 460 : 0
+                )
+                .frame(width: isFileWorkspaceSidebarVisible ? nil : 0)
+                .clipped()
+                .opacity(isFileWorkspaceSidebarVisible ? 1 : 0)
+                .allowsHitTesting(isFileWorkspaceSidebarVisible)
+                .accessibilityHidden(!isFileWorkspaceSidebarVisible)
             }
         }
         .background(theme.contentBackground.color)
         .ignoresSafeArea(.container, edges: .top)
-        .onReceive(NotificationCenter.default.publisher(for: .fileBufferDirtyStateChanged)) { _ in
-            fileBufferRevision += 1
+        .onReceive(NotificationCenter.default.publisher(for: .toggleFileWorkspaceSidebar)) { _ in
+            toggleFileWorkspaceSidebar()
         }
     }
 
     private func showSessionCommandPalette() {
         NotificationCenter.default.post(name: .showSessionCommandPalette, object: nil)
+    }
+
+    private func toggleFileWorkspaceSidebar() {
+        withAnimation(.easeInOut(duration: 0.16)) {
+            isFileWorkspaceSidebarVisible.toggle()
+        }
     }
 }
 
@@ -1268,12 +1291,13 @@ struct TabChromeView: View {
     let store: WorkspaceStore
     let commandService: any WorkspaceCommandService
     let fileBufferController: any WorkspaceFileBufferManaging
-    let fileBufferRevision: Int
     @Binding var userMessage: UserMessage?
     @Environment(\.shellThemePalette) private var theme
+    @State private var dirtyRefreshToken = 0
+    @State private var pendingCloseConfirmation: TabCloseConfirmation?
 
     var body: some View {
-        let _ = fileBufferRevision
+        let _ = dirtyRefreshToken
         ScrollView(.horizontal) {
             HStack(spacing: 6) {
                 if store.tabsForSelectedSession.isEmpty {
@@ -1311,6 +1335,23 @@ struct TabChromeView: View {
         }
         .frame(height: 38)
         .background(theme.tabBarBackground.color)
+        .alert(
+            pendingCloseConfirmation?.title ?? "Close tab?",
+            isPresented: closeConfirmationPresented,
+            presenting: pendingCloseConfirmation
+        ) { confirmation in
+            Button("Cancel", role: .cancel) {
+                pendingCloseConfirmation = nil
+            }
+            Button("Force Close", role: .destructive) {
+                forceCloseTab(confirmation.tabID)
+            }
+        } message: { confirmation in
+            Text(confirmation.detail)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .fileBufferDirtyStateChanged)) { _ in
+            dirtyRefreshToken += 1
+        }
     }
 
     private func selectTab(_ id: UUID?) {
@@ -1328,12 +1369,28 @@ struct TabChromeView: View {
             do {
                 try await commandService.closeTab(tabID: id, force: false)
             } catch WorkspaceCommandError.dirtyFileTabCloseRejected {
-                userMessage = UserMessage(
+                pendingCloseConfirmation = TabCloseConfirmation(
+                    tabID: id,
                     title: "File has unsaved changes",
-                    detail: "Save or revert this file before closing the tab."
+                    detail: "Closing this file will discard its unsaved changes."
                 )
             } catch WorkspaceCommandError.closeRejected {
-                userMessage = UserMessage(title: "Tab is still running", detail: "This terminal still has a live process. Close was cancelled to avoid interrupting work.")
+                pendingCloseConfirmation = TabCloseConfirmation(
+                    tabID: id,
+                    title: "Tab is still running",
+                    detail: "This terminal still has a live process. Force close it to interrupt the process and close the tab."
+                )
+            } catch {
+                userMessage = UserMessage(title: "Tab could not be closed", detail: String(describing: error))
+            }
+        }
+    }
+
+    private func forceCloseTab(_ id: UUID) {
+        pendingCloseConfirmation = nil
+        Task {
+            do {
+                try await commandService.closeTab(tabID: id, force: true)
             } catch {
                 userMessage = UserMessage(title: "Tab could not be closed", detail: String(describing: error))
             }
@@ -1350,6 +1407,25 @@ struct TabChromeView: View {
             }
         }
     }
+
+    private var closeConfirmationPresented: Binding<Bool> {
+        Binding(
+            get: { pendingCloseConfirmation != nil },
+            set: { isPresented in
+                if !isPresented {
+                    pendingCloseConfirmation = nil
+                }
+            }
+        )
+    }
+}
+
+private struct TabCloseConfirmation: Identifiable {
+    let tabID: UUID
+    let title: String
+    let detail: String
+
+    var id: UUID { tabID }
 }
 
 struct TabItemView: View {
@@ -1730,26 +1806,20 @@ struct FileWorkspaceSidebarView: View {
     let store: WorkspaceStore
     let commandService: any WorkspaceCommandService
     let fileAccessService: any WorkspaceFileAccessing
-    let fileBufferController: any WorkspaceFileBufferManaging
-    let fileBufferRevision: Int
     @Binding var userMessage: UserMessage?
     @Environment(\.shellThemePalette) private var theme
     @State private var repositoryNodes: [WorkspaceFileNode] = []
+    @State private var repositoryEntries: [FileWorkspaceTreeEntry] = []
     @State private var expandedDirectoryPaths: Set<String> = []
     @State private var repositoryError: String?
     @State private var isRepositoryLoading = false
 
     var body: some View {
-        let _ = fileBufferRevision
-        VStack(alignment: .leading, spacing: 0) {
-            FileWorkspaceHeaderView(project: store.selectedProject, reload: reloadRepository)
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 14) {
-                    workingSetSection
-                    repositorySection
-                }
-                .padding(12)
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 12) {
+                repositorySection
             }
+            .padding(12)
         }
         .background(theme.sidebarBackground.color)
         .overlay(alignment: .leading) {
@@ -1765,25 +1835,15 @@ struct FileWorkspaceSidebarView: View {
         }
     }
 
-    private var workingSetSection: some View {
-        FileWorkspaceSection(title: "Working Set", systemImage: "clock.arrow.circlepath") {
-            let entries = store.selectedSessionFileWorkingSetEntries(dirtyTabIDs: dirtyFileTabIDs)
-            if entries.isEmpty {
-                FileWorkspaceInlineEmptyState(title: "No open files")
-            } else {
-                VStack(alignment: .leading, spacing: 5) {
-                    ForEach(entries) { entry in
-                        FileWorkingSetRow(entry: entry) {
-                            selectTab(entry.tabID)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     private var repositorySection: some View {
-        FileWorkspaceSection(title: "Repository", systemImage: "folder") {
+        FileWorkspaceSection(
+            title: repositorySectionTitle,
+            systemImage: "folder",
+            trailingActionLabel: "Reload files",
+            trailingActionSystemImage: "arrow.clockwise",
+            trailingActionDisabled: store.selectedProject == nil,
+            trailingAction: reloadRepository
+        ) {
             if store.selectedProject == nil {
                 FileWorkspaceInlineEmptyState(title: "No project selected")
             } else if isRepositoryLoading {
@@ -1800,7 +1860,7 @@ struct FileWorkspaceSidebarView: View {
             } else if repositoryEntries.isEmpty {
                 FileWorkspaceInlineEmptyState(title: "No files")
             } else {
-                VStack(alignment: .leading, spacing: 3) {
+                LazyVStack(alignment: .leading, spacing: 3) {
                     ForEach(repositoryEntries) { entry in
                         RepositoryTreeRow(entry: entry) {
                             handleRepositoryEntry(entry)
@@ -1811,20 +1871,8 @@ struct FileWorkspaceSidebarView: View {
         }
     }
 
-    private var dirtyFileTabIDs: Set<UUID> {
-        Set(store.tabsForSelectedSession.compactMap { tab in
-            guard tab.kind == .file, fileBufferController.isDirty(tabID: tab.id) else { return nil }
-            return tab.id
-        })
-    }
-
-    private var repositoryEntries: [FileWorkspaceTreeEntry] {
-        guard let project = store.selectedProject else { return [] }
-        return WorkspaceFileTreeBuilder.visibleEntries(
-            projectRoot: project.path,
-            nodes: repositoryNodes,
-            expandedDirectoryPaths: expandedDirectoryPaths
-        )
+    private var repositorySectionTitle: String {
+        store.selectedProject?.displayName ?? "Repository"
     }
 
     private var repositoryTaskID: String {
@@ -1834,6 +1882,7 @@ struct FileWorkspaceSidebarView: View {
     private func loadRepositoryNodes() async {
         guard let project = store.selectedProject else {
             repositoryNodes = []
+            repositoryEntries = []
             repositoryError = nil
             isRepositoryLoading = false
             return
@@ -1844,8 +1893,10 @@ struct FileWorkspaceSidebarView: View {
         do {
             repositoryNodes = try await fileAccessService.enumerateProjectFiles(projectRoot: project.path)
             expandSelectedFileAncestors()
+            rebuildRepositoryEntries()
         } catch {
             repositoryNodes = []
+            repositoryEntries = []
             repositoryError = "Files unavailable"
             userMessage = UserMessage(title: "Repository files unavailable", detail: String(describing: error))
         }
@@ -1855,16 +1906,6 @@ struct FileWorkspaceSidebarView: View {
     private func reloadRepository() {
         Task {
             await loadRepositoryNodes()
-        }
-    }
-
-    private func selectTab(_ id: UUID) {
-        Task {
-            do {
-                try await commandService.selectTab(id: id)
-            } catch {
-                userMessage = UserMessage(title: "Tab selection could not be saved", detail: String(describing: error))
-            }
         }
     }
 
@@ -1895,6 +1936,7 @@ struct FileWorkspaceSidebarView: View {
         } else {
             expandedDirectoryPaths.insert(path)
         }
+        rebuildRepositoryEntries()
     }
 
     private func expandSelectedFileAncestors() {
@@ -1905,56 +1947,79 @@ struct FileWorkspaceSidebarView: View {
     private func expandAncestors(of path: String) {
         var url = URL(fileURLWithPath: path).deletingLastPathComponent()
         let rootPath = store.selectedProject?.path
+        var didChange = false
         while !url.path.isEmpty, url.path != "/" {
-            expandedDirectoryPaths.insert(url.path)
+            if expandedDirectoryPaths.insert(url.path).inserted {
+                didChange = true
+            }
             if let rootPath, URL(fileURLWithPath: rootPath, isDirectory: true).standardizedFileURL.path == url.standardizedFileURL.path {
                 break
             }
             url.deleteLastPathComponent()
         }
-    }
-}
-
-struct FileWorkspaceHeaderView: View {
-    let project: WorkspaceProject?
-    let reload: () -> Void
-    @Environment(\.shellThemePalette) private var theme
-
-    var body: some View {
-        HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Files")
-                    .font(.headline)
-                    .foregroundStyle(theme.primaryText.color)
-                Text(project?.displayName ?? "No project")
-                    .font(.caption.monospaced())
-                    .foregroundStyle(theme.mutedText.color)
-                    .lineLimit(1)
-            }
-            Spacer()
-            Button("Reload", systemImage: "arrow.clockwise", action: reload)
-                .labelStyle(.iconOnly)
-                .buttonStyle(.borderless)
-                .disabled(project == nil)
-                .help("Reload files")
+        if didChange {
+            rebuildRepositoryEntries()
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(theme.tabBarBackground.color)
+    }
+
+    private func rebuildRepositoryEntries() {
+        guard let project = store.selectedProject else {
+            repositoryEntries = []
+            return
+        }
+        repositoryEntries = WorkspaceFileTreeBuilder.visibleEntries(
+            projectRoot: project.path,
+            nodes: repositoryNodes,
+            expandedDirectoryPaths: expandedDirectoryPaths
+        )
     }
 }
 
 struct FileWorkspaceSection<Content: View>: View {
     let title: String
     let systemImage: String
+    let trailingActionLabel: String?
+    let trailingActionSystemImage: String?
+    let trailingActionDisabled: Bool
+    let trailingAction: (() -> Void)?
     @ViewBuilder let content: Content
     @Environment(\.shellThemePalette) private var theme
 
+    init(
+        title: String,
+        systemImage: String,
+        trailingActionLabel: String? = nil,
+        trailingActionSystemImage: String? = nil,
+        trailingActionDisabled: Bool = false,
+        trailingAction: (() -> Void)? = nil,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.title = title
+        self.systemImage = systemImage
+        self.trailingActionLabel = trailingActionLabel
+        self.trailingActionSystemImage = trailingActionSystemImage
+        self.trailingActionDisabled = trailingActionDisabled
+        self.trailingAction = trailingAction
+        self.content = content()
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label(title, systemImage: systemImage)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(theme.secondaryText.color)
+            HStack(spacing: 8) {
+                Label(title, systemImage: systemImage)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(theme.secondaryText.color)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                if let trailingAction, let trailingActionSystemImage {
+                    Button(trailingActionLabel ?? title, systemImage: trailingActionSystemImage, action: trailingAction)
+                        .labelStyle(.iconOnly)
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(theme.secondaryText.color)
+                        .disabled(trailingActionDisabled)
+                        .help(trailingActionLabel ?? "")
+                }
+            }
             content
         }
         .frame(maxWidth: .infinity, alignment: .leading)

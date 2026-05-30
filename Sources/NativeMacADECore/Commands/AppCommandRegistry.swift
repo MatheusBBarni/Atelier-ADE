@@ -27,7 +27,7 @@ public enum AppCommandRegistry {
         .openFileInExternalEditor: KeybindingOverride(commandID: .openFileInExternalEditor, keyEquivalent: "o", modifiers: [.command, .shift]),
         .zoomInTerminal: KeybindingOverride(commandID: .zoomInTerminal, keyEquivalent: "+"),
         .zoomOutTerminal: KeybindingOverride(commandID: .zoomOutTerminal, keyEquivalent: "-"),
-        .toggleRightSidebar: KeybindingOverride(commandID: .toggleRightSidebar, keyEquivalent: "b"),
+        .toggleRightSidebar: KeybindingOverride(commandID: .toggleRightSidebar, keyEquivalent: "l"),
         .openSettings: KeybindingOverride(commandID: .openSettings, keyEquivalent: ",")
     ]
 

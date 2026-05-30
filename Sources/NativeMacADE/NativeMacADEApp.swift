@@ -117,6 +117,10 @@ struct AtelierApp: App {
                 Button("Toggle Left Sidebar") {
                     NotificationCenter.default.post(name: .toggleWorkspaceSidebar, object: nil)
                 }
+
+                Button("Toggle Right Sidebar") {
+                    NotificationCenter.default.post(name: .toggleFileWorkspaceSidebar, object: nil)
+                }
                 .managedKeyboardShortcut(.toggleRightSidebar, preferences: workspaceStore.appPreferences)
 
                 Button("Zoom In Terminal") {
@@ -202,6 +206,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 
 extension Notification.Name {
     static let toggleWorkspaceSidebar = Notification.Name("Atelier.toggleWorkspaceSidebar")
+    static let toggleFileWorkspaceSidebar = Notification.Name("Atelier.toggleFileWorkspaceSidebar")
     static let showSessionCommandPalette = Notification.Name("Atelier.showSessionCommandPalette")
     static let performSelectedFileCommand = Notification.Name("Atelier.performSelectedFileCommand")
 }

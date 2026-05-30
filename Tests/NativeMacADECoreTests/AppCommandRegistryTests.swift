@@ -31,7 +31,7 @@ struct AppCommandRegistryTests {
         #expect(defaults[.openFileInExternalEditor] == KeybindingOverride(commandID: .openFileInExternalEditor, keyEquivalent: "o", modifiers: [.command, .shift]))
         #expect(defaults[.zoomInTerminal] == KeybindingOverride(commandID: .zoomInTerminal, keyEquivalent: "+"))
         #expect(defaults[.zoomOutTerminal] == KeybindingOverride(commandID: .zoomOutTerminal, keyEquivalent: "-"))
-        #expect(defaults[.toggleRightSidebar] == KeybindingOverride(commandID: .toggleRightSidebar, keyEquivalent: "b"))
+        #expect(defaults[.toggleRightSidebar] == KeybindingOverride(commandID: .toggleRightSidebar, keyEquivalent: "l"))
         #expect(defaults[.openSettings] == KeybindingOverride(commandID: .openSettings, keyEquivalent: ","))
         #expect(AppCommandRegistry.resolvedKeybindings(for: .defaults) == defaults)
     }

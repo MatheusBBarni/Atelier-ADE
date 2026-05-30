@@ -107,7 +107,6 @@ public enum WorkspaceFileTreeBuilder {
     ) -> [FileWorkspaceTreeEntry] {
         let root = URL(fileURLWithPath: projectRoot, isDirectory: true).standardizedFileURL.path
         let rootPrefix = root.hasSuffix("/") ? root : "\(root)/"
-        let nodesByPath = Dictionary(grouping: nodes, by: \.reference.path).compactMapValues(\.first)
 
         let childrenByParent = nodes.reduce(into: [String: [WorkspaceFileNode]]()) { result, node in
             guard node.reference.path.hasPrefix(rootPrefix) else { return }
@@ -115,8 +114,8 @@ public enum WorkspaceFileTreeBuilder {
             result[parent, default: []].append(node)
         }
 
-        func sortedChildren(of parent: String) -> [WorkspaceFileNode] {
-            childrenByParent[parent, default: []].sorted { lhs, rhs in
+        let sortedChildrenByParent = childrenByParent.mapValues { children in
+            children.sorted { lhs, rhs in
                 if lhs.isDirectory != rhs.isDirectory {
                     return lhs.isDirectory && !rhs.isDirectory
                 }
@@ -124,8 +123,13 @@ public enum WorkspaceFileTreeBuilder {
             }
         }
 
+        func sortedChildren(of parent: String) -> [WorkspaceFileNode] {
+            sortedChildrenByParent[parent, default: []]
+        }
+
         func appendChildren(of parent: String, depth: Int, into entries: inout [FileWorkspaceTreeEntry]) {
             for child in sortedChildren(of: parent) {
+                let childChildren = sortedChildren(of: child.reference.path)
                 let isExpanded = expandedDirectoryPaths.contains(child.reference.path)
                 entries.append(FileWorkspaceTreeEntry(
                     reference: child.reference,
@@ -134,7 +138,7 @@ public enum WorkspaceFileTreeBuilder {
                     depth: depth,
                     isDirectory: child.isDirectory,
                     isExpanded: isExpanded,
-                    hasChildren: nodesByPath[child.reference.path]?.isDirectory == true && !sortedChildren(of: child.reference.path).isEmpty
+                    hasChildren: child.isDirectory && !childChildren.isEmpty
                 ))
                 if child.isDirectory, isExpanded {
                     appendChildren(of: child.reference.path, depth: depth + 1, into: &entries)
