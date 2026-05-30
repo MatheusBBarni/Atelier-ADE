@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Make store, command, and restore flows file-tab aware"
 type: backend
 complexity: high
@@ -28,11 +28,11 @@ Make the existing shared session workflow understand file tabs as first-class ta
 </requirements>
 
 ## Subtasks
-- [ ] 2.1 Extend `WorkspaceStore` helpers and selection logic so mixed terminal/file tabs remain coherent within one session.
-- [ ] 2.2 Update `WorkspaceCommandService` and `DefaultWorkspaceCommandService` to expose and branch on file-tab behavior without creating file buffers yet.
-- [ ] 2.3 Update restore assembly and restore replay so file tabs reuse the existing snapshot order but bypass terminal surface recreation.
-- [ ] 2.4 Add per-kind close and destructive-action protections for file tabs versus terminal tabs.
-- [ ] 2.5 Expand store, command-service, and restore tests for mixed tab ordering, close branching, and restore diagnostics.
+- [x] 2.1 Extend `WorkspaceStore` helpers and selection logic so mixed terminal/file tabs remain coherent within one session.
+- [x] 2.2 Update `WorkspaceCommandService` and `DefaultWorkspaceCommandService` to expose and branch on file-tab behavior without creating file buffers yet.
+- [x] 2.3 Update restore assembly and restore replay so file tabs reuse the existing snapshot order but bypass terminal surface recreation.
+- [x] 2.4 Add per-kind close and destructive-action protections for file tabs versus terminal tabs.
+- [x] 2.5 Expand store, command-service, and restore tests for mixed tab ordering, close branching, and restore diagnostics.
 
 ## Implementation Details
 This task is the shared backend seam for mixed-tab behavior. Use the TechSpec sections "System Architecture", "Implementation Design > API Endpoints", and "Development Sequencing" to keep store, command, and restore logic aligned with ADR-003 and ADR-005.
@@ -69,13 +69,13 @@ This task is the shared backend seam for mixed-tab behavior. Use the TechSpec se
 
 ## Tests
 - Unit tests:
-  - [ ] `WorkspaceStoreTests`: selecting and activating mixed terminal/file tabs preserves one session-scoped tab order and one selected tab ID.
-  - [ ] `DefaultWorkspaceCommandServiceTests`: restoring a mixed session recreates terminal surfaces only for terminal tabs.
-  - [ ] `DefaultWorkspaceCommandServiceTests`: closing a file tab follows file-specific rejection rules while terminal close behavior stays unchanged.
-  - [ ] `DefaultWorkspaceCommandServiceTests`: removing a session or project with mixed tabs branches correctly by tab kind instead of assuming every tab is terminal-backed.
+  - [x] `WorkspaceStoreTests`: selecting and activating mixed terminal/file tabs preserves one session-scoped tab order and one selected tab ID.
+  - [x] `DefaultWorkspaceCommandServiceTests`: restoring a mixed session recreates terminal surfaces only for terminal tabs.
+  - [x] `DefaultWorkspaceCommandServiceTests`: closing a file tab follows file-specific rejection rules while terminal close behavior stays unchanged.
+  - [x] `DefaultWorkspaceCommandServiceTests`: removing a session or project with mixed tabs branches correctly by tab kind instead of assuming every tab is terminal-backed.
 - Integration tests:
-  - [ ] `RestoreCoordinatorIntegrationTests`: a relaunched mixed session restores tab order and selection while skipping unreadable file tabs with diagnostics.
-  - [ ] `DefaultWorkspaceCommandServiceIntegrationTests`: mixed tab metadata persists through selection changes, close actions, and restore snapshot updates.
+  - [x] `RestoreCoordinatorIntegrationTests`: a relaunched mixed session restores tab order and selection while skipping unreadable file tabs with diagnostics.
+  - [x] `DefaultWorkspaceCommandServiceIntegrationTests`: mixed tab metadata persists through selection changes, close actions, and restore snapshot updates.
 - Test coverage target: >=80%
 - All tests must pass
 

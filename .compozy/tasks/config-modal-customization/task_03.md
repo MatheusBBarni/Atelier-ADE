@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Add settings orchestration and agent-profile mutation APIs"
 type: backend
 complexity: high
@@ -32,12 +32,12 @@ This task expands the command-service and store seam from read-only launch-profi
 </requirements>
 
 ## Subtasks
-- [ ] 3.1 Expand the command-service contract, errors, and store mutation surface for settings and agent-profile operations.
-- [ ] 3.2 Add persistence-backed flows for loading, saving, deleting, and resetting agent profiles and app preferences.
-- [ ] 3.3 Freeze the curated built-in catalog and merge it deterministically with persisted profile rows.
-- [ ] 3.4 Add stale-default cleanup and safe fallback behavior for invalid saved default references.
-- [ ] 3.5 Update observable store state so downstream UI and app commands react to successful changes immediately.
-- [ ] 3.6 Add regression coverage for validation, provenance, precedence, and self-healing behavior.
+- [x] 3.1 Expand the command-service contract, errors, and store mutation surface for settings and agent-profile operations.
+- [x] 3.2 Add persistence-backed flows for loading, saving, deleting, and resetting agent profiles and app preferences.
+- [x] 3.3 Freeze the curated built-in catalog and merge it deterministically with persisted profile rows.
+- [x] 3.4 Add stale-default cleanup and safe fallback behavior for invalid saved default references.
+- [x] 3.5 Update observable store state so downstream UI and app commands react to successful changes immediately.
+- [x] 3.6 Add regression coverage for validation, provenance, precedence, and self-healing behavior.
 
 ## Implementation Details
 See the TechSpec sections **Core Interfaces**, **API Endpoints**, **Data Models**, and **Key Decisions**. Keep settings orchestration in the existing command-service seam; do not introduce a separate settings protocol or expose persistence details to the UI.
@@ -77,17 +77,17 @@ See the TechSpec sections **Core Interfaces**, **API Endpoints**, **Data Models*
 
 ## Tests
 - Unit tests:
-  - [ ] Saving preferences rejects unknown theme IDs and leaves persisted preferences unchanged.
-  - [ ] Saving preferences rejects duplicate managed keybindings and reports a typed validation failure.
-  - [ ] Saving or editing a profile rejects malformed `launchArgumentsJSON` and preserves the previous valid profile state.
-  - [ ] Editing a built-in profile marks it overridden; resetting it restores canonical values and clears override state.
-  - [ ] Deleting a custom profile clears `defaultSessionShortcutID` when it references that profile.
-  - [ ] Attempting to delete a built-in profile fails without mutating persistence.
+  - [x] Saving preferences rejects unknown theme IDs and leaves persisted preferences unchanged.
+  - [x] Saving preferences rejects duplicate managed keybindings and reports a typed validation failure.
+  - [x] Saving or editing a profile rejects malformed `launchArgumentsJSON` and preserves the previous valid profile state.
+  - [x] Editing a built-in profile marks it overridden; resetting it restores canonical values and clears override state.
+  - [x] Deleting a custom profile clears `defaultSessionShortcutID` when it references that profile.
+  - [x] Attempting to delete a built-in profile fails without mutating persistence.
 - Integration tests:
-  - [ ] Preferences and built-in override state round-trip through SQLite.
-  - [ ] Explicit profile beats saved default, and saved default beats plain shell during new-session creation.
-  - [ ] Loading persisted stale default-profile data self-heals to nil and plain session creation still succeeds.
-  - [ ] Repeated profile-list loads do not duplicate built-ins and always include the curated OpenCode profile.
+  - [x] Preferences and built-in override state round-trip through SQLite.
+  - [x] Explicit profile beats saved default, and saved default beats plain shell during new-session creation.
+  - [x] Loading persisted stale default-profile data self-heals to nil and plain session creation still succeeds.
+  - [x] Repeated profile-list loads do not duplicate built-ins and always include the curated OpenCode profile.
 - Test coverage target: >=80%
 - All tests must pass
 

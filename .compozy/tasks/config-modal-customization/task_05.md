@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Add settings host, startup preference load, and top-level command registry"
 type: frontend
 complexity: medium
@@ -32,12 +32,12 @@ This task adds the main-window settings host and the app-level command wiring th
 </requirements>
 
 ## Subtasks
-- [ ] 5.1 Add shared app-shell state for presenting and dismissing the settings modal.
-- [ ] 5.2 Add the `Settings…` command and one obvious in-window entry point for the modal.
-- [ ] 5.3 Load persisted preferences during startup before restore/UI unblocking finishes.
-- [ ] 5.4 Introduce the small managed command registry and resolve runtime shortcuts from persisted preferences, including terminal zoom bindings.
-- [ ] 5.5 Reconcile menu and toolbar command surfaces so managed bindings come from one source of truth.
-- [ ] 5.6 Add launch-time and command-resolution regression coverage.
+- [x] 5.1 Add shared app-shell state for presenting and dismissing the settings modal.
+- [x] 5.2 Add the `Settings…` command and one obvious in-window entry point for the modal.
+- [x] 5.3 Load persisted preferences during startup before restore/UI unblocking finishes.
+- [x] 5.4 Introduce the small managed command registry and resolve runtime shortcuts from persisted preferences, including terminal zoom bindings.
+- [x] 5.5 Reconcile menu and toolbar command surfaces so managed bindings come from one source of truth.
+- [x] 5.6 Add launch-time and command-resolution regression coverage.
 
 ## Implementation Details
 See the TechSpec sections **App Shell**, **Data Flow**, **High-Level Technical Constraints**, and **Technical Dependencies**. Keep the registry bounded to `previousTab`, `nextTab`, `previousSession`, `nextSession`, `searchSessions`, `zoomInTerminal`, `zoomOutTerminal`, `toggleRightSidebar`, and `openSettings`, and avoid rebuilding the app into a general settings platform.
@@ -76,15 +76,15 @@ See the TechSpec sections **App Shell**, **Data Flow**, **High-Level Technical C
 
 ## Tests
 - Unit tests:
-  - [ ] Registry defaults resolve correctly for `previousTab`, `nextTab`, `previousSession`, `nextSession`, `searchSessions`, `zoomInTerminal`, `zoomOutTerminal`, `toggleRightSidebar`, and `openSettings`.
-  - [ ] Persisted overrides replace only the targeted app commands and reset cleanly to defaults.
-  - [ ] Duplicate or unknown override entries are rejected or ignored predictably.
-  - [ ] App-shell startup state does not clear the restore overlay before preference load completes or safely falls back.
+  - [x] Registry defaults resolve correctly for `previousTab`, `nextTab`, `previousSession`, `nextSession`, `searchSessions`, `zoomInTerminal`, `zoomOutTerminal`, `toggleRightSidebar`, and `openSettings`.
+  - [x] Persisted overrides replace only the targeted app commands and reset cleanly to defaults.
+  - [x] Duplicate or unknown override entries are rejected or ignored predictably.
+  - [x] App-shell startup state does not clear the restore overlay before preference load completes or safely falls back.
 - Integration tests:
-  - [ ] Launch with a saved non-default theme and restore snapshot; restored terminal surfaces use the loaded appearance on startup.
-  - [ ] Launch with saved keybinding overrides; top-level command bindings resolve to overrides after load, then revert after reset.
-  - [ ] The `Settings…` command and visible in-window entry open the same modal host.
-  - [ ] Unknown theme IDs or stale default-profile references do not block restore or create extra tabs.
+  - [x] Launch with a saved non-default theme and restore snapshot; restored terminal surfaces use the loaded appearance on startup.
+  - [x] Launch with saved keybinding overrides; top-level command bindings resolve to overrides after load, then revert after reset.
+  - [x] The `Settings…` command and visible in-window entry open the same modal host.
+  - [x] Unknown theme IDs or stale default-profile references do not block restore or create extra tabs.
 - Test coverage target: >=80%
 - All tests must pass
 

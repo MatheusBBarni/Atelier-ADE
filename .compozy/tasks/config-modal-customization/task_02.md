@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Centralize new-session bootstrap and default-profile resolution"
 type: backend
 complexity: high
@@ -30,11 +30,11 @@ This task makes `createSession` the single owner of first-tab bootstrap for all 
 </requirements>
 
 ## Subtasks
-- [ ] 2.1 Audit all new-session entry points and remove UI-side first-tab bootstrap assumptions.
-- [ ] 2.2 Normalize the explicit-profile, saved-default, and plain-shell launch-source contract in the command service.
-- [ ] 2.3 Update session persistence, selection, and logging so all new-session paths follow one bootstrap flow.
-- [ ] 2.4 Preserve existing restore and later-tab behavior while retiring only the split first-tab path.
-- [ ] 2.5 Add regression coverage for exactly-one-tab creation, rollback safety, and later-tab inheritance behavior.
+- [x] 2.1 Audit all new-session entry points and remove UI-side first-tab bootstrap assumptions.
+- [x] 2.2 Normalize the explicit-profile, saved-default, and plain-shell launch-source contract in the command service.
+- [x] 2.3 Update session persistence, selection, and logging so all new-session paths follow one bootstrap flow.
+- [x] 2.4 Preserve existing restore and later-tab behavior while retiring only the split first-tab path.
+- [x] 2.5 Add regression coverage for exactly-one-tab creation, rollback safety, and later-tab inheritance behavior.
 
 ## Implementation Details
 See the TechSpec sections **Data Flow**, **API Endpoints**, and **Development Sequencing** for the normalized session-bootstrap contract. This task must not reintroduce duplicate-tab behavior through UI fallbacks or restore-time preference re-resolution.
@@ -70,16 +70,16 @@ See the TechSpec sections **Data Flow**, **API Endpoints**, and **Development Se
 
 ## Tests
 - Unit tests:
-  - [ ] Explicit `shortcutID` creates one session and one first tab with the selected profile’s launch command and arguments.
-  - [ ] `shortcutID == nil` with a saved default profile creates one first tab using that saved profile.
-  - [ ] `shortcutID == nil` with no saved default profile creates one plain first tab with nil launch command and args.
-  - [ ] Missing explicit shortcut still throws `missingShortcut` and leaves store and persistence unchanged.
-  - [ ] Later `createTab(sessionID:)` inherits the session’s stored launch intent instead of rereading current preferences.
+  - [x] Explicit `shortcutID` creates one session and one first tab with the selected profile’s launch command and arguments.
+  - [x] `shortcutID == nil` with a saved default profile creates one first tab using that saved profile.
+  - [x] `shortcutID == nil` with no saved default profile creates one plain first tab with nil launch command and args.
+  - [x] Missing explicit shortcut still throws `missingShortcut` and leaves store and persistence unchanged.
+  - [x] Later `createTab(sessionID:)` inherits the session’s stored launch intent instead of rereading current preferences.
 - Integration tests:
-  - [ ] SQLite-backed explicit-profile session creation writes exactly one `sessions` row and one `tabs` row.
-  - [ ] SQLite-backed saved-default session creation writes exactly one first tab and preserves the correct launch intent.
-  - [ ] Terminal surface failure during first-tab bootstrap rolls back both the session and tab persistence records.
-  - [ ] Restoring old tabs after a default-profile change reopens them with their original persisted command and arguments.
+  - [x] SQLite-backed explicit-profile session creation writes exactly one `sessions` row and one `tabs` row.
+  - [x] SQLite-backed saved-default session creation writes exactly one first tab and preserves the correct launch intent.
+  - [x] Terminal surface failure during first-tab bootstrap rolls back both the session and tab persistence records.
+  - [x] Restoring old tabs after a default-profile change reopens them with their original persisted command and arguments.
 - Test coverage target: >=80%
 - All tests must pass
 

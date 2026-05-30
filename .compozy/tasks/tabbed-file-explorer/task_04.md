@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Integrate the right sidebar workspace and CodeEditorView into the app shell"
 type: frontend
 complexity: high
@@ -29,12 +29,12 @@ Integrate the approved file workspace experience into the app shell by adding th
 </requirements>
 
 ## Subtasks
-- [ ] 4.1 Add `CodeEditorView` and `LanguageSupport` to the app target and introduce a thin editor wrapper view for the file-tab host.
-- [ ] 4.2 Extend `WorkspaceDetailView` into a split detail layout with terminal content on one side and the file workspace surface on the other.
-- [ ] 4.3 Build the working-set-first sidebar and secondary repository tree using the selected project/session context.
-- [ ] 4.4 Update the shared tab chrome so file tabs and terminal tabs render correctly in one strip with accurate labels and close affordances.
-- [ ] 4.5 Wire the selected file tab to the editor host and keep terminal host creation restricted to terminal tabs.
-- [ ] 4.6 Add smoke-level coverage or testable state coverage for mixed-tab shell behavior and working-set rendering inputs.
+- [x] 4.1 Add `CodeEditorView` and `LanguageSupport` to the app target and introduce a thin editor wrapper view for the file-tab host.
+- [x] 4.2 Extend `WorkspaceDetailView` into a split detail layout with terminal content on one side and the file workspace surface on the other.
+- [x] 4.3 Build the working-set-first sidebar and secondary repository tree using the selected project/session context.
+- [x] 4.4 Update the shared tab chrome so file tabs and terminal tabs render correctly in one strip with accurate labels and close affordances.
+- [x] 4.5 Wire the selected file tab to the editor host and keep terminal host creation restricted to terminal tabs.
+- [x] 4.6 Add smoke-level coverage or testable state coverage for mixed-tab shell behavior and working-set rendering inputs.
 
 ## Implementation Details
 Use the TechSpec sections "System Architecture", "Integration Points", and "Development Sequencing" as the implementation guide. Keep the UI split localized to the existing detail-pane seam and prefer thin wrapper views over leaking editor-library types into core modules.
@@ -72,13 +72,13 @@ Use the TechSpec sections "System Architecture", "Integration Points", and "Deve
 
 ## Tests
 - Unit tests:
-  - [ ] `WorkspaceStoreTests`: mixed tab activation order produces the expected working-set input for the right sidebar.
-  - [ ] `DefaultWorkspaceCommandServiceTests`: selecting a file tab updates the shared selected-tab state without triggering terminal-only side effects.
-  - [ ] Any new editor-wrapper state tests: a file tab maps to the expected language configuration and dirty-state presentation inputs.
+  - [x] `WorkspaceStoreTests`: mixed tab activation order produces the expected working-set input for the right sidebar.
+  - [x] `DefaultWorkspaceCommandServiceTests`: selecting a file tab updates the shared selected-tab state without triggering terminal-only side effects.
+  - [x] Any new editor-wrapper state tests: a file tab maps to the expected language configuration and dirty-state presentation inputs.
 - Integration tests:
-  - [ ] Build/smoke coverage: the app target compiles and links with `CodeEditorView` and `LanguageSupport` added to `Package.swift`.
-  - [ ] `DefaultWorkspaceCommandServiceIntegrationTests` or equivalent smoke path: opening a file tab results in shared tab selection plus editor-host rendering eligibility, while terminal tabs still render through `TerminalHostController`.
-  - [ ] `RestoreCoordinatorIntegrationTests`: a restored mixed session produces a usable selected file tab and does not recreate terminal surfaces for file tabs.
+  - [x] Build/smoke coverage: the app target compiles and links with `CodeEditorView` and `LanguageSupport` added to `Package.swift`.
+  - [x] `DefaultWorkspaceCommandServiceIntegrationTests` or equivalent smoke path: opening a file tab results in shared tab selection plus editor-host rendering eligibility, while terminal tabs still render through `TerminalHostController`.
+  - [x] `RestoreCoordinatorIntegrationTests`: a restored mixed session produces a usable selected file tab and does not recreate terminal surfaces for file tabs.
 - Test coverage target: >=80%
 - All tests must pass
 

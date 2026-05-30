@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Introduce runtime theme catalog and live terminal appearance"
 type: frontend
 complexity: high
@@ -31,11 +31,11 @@ This task replaces the app’s Nord-only runtime assumptions with a fixed persis
 </requirements>
 
 ## Subtasks
-- [ ] 4.1 Define the runtime theme catalog and default-fallback contract.
-- [ ] 4.2 Convert shell styling from direct Nord-only token usage to active-theme lookups.
-- [ ] 4.3 Thread the current terminal appearance into new surface creation and live host-view refresh.
-- [ ] 4.4 Bind active theme resolution to observed persisted preferences.
-- [ ] 4.5 Add regression coverage for theme lookup, fallback behavior, and live runtime updates.
+- [x] 4.1 Define the runtime theme catalog and default-fallback contract.
+- [x] 4.2 Convert shell styling from direct Nord-only token usage to active-theme lookups.
+- [x] 4.3 Thread the current terminal appearance into new surface creation and live host-view refresh.
+- [x] 4.4 Bind active theme resolution to observed persisted preferences.
+- [x] 4.5 Add regression coverage for theme lookup, fallback behavior, and live runtime updates.
 
 ## Implementation Details
 See the TechSpec sections **Theme Runtime**, **Data Flow**, **Testing Approach**, and **Known Risks**. Keep the theme system small and curated; do not introduce a generalized theming platform or extra persistence layers.
@@ -72,15 +72,15 @@ See the TechSpec sections **Theme Runtime**, **Data Flow**, **Testing Approach**
 
 ## Tests
 - Unit tests:
-  - [ ] Known theme IDs `dracula`, `onedark`, `catppuccin`, and `cursor` resolve to the correct catalog entries.
-  - [ ] Unknown theme IDs fall back to the default theme without crashing or mutating unrelated state.
-  - [ ] `GhosttyLaunchConfiguration` preserves launch metadata while honoring an injected non-default `TerminalAppearance`.
-  - [ ] Theme helper logic updates background, text, and cursor palette values when the active theme changes.
+  - [x] Known theme IDs `dracula`, `onedark`, `catppuccin`, and `cursor` resolve to the correct catalog entries.
+  - [x] Unknown theme IDs fall back to the default theme without crashing or mutating unrelated state.
+  - [x] `GhosttyLaunchConfiguration` preserves launch metadata while honoring an injected non-default `TerminalAppearance`.
+  - [x] Theme helper logic updates background, text, and cursor palette values when the active theme changes.
 - Integration tests:
-  - [ ] Loading each saved non-default theme from the supported catalog updates root shell styling immediately, including light-versus-dark color-scheme behavior.
-  - [ ] Changing theme after a host view exists updates that host view without creating a duplicate terminal surface.
-  - [ ] Creating a new tab after a theme change passes the new `TerminalAppearance` to the terminal adapter.
-  - [ ] Theme swaps do not mutate persisted session or tab launch intent.
+  - [x] Loading each saved non-default theme from the supported catalog updates root shell styling immediately, including light-versus-dark color-scheme behavior.
+  - [x] Changing theme after a host view exists updates that host view without creating a duplicate terminal surface.
+  - [x] Creating a new tab after a theme change passes the new `TerminalAppearance` to the terminal adapter.
+  - [x] Theme swaps do not mutate persisted session or tab launch intent.
 - Test coverage target: >=80%
 - All tests must pass
 

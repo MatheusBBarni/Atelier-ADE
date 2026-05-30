@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Add app preferences model and additive SQLite v2 migration"
 type: backend
 complexity: high
@@ -29,12 +29,12 @@ This task establishes the persisted settings foundation for Config Modal Customi
 </requirements>
 
 ## Subtasks
-- [ ] 1.1 Define the new global preferences and keybinding domain types required by the TechSpec Data Models section.
-- [ ] 1.2 Extend `SessionShortcut` with the explicit built-in override state required for curated agent-profile customization.
-- [ ] 1.3 Expand the persistence protocol and both persistence implementations to load and save app preferences.
-- [ ] 1.4 Add the additive SQLite schema update, default seed row, and user-version bump for v2.
-- [ ] 1.5 Ensure shortcut deletion clears any stored default-profile reference in both live and in-memory persistence paths.
-- [ ] 1.6 Add regression coverage for models, migration behavior, and persistence round-trips.
+- [x] 1.1 Define the new global preferences and keybinding domain types required by the TechSpec Data Models section.
+- [x] 1.2 Extend `SessionShortcut` with the explicit built-in override state required for curated agent-profile customization.
+- [x] 1.3 Expand the persistence protocol and both persistence implementations to load and save app preferences.
+- [x] 1.4 Add the additive SQLite schema update, default seed row, and user-version bump for v2.
+- [x] 1.5 Ensure shortcut deletion clears any stored default-profile reference in both live and in-memory persistence paths.
+- [x] 1.6 Add regression coverage for models, migration behavior, and persistence round-trips.
 
 ## Implementation Details
 Modify the core models and persistence seams first. See the TechSpec sections **Data Models**, **Storage Structures**, and **Migration Strategy** for the required shape of `AppPreferences`, keybinding overrides, and the SQLite v2 upgrade. Keep the implementation additive and local-first.
@@ -73,16 +73,16 @@ Modify the core models and persistence seams first. See the TechSpec sections **
 
 ## Tests
 - Unit tests:
-  - [ ] `AppPreferences` preserves theme ID, optional default shortcut ID, keybinding overrides, and update timestamps as value-semantic data.
-  - [ ] `SessionShortcut.hasUserOverride` round-trips correctly for built-in and custom profiles.
-  - [ ] In-memory persistence save/load preserves app preferences and override state without mutation.
-  - [ ] Deleting a shortcut in the in-memory store clears `defaultSessionShortcutID` when it points at that shortcut.
+  - [x] `AppPreferences` preserves theme ID, optional default shortcut ID, keybinding overrides, and update timestamps as value-semantic data.
+  - [x] `SessionShortcut.hasUserOverride` round-trips correctly for built-in and custom profiles.
+  - [x] In-memory persistence save/load preserves app preferences and override state without mutation.
+  - [x] Deleting a shortcut in the in-memory store clears `defaultSessionShortcutID` when it points at that shortcut.
 - Integration tests:
-  - [ ] Fresh SQLite bootstrap creates `app_preferences`, exposes `has_user_override`, and sets `PRAGMA user_version = 2`.
-  - [ ] A hand-built v1 SQLite database upgrades to v2 without changing existing projects, sessions, tabs, or restore rows.
-  - [ ] SQLite save/load round-trip preserves `AppPreferences`, including nil and non-nil default shortcut references.
-  - [ ] SQLite save/load round-trip preserves `SessionShortcut.hasUserOverride` for built-in overrides.
-  - [ ] Deleting a persisted shortcut referenced by `app_preferences.default_session_shortcut_id` clears that stored reference.
+  - [x] Fresh SQLite bootstrap creates `app_preferences`, exposes `has_user_override`, and sets `PRAGMA user_version = 2`.
+  - [x] A hand-built v1 SQLite database upgrades to v2 without changing existing projects, sessions, tabs, or restore rows.
+  - [x] SQLite save/load round-trip preserves `AppPreferences`, including nil and non-nil default shortcut references.
+  - [x] SQLite save/load round-trip preserves `SessionShortcut.hasUserOverride` for built-in overrides.
+  - [x] Deleting a persisted shortcut referenced by `app_preferences.default_session_shortcut_id` clears that stored reference.
 - Test coverage target: >=80%
 - All tests must pass
 

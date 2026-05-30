@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Build the config modal agent-profile section"
 type: frontend
 complexity: medium
@@ -32,12 +32,12 @@ This task implements the highest-value section of the config modal: agent-profil
 </requirements>
 
 ## Subtasks
-- [ ] 6.1 Define the Agent Profile section content and copy, including the default-profile selector and no-default state.
-- [ ] 6.2 Add profile rows or cards that show built-in, customized, and custom states with the correct available actions.
-- [ ] 6.3 Add create and edit flows for profile details and default assignment.
-- [ ] 6.4 Add reset and delete flows with the required safeguards for built-ins versus custom profiles.
-- [ ] 6.5 Add friendly validation and error presentation for profile edits and default-profile failures.
-- [ ] 6.6 Replace in-scope user-facing “shortcut” terminology with “Agent Profile.”
+- [x] 6.1 Define the Agent Profile section content and copy, including the default-profile selector and no-default state.
+- [x] 6.2 Add profile rows or cards that show built-in, customized, and custom states with the correct available actions.
+- [x] 6.3 Add create and edit flows for profile details and default assignment.
+- [x] 6.4 Add reset and delete flows with the required safeguards for built-ins versus custom profiles.
+- [x] 6.5 Add friendly validation and error presentation for profile edits and default-profile failures.
+- [x] 6.6 Replace in-scope user-facing “shortcut” terminology with “Agent Profile.”
 
 ## Implementation Details
 See the TechSpec sections **Agent Profile Layer**, **API Endpoints**, **Testing Approach**, and **Key Decisions**. The UI must bind to the command-service settings surface instead of talking to persistence directly, and it must keep user-facing terminology distinct from the internal `SessionShortcut` type name.
@@ -78,16 +78,16 @@ See the TechSpec sections **Agent Profile Layer**, **API Endpoints**, **Testing 
 
 ## Tests
 - Unit tests:
-  - [ ] Editing a built-in profile preserves its ID, marks it customized, and leaves delete unavailable.
-  - [ ] Resetting a built-in profile restores canonical values and clears customized state.
-  - [ ] Adding, editing, and deleting a custom profile works, while deleting a built-in profile fails.
-  - [ ] Invalid `launchArgumentsJSON` is rejected and leaves the previously saved profile unchanged.
-  - [ ] Section-state helpers, if introduced, compute the correct badges and allowed actions for built-in, customized, and custom profiles.
+  - [x] Editing a built-in profile preserves its ID, marks it customized, and leaves delete unavailable.
+  - [x] Resetting a built-in profile restores canonical values and clears customized state.
+  - [x] Adding, editing, and deleting a custom profile works, while deleting a built-in profile fails.
+  - [x] Invalid `launchArgumentsJSON` is rejected and leaves the previously saved profile unchanged.
+  - [x] Section-state helpers, if introduced, compute the correct badges and allowed actions for built-in, customized, and custom profiles.
 - Integration tests:
-  - [ ] Saving a default agent profile then calling `createSession(projectID:, shortcutID: nil)` creates exactly one first tab using that profile.
-  - [ ] Clearing or deleting the current default profile removes the saved default and new sessions fall back to plain shell.
-  - [ ] Persisted default-profile references and built-in override state round-trip through SQLite.
-  - [ ] Resetting a customized built-in changes only future session bootstrap and does not mutate existing restored tabs.
+  - [x] Saving a default agent profile then calling `createSession(projectID:, shortcutID: nil)` creates exactly one first tab using that profile.
+  - [x] Clearing or deleting the current default profile removes the saved default and new sessions fall back to plain shell.
+  - [x] Persisted default-profile references and built-in override state round-trip through SQLite.
+  - [x] Resetting a customized built-in changes only future session bootstrap and does not mutate existing restored tabs.
 - Test coverage target: >=80%
 - All tests must pass
 

@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Build the config modal appearance and shortcut sections, plus settings observability"
 type: frontend
 complexity: medium
@@ -33,11 +33,11 @@ This task completes the V1 config modal by adding the appearance and top-level k
 </requirements>
 
 ## Subtasks
-- [ ] 7.1 Finish the modal appearance section with theme selection, current-state display, and save/reset behavior.
-- [ ] 7.2 Finish the managed shortcut section for the approved navigation, search, zoom, sidebar, and settings commands, including changed-versus-default state.
-- [ ] 7.3 Add local settings-open, save, failure, theme-change, and keybinding-change observations to the shared logger and metrics surfaces.
-- [ ] 7.4 Ensure successful saves refresh shell styling, terminal appearance, and top-level command bindings immediately.
-- [ ] 7.5 Add regression coverage for theme switching, shortcut reset and failure handling, and settings observability output.
+- [x] 7.1 Finish the modal appearance section with theme selection, current-state display, and save/reset behavior.
+- [x] 7.2 Finish the managed shortcut section for the approved navigation, search, zoom, sidebar, and settings commands, including changed-versus-default state.
+- [x] 7.3 Add local settings-open, save, failure, theme-change, and keybinding-change observations to the shared logger and metrics surfaces.
+- [x] 7.4 Ensure successful saves refresh shell styling, terminal appearance, and top-level command bindings immediately.
+- [x] 7.5 Add regression coverage for theme switching, shortcut reset and failure handling, and settings observability output.
 
 ## Implementation Details
 See the TechSpec sections **Monitoring and Observability**, **Keybinding Registry**, **Theme Runtime**, and **Known Risks**. Keep V1 shortcut scope bounded to `previousTab`, `nextTab`, `previousSession`, `nextSession`, `searchSessions`, `zoomInTerminal`, `zoomOutTerminal`, `toggleRightSidebar`, and `openSettings`, and keep observability local-first using the project’s existing logger and pilot-diagnostics patterns.
@@ -78,15 +78,15 @@ See the TechSpec sections **Monitoring and Observability**, **Keybinding Registr
 
 ## Tests
 - Unit tests:
-  - [ ] Saving a theme-only change records one settings save and one theme-change observation, with no keybinding-change observation.
-  - [ ] Saving managed keybinding overrides for tab navigation, session navigation, session search, terminal zoom, right-sidebar toggle, and settings records the expected changed-count and resetting one override clears only that override.
-  - [ ] Duplicate or invalid top-level keybindings are rejected, emit one failure observation, and leave persisted preferences unchanged.
-  - [ ] Opening the settings surface records one local open observation with context about project selection state.
+  - [x] Saving a theme-only change records one settings save and one theme-change observation, with no keybinding-change observation.
+  - [x] Saving managed keybinding overrides for tab navigation, session navigation, session search, terminal zoom, right-sidebar toggle, and settings records the expected changed-count and resetting one override clears only that override.
+  - [x] Duplicate or invalid top-level keybindings are rejected, emit one failure observation, and leave persisted preferences unchanged.
+  - [x] Opening the settings surface records one local open observation with context about project selection state.
 - Integration tests:
-  - [ ] Preferences round-trip preserves a selected theme from Dracula, OneDark, Catppuccin, or Cursor plus at least one managed keybinding override.
-  - [ ] Switching themes updates both new terminal surfaces and existing attached host views without losing tab or session metadata.
-  - [ ] After loading saved overrides, the managed navigation, search, zoom, sidebar, and settings commands resolve to overridden bindings; after reset, they resolve back to defaults.
-  - [ ] Failed settings save leaves prior preferences intact and records a failure observation without blocking later successful saves.
+  - [x] Preferences round-trip preserves a selected theme from Dracula, OneDark, Catppuccin, or Cursor plus at least one managed keybinding override.
+  - [x] Switching themes updates both new terminal surfaces and existing attached host views without losing tab or session metadata.
+  - [x] After loading saved overrides, the managed navigation, search, zoom, sidebar, and settings commands resolve to overridden bindings; after reset, they resolve back to defaults.
+  - [x] Failed settings save leaves prior preferences intact and records a failure observation without blocking later successful saves.
 - Test coverage target: >=80%
 - All tests must pass
 

@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Add app commands, telemetry, and workflow hardening for file tabs"
 type: backend
 complexity: high
@@ -29,11 +29,11 @@ Finish the feature by adding the user command surface, privacy-safe telemetry, a
 </requirements>
 
 ## Subtasks
-- [ ] 5.1 Add save, revert, and external-editor commands and shortcuts to the app-level command surface with selected-file enablement rules.
-- [ ] 5.2 Add file workflow metrics and structured log events with privacy-safe path handling.
-- [ ] 5.3 Update close and restore user messages so file-tab rejection and missing restored files no longer use terminal-specific copy.
-- [ ] 5.4 Harden destructive flows such as close, remove-session, and remove-project for dirty file tabs.
-- [ ] 5.5 Expand integration coverage for mixed restore, save/revert, close confirmation, and file workflow telemetry.
+- [x] 5.1 Add save, revert, and external-editor commands and shortcuts to the app-level command surface with selected-file enablement rules.
+- [x] 5.2 Add file workflow metrics and structured log events with privacy-safe path handling.
+- [x] 5.3 Update close and restore user messages so file-tab rejection and missing restored files no longer use terminal-specific copy.
+- [x] 5.4 Harden destructive flows such as close, remove-session, and remove-project for dirty file tabs.
+- [x] 5.5 Expand integration coverage for mixed restore, save/revert, close confirmation, and file workflow telemetry.
 
 ## Implementation Details
 This task lands the final workflow hardening around the TechSpec sections "Monitoring and Observability", "Technical Considerations", and "Development Sequencing". Keep the feature centered on explicit user trust: deliberate save, accurate close messages, and restore diagnostics that match the metadata-only continuity model.
@@ -70,13 +70,13 @@ This task lands the final workflow hardening around the TechSpec sections "Monit
 
 ## Tests
 - Unit tests:
-  - [ ] `DefaultWorkspaceCommandServiceTests`: dirty file tabs trigger file-specific rejection handling instead of terminal-specific `still running` behavior.
-  - [ ] `PerformanceMetricsTests`: file-open/save/restore counters and dirty-close confirmation counts roll up into pilot diagnostics correctly.
-  - [ ] `WorkspaceLogger`-focused tests or command-service tests: file workflow events hash or omit file paths rather than logging raw file locations.
+  - [x] `DefaultWorkspaceCommandServiceTests`: dirty file tabs trigger file-specific rejection handling instead of terminal-specific `still running` behavior.
+  - [x] `PerformanceMetricsTests`: file-open/save/restore counters and dirty-close confirmation counts roll up into pilot diagnostics correctly.
+  - [x] `WorkspaceLogger`-focused tests or command-service tests: file workflow events hash or omit file paths rather than logging raw file locations.
 - Integration tests:
-  - [ ] `DefaultWorkspaceCommandServiceIntegrationTests`: file open → edit → save → relaunch preserves saved contents and clears dirty state while unsaved changes are intentionally not restored.
-  - [ ] `RestoreCoordinatorIntegrationTests`: missing restored file tabs produce visible diagnostics without aborting the whole workspace restore.
-  - [ ] Integration or smoke coverage: app command enablement reflects the selected file tab for save/revert/open-external-editor actions.
+  - [x] `DefaultWorkspaceCommandServiceIntegrationTests`: file open → edit → save → relaunch preserves saved contents and clears dirty state while unsaved changes are intentionally not restored.
+  - [x] `RestoreCoordinatorIntegrationTests`: missing restored file tabs produce visible diagnostics without aborting the whole workspace restore.
+  - [x] Integration or smoke coverage: app command enablement reflects the selected file tab for save/revert/open-external-editor actions.
 - Test coverage target: >=80%
 - All tests must pass
 

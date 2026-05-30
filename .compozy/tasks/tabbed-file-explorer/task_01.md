@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Generalize workspace tabs and migrate persistence for mixed tab kinds"
 type: backend
 complexity: high
@@ -27,11 +27,11 @@ Generalize the shared workspace tab model so terminal tabs and file tabs can coe
 </requirements>
 
 ## Subtasks
-- [ ] 1.1 Add tab-kind and file-reference metadata to the shared workspace tab model with terminal-safe defaults.
-- [ ] 1.2 Introduce schema v2 changes for mixed tab persistence and implement versioned migration logic instead of bootstrap-only setup.
-- [ ] 1.3 Update SQLite and in-memory persistence implementations to load and save mixed terminal/file tab metadata.
-- [ ] 1.4 Preserve restore snapshot compatibility so mixed tabs still reuse the existing selected-tab and ordered-tab model.
-- [ ] 1.5 Extend model and persistence tests to cover migration, round-trip loading, and mixed-tab ordering compatibility.
+- [x] 1.1 Add tab-kind and file-reference metadata to the shared workspace tab model with terminal-safe defaults.
+- [x] 1.2 Introduce schema v2 changes for mixed tab persistence and implement versioned migration logic instead of bootstrap-only setup.
+- [x] 1.3 Update SQLite and in-memory persistence implementations to load and save mixed terminal/file tab metadata.
+- [x] 1.4 Preserve restore snapshot compatibility so mixed tabs still reuse the existing selected-tab and ordered-tab model.
+- [x] 1.5 Extend model and persistence tests to cover migration, round-trip loading, and mixed-tab ordering compatibility.
 
 ## Implementation Details
 Update the shared tab metadata and persistence seams first so later tasks can rely on a stable mixed-tab contract. Follow the TechSpec sections "System Architecture", "Implementation Design > Data Models", and "Development Sequencing" for the v2 migration and shared-tab rules.
@@ -66,13 +66,13 @@ Update the shared tab metadata and persistence seams first so later tasks can re
 
 ## Tests
 - Unit tests:
-  - [ ] `WorkspaceModelsTests`: a terminal tab without file metadata still round-trips with default tab kind.
-  - [ ] `WorkspaceModelsTests`: a file tab preserves its file path/reference fields when encoded and decoded.
-  - [ ] `WorkspaceStoreTests`: mixed terminal/file tab snapshots preserve ordered tab IDs without introducing a second namespace.
+  - [x] `WorkspaceModelsTests`: a terminal tab without file metadata still round-trips with default tab kind.
+  - [x] `WorkspaceModelsTests`: a file tab preserves its file path/reference fields when encoded and decoded.
+  - [x] `WorkspaceStoreTests`: mixed terminal/file tab snapshots preserve ordered tab IDs without introducing a second namespace.
 - Integration tests:
-  - [ ] `SQLiteWorkspaceMetadataStoreTests`: a schema v1 database migrates to v2 without losing existing projects, sessions, terminal tabs, or restore snapshot data.
-  - [ ] `SQLiteWorkspaceMetadataStoreTests`: saving and reloading a mixed terminal/file tab session preserves tab kind, file path, ordinal, and activation timestamps.
-  - [ ] `SQLiteWorkspaceMetadataStoreTests`: invalid stored mixed-tab values fail with a descriptive persistence error instead of silently corrupting restore state.
+  - [x] `SQLiteWorkspaceMetadataStoreTests`: a schema v1 database migrates to v2 without losing existing projects, sessions, terminal tabs, or restore snapshot data.
+  - [x] `SQLiteWorkspaceMetadataStoreTests`: saving and reloading a mixed terminal/file tab session preserves tab kind, file path, ordinal, and activation timestamps.
+  - [x] `SQLiteWorkspaceMetadataStoreTests`: invalid stored mixed-tab values fail with a descriptive persistence error instead of silently corrupting restore state.
 - Test coverage target: >=80%
 - All tests must pass
 

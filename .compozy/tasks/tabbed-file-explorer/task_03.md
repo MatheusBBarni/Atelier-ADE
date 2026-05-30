@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Add file runtime services for project-scoped access, buffers, and explicit save/revert"
 type: backend
 complexity: high
@@ -29,11 +29,11 @@ Add the runtime-only services that make file tabs editable without turning `Work
 </requirements>
 
 ## Subtasks
-- [ ] 3.1 Add a project-scoped file-access boundary for enumerating, loading, saving, and validating files under the selected project root.
-- [ ] 3.2 Add a runtime file-buffer controller for live editor text, saved text snapshots, dirty state, and per-tab buffer lifecycle.
-- [ ] 3.3 Add command-service support for opening file tabs, saving buffers, reverting buffers, and preparing external-editor escalation.
-- [ ] 3.4 Populate project bookmark data during project-open flow so restored file access has a stable project-level anchor.
-- [ ] 3.5 Add unit and integration coverage for file loading, save/revert behavior, dirty state transitions, and root-path rejection.
+- [x] 3.1 Add a project-scoped file-access boundary for enumerating, loading, saving, and validating files under the selected project root.
+- [x] 3.2 Add a runtime file-buffer controller for live editor text, saved text snapshots, dirty state, and per-tab buffer lifecycle.
+- [x] 3.3 Add command-service support for opening file tabs, saving buffers, reverting buffers, and preparing external-editor escalation.
+- [x] 3.4 Populate project bookmark data during project-open flow so restored file access has a stable project-level anchor.
+- [x] 3.5 Add unit and integration coverage for file loading, save/revert behavior, dirty state transitions, and root-path rejection.
 
 ## Implementation Details
 Use the TechSpec sections "Implementation Design > Core Interfaces", "Data Models", and "Technical Considerations" as the source of truth for the runtime split. Keep these services inside the existing core target and avoid persisting unsaved buffers.
@@ -72,14 +72,14 @@ Use the TechSpec sections "Implementation Design > Core Interfaces", "Data Model
 
 ## Tests
 - Unit tests:
-  - [ ] `DefaultWorkspaceCommandServiceTests`: opening a file inside the selected project creates a file tab and loads the initial buffer without altering terminal-tab semantics.
-  - [ ] `DefaultWorkspaceCommandServiceTests`: attempting to open or save a file outside the project root returns a specific file-access rejection.
-  - [ ] New file-buffer controller tests: editing marks the buffer dirty, successful save clears dirty state, and failed save preserves unsaved text.
-  - [ ] New file-buffer controller tests: revert reloads saved disk contents and clears dirty state only when reload succeeds.
+  - [x] `DefaultWorkspaceCommandServiceTests`: opening a file inside the selected project creates a file tab and loads the initial buffer without altering terminal-tab semantics.
+  - [x] `DefaultWorkspaceCommandServiceTests`: attempting to open or save a file outside the project root returns a specific file-access rejection.
+  - [x] New file-buffer controller tests: editing marks the buffer dirty, successful save clears dirty state, and failed save preserves unsaved text.
+  - [x] New file-buffer controller tests: revert reloads saved disk contents and clears dirty state only when reload succeeds.
 - Integration tests:
-  - [ ] `DefaultWorkspaceCommandServiceIntegrationTests`: a file open → edit → save flow persists metadata and writes the saved contents to disk.
-  - [ ] `SQLiteWorkspaceMetadataStoreTests`: project bookmark data persists and reloads alongside file-tab metadata.
-  - [ ] `RestoreCoordinatorIntegrationTests`: relaunch restores file tabs from disk but does not restore unsaved buffer text.
+  - [x] `DefaultWorkspaceCommandServiceIntegrationTests`: a file open → edit → save flow persists metadata and writes the saved contents to disk.
+  - [x] `SQLiteWorkspaceMetadataStoreTests`: project bookmark data persists and reloads alongside file-tab metadata.
+  - [x] `RestoreCoordinatorIntegrationTests`: relaunch restores file tabs from disk but does not restore unsaved buffer text.
 - Test coverage target: >=80%
 - All tests must pass
 
