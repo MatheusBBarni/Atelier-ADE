@@ -93,6 +93,7 @@ public struct Tab: Identifiable, Equatable, Codable, Sendable {
     public var sessionID: UUID
     public var kind: WorkspaceTabKind
     public var workingDirectory: String
+    public var title: String?
     public var launchCommand: String?
     public var launchArgumentsJSON: String?
     public var fileReference: WorkspaceFileReference?
@@ -105,6 +106,7 @@ public struct Tab: Identifiable, Equatable, Codable, Sendable {
         sessionID: UUID,
         kind: WorkspaceTabKind = .terminal,
         workingDirectory: String,
+        title: String? = nil,
         launchCommand: String? = nil,
         launchArgumentsJSON: String? = nil,
         fileReference: WorkspaceFileReference? = nil,
@@ -116,6 +118,7 @@ public struct Tab: Identifiable, Equatable, Codable, Sendable {
         self.sessionID = sessionID
         self.kind = kind
         self.workingDirectory = workingDirectory
+        self.title = title
         self.launchCommand = launchCommand
         self.launchArgumentsJSON = launchArgumentsJSON
         self.fileReference = fileReference
@@ -129,6 +132,7 @@ public struct Tab: Identifiable, Equatable, Codable, Sendable {
         case sessionID
         case kind
         case workingDirectory
+        case title
         case launchCommand
         case launchArgumentsJSON
         case fileReference
@@ -143,6 +147,7 @@ public struct Tab: Identifiable, Equatable, Codable, Sendable {
         sessionID = try container.decode(UUID.self, forKey: .sessionID)
         kind = try container.decodeIfPresent(WorkspaceTabKind.self, forKey: .kind) ?? .terminal
         workingDirectory = try container.decode(String.self, forKey: .workingDirectory)
+        title = try container.decodeIfPresent(String.self, forKey: .title)
         launchCommand = try container.decodeIfPresent(String.self, forKey: .launchCommand)
         launchArgumentsJSON = try container.decodeIfPresent(String.self, forKey: .launchArgumentsJSON)
         fileReference = try container.decodeIfPresent(WorkspaceFileReference.self, forKey: .fileReference)

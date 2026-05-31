@@ -7,7 +7,7 @@ public enum WorkspaceMigrationError: Error, Equatable, Sendable {
 }
 
 public enum WorkspaceMigrations {
-    public static let currentUserVersion: Int32 = 2
+    public static let currentUserVersion: Int32 = 4
     public static let metadataTables: Set<String> = [
         "projects",
         "sessions",
@@ -29,10 +29,17 @@ public enum WorkspaceMigrations {
         try execute(database, sessionShortcutsSQL)
         try execute(database, appPreferencesSQL)
         try execute(database, restoreSnapshotSQL)
-        if existingUserVersion < currentUserVersion {
+        if existingUserVersion < 2 {
             try migrateToV2(database)
         }
-        try repairVersionTwoTabMetadataIfNeeded(database)
+        if existingUserVersion < 3 {
+            try migrateToV3(database)
+        }
+        if existingUserVersion < 4 {
+            try migrateToV4(database)
+        }
+        try repairTabMetadataIfNeeded(database)
+        try repairAppPreferencesMetadataIfNeeded(database)
         try execute(database, "PRAGMA user_version = \(currentUserVersion)")
     }
 
@@ -74,6 +81,7 @@ public enum WorkspaceMigrations {
         id TEXT PRIMARY KEY NOT NULL,
         session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
         working_directory TEXT NOT NULL,
+        title TEXT,
         launch_command TEXT,
         launch_arguments_json TEXT,
         kind TEXT NOT NULL DEFAULT 'terminal' CHECK (kind IN ('terminal', 'file')),
@@ -102,6 +110,7 @@ public enum WorkspaceMigrations {
         id INTEGER PRIMARY KEY NOT NULL CHECK (id = 1),
         theme_id TEXT NOT NULL,
         default_session_shortcut_id TEXT REFERENCES session_shortcuts(id) ON DELETE SET NULL,
+        terminal_font_size REAL NOT NULL DEFAULT \(AppPreferences.defaultTerminalFontSize),
         keybindings_json TEXT NOT NULL,
         updated_at REAL NOT NULL
     )
@@ -125,13 +134,26 @@ public enum WorkspaceMigrations {
             try execute(database, "ALTER TABLE session_shortcuts ADD COLUMN has_user_override INTEGER NOT NULL DEFAULT 0 CHECK (has_user_override IN (0, 1))")
         }
         try execute(database, """
-        INSERT OR IGNORE INTO app_preferences (id, theme_id, default_session_shortcut_id, keybindings_json, updated_at)
-        VALUES (1, '\(AppPreferences.defaultThemeID)', NULL, '[]', 0)
+        INSERT OR IGNORE INTO app_preferences (id, theme_id, default_session_shortcut_id, terminal_font_size, keybindings_json, updated_at)
+        VALUES (1, '\(AppPreferences.defaultThemeID)', NULL, \(AppPreferences.defaultTerminalFontSize), '[]', 0)
         """)
     }
 
-    private static func repairVersionTwoTabMetadataIfNeeded(_ database: OpaquePointer?) throws {
+    private static func migrateToV3(_ database: OpaquePointer?) throws {
+        try addV3TabTitleColumnIfNeeded(database)
+    }
+
+    private static func migrateToV4(_ database: OpaquePointer?) throws {
+        try addV4AppPreferencesFontSizeColumnIfNeeded(database)
+    }
+
+    private static func repairTabMetadataIfNeeded(_ database: OpaquePointer?) throws {
         try addV2TabMetadataColumnsIfNeeded(database)
+        try addV3TabTitleColumnIfNeeded(database)
+    }
+
+    private static func repairAppPreferencesMetadataIfNeeded(_ database: OpaquePointer?) throws {
+        try addV4AppPreferencesFontSizeColumnIfNeeded(database)
     }
 
     private static func addV2TabMetadataColumnsIfNeeded(_ database: OpaquePointer?) throws {
@@ -140,6 +162,18 @@ public enum WorkspaceMigrations {
         }
         if try !table("tabs", hasColumn: "file_path", database: database) {
             try execute(database, "ALTER TABLE tabs ADD COLUMN file_path TEXT")
+        }
+    }
+
+    private static func addV3TabTitleColumnIfNeeded(_ database: OpaquePointer?) throws {
+        if try !table("tabs", hasColumn: "title", database: database) {
+            try execute(database, "ALTER TABLE tabs ADD COLUMN title TEXT")
+        }
+    }
+
+    private static func addV4AppPreferencesFontSizeColumnIfNeeded(_ database: OpaquePointer?) throws {
+        if try !table("app_preferences", hasColumn: "terminal_font_size", database: database) {
+            try execute(database, "ALTER TABLE app_preferences ADD COLUMN terminal_font_size REAL NOT NULL DEFAULT \(AppPreferences.defaultTerminalFontSize)")
         }
     }
 

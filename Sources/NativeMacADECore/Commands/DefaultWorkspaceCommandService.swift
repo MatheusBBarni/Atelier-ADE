@@ -381,6 +381,19 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
         try await persistSnapshot()
     }
 
+    public func renameTab(tabID: UUID, title: String?) async throws -> WorkspaceTab {
+        guard var tab = store.tab(id: tabID) else {
+            throw WorkspaceCommandError.missingTab(tabID)
+        }
+
+        let trimmedTitle = title?.trimmingCharacters(in: .whitespacesAndNewlines)
+        tab.title = trimmedTitle?.isEmpty == false ? trimmedTitle : nil
+        try await persist { try await persistenceStore.save(tab: tab) }
+        store.upsertTab(tab, select: store.selectedTabID == tabID)
+        try await persistSnapshot()
+        return tab
+    }
+
     public func createTab(sessionID: UUID) async throws -> WorkspaceTab {
         let session = try requireSession(id: sessionID)
         let launchIntent = try await resolveStoredLaunchIntent(for: session)
@@ -398,6 +411,12 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
     public func createDefaultAgentTab(sessionID: UUID) async throws -> WorkspaceTab {
         let session = try requireSession(id: sessionID)
         let launchIntent = try await resolveLaunchIntent(explicitShortcutID: nil)
+        return try await createTerminalTab(session: session, launchIntent: launchIntent)
+    }
+
+    public func createAgentTab(sessionID: UUID, shortcutID: UUID) async throws -> WorkspaceTab {
+        let session = try requireSession(id: sessionID)
+        let launchIntent = try await resolveLaunchIntent(explicitShortcutID: shortcutID)
         return try await createTerminalTab(session: session, launchIntent: launchIntent)
     }
 
@@ -582,6 +601,61 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
             "session_id": tab.sessionID.uuidString,
             "hashed_path": WorkspacePrivacy.hashIdentifier(fileReference.path)
         ])
+    }
+
+    public func renameWorkspaceItem(projectID: UUID, path: String, to destinationPath: String) async throws {
+        let project = try requireProject(id: projectID)
+        let sourcePath = try standardizeWorkspaceItemPath(path, projectRoot: project.path)
+        let targetPath = try standardizeWorkspaceItemPath(destinationPath, projectRoot: project.path)
+        let affectedTabs = affectedOpenFileTabs(in: project, under: sourcePath)
+        try rejectIfDirtyFileTabs(affectedTabs, operation: "rename_workspace_item")
+
+        let renamedReference: WorkspaceFileReference
+        do {
+            renamedReference = try await fileAccess.renameItem(
+                path: sourcePath,
+                to: targetPath,
+                projectRoot: project.path
+            )
+        } catch let error as WorkspaceFileAccessError {
+            throw commandError(for: error)
+        }
+
+        let updatedTabs = affectedTabs.map { tab in
+            updatedFileTab(tab, replacingPathPrefix: sourcePath, with: renamedReference.path)
+        }
+        for tab in updatedTabs {
+            try await persist { try await persistenceStore.save(tab: tab) }
+        }
+        for tab in updatedTabs {
+            store.upsertTab(tab, select: store.selectedTabID == tab.id)
+            if let fileReference = tab.fileReference {
+                fileBufferManager.updateBufferFileReference(tabID: tab.id, fileReference: fileReference)
+            }
+        }
+        try await persistSnapshot()
+    }
+
+    public func deleteWorkspaceItem(projectID: UUID, path: String) async throws {
+        let project = try requireProject(id: projectID)
+        let itemPath = try standardizeWorkspaceItemPath(path, projectRoot: project.path)
+        let affectedTabs = affectedOpenFileTabs(in: project, under: itemPath)
+        try rejectIfDirtyFileTabs(affectedTabs, operation: "delete_workspace_item")
+
+        do {
+            try await fileAccess.deleteItem(path: itemPath, projectRoot: project.path)
+        } catch let error as WorkspaceFileAccessError {
+            throw commandError(for: error)
+        }
+
+        for tab in affectedTabs {
+            try await persist { try await persistenceStore.deleteTab(id: tab.id) }
+        }
+        for tab in affectedTabs {
+            fileBufferManager.discardBuffer(tabID: tab.id)
+            store.removeTab(id: tab.id)
+        }
+        try await persistSnapshot()
     }
 
     @discardableResult
@@ -1025,6 +1099,66 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
         fields["operation"] = operation
         logger.emit("file_tab_dirty_close_decision", fields: fields)
         throw WorkspaceCommandError.dirtyFileTabCloseRejected(dirtyTab.id)
+    }
+
+    private func standardizeWorkspaceItemPath(_ path: String, projectRoot: String) throws -> String {
+        guard (path as NSString).isAbsolutePath else {
+            throw WorkspaceCommandError.invalidFilePath(path)
+        }
+        let root = standardizedResolvedPath(projectRoot, isDirectory: true)
+        let itemPath = standardizedResolvedPath(path)
+        guard itemPath != root else {
+            throw WorkspaceCommandError.filePathOutsideProject(filePath: itemPath, projectRoot: root)
+        }
+        let rootPrefix = root.hasSuffix("/") ? root : "\(root)/"
+        guard itemPath.hasPrefix(rootPrefix) else {
+            throw WorkspaceCommandError.filePathOutsideProject(filePath: itemPath, projectRoot: root)
+        }
+        return itemPath
+    }
+
+    private func standardizedResolvedPath(_ path: String, isDirectory: Bool = false) -> String {
+        URL(fileURLWithPath: path, isDirectory: isDirectory)
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+            .path
+    }
+
+    private func affectedOpenFileTabs(in project: WorkspaceProject, under itemPath: String) -> [WorkspaceTab] {
+        let projectRoot = standardizedResolvedPath(project.path, isDirectory: true)
+        return store.tabs.filter { tab in
+            guard tab.kind == .file,
+                  let fileReference = tab.fileReference,
+                  standardizedResolvedPath(fileReference.projectRoot, isDirectory: true) == projectRoot
+            else {
+                return false
+            }
+            return isSamePathOrDescendant(fileReference.path, of: itemPath)
+        }
+    }
+
+    private func isSamePathOrDescendant(_ path: String, of ancestorPath: String) -> Bool {
+        if path == ancestorPath { return true }
+        let ancestorPrefix = ancestorPath.hasSuffix("/") ? ancestorPath : "\(ancestorPath)/"
+        return path.hasPrefix(ancestorPrefix)
+    }
+
+    private func updatedFileTab(
+        _ tab: WorkspaceTab,
+        replacingPathPrefix sourcePath: String,
+        with destinationPath: String
+    ) -> WorkspaceTab {
+        guard let fileReference = tab.fileReference else { return tab }
+        var updatedTab = tab
+        let updatedPath: String
+        if fileReference.path == sourcePath {
+            updatedPath = destinationPath
+        } else {
+            let suffix = fileReference.path.dropFirst(sourcePath.count)
+            updatedPath = destinationPath + suffix
+        }
+        updatedTab.fileReference = WorkspaceFileReference(path: updatedPath, projectRoot: fileReference.projectRoot)
+        return updatedTab
     }
 
     private func recordFileOpen(

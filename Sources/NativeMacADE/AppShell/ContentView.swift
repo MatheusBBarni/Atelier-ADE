@@ -8,10 +8,19 @@ struct ShellThemePaletteKey: EnvironmentKey {
     static let defaultValue = AppTheme.defaultTheme.shellPalette
 }
 
+struct ShellUIFontSizeKey: EnvironmentKey {
+    static let defaultValue = AppPreferences.defaultTerminalFontSize
+}
+
 extension EnvironmentValues {
     var shellThemePalette: ShellThemePalette {
         get { self[ShellThemePaletteKey.self] }
         set { self[ShellThemePaletteKey.self] = newValue }
+    }
+
+    var shellUIFontSize: Double {
+        get { self[ShellUIFontSizeKey.self] }
+        set { self[ShellUIFontSizeKey.self] = newValue }
     }
 }
 
@@ -40,6 +49,8 @@ struct ContentView: View {
     @State private var userMessage: UserMessage?
     @State private var splitViewVisibility: NavigationSplitViewVisibility = .all
     @State private var sessionCommandPalette: SessionCommandPaletteState?
+    @State private var agentTabPalette: AgentTabPaletteState?
+    @State private var sessionSearchPalette: SessionSearchPaletteState?
 
     var body: some View {
         ZStack {
@@ -85,7 +96,9 @@ struct ContentView: View {
             if !isRestoring, let pilotDiagnostics, !pilotDiagnostics.releaseBlockingReasons.isEmpty {
                 VStack {
                     Spacer()
-                    PilotDiagnosticsView(diagnostics: pilotDiagnostics)
+                    PilotDiagnosticsView(diagnostics: pilotDiagnostics) {
+                        self.pilotDiagnostics = nil
+                    }
                         .padding(.horizontal, 20)
                         .padding(.bottom, 18)
                 }
@@ -100,12 +113,31 @@ struct ContentView: View {
                 )
                 .transition(.opacity.combined(with: .scale(scale: 0.98)))
             }
+
+            if let agentTabPalette {
+                AgentTabPaletteOverlay(
+                    state: agentTabPalette,
+                    onClose: { self.agentTabPalette = nil },
+                    onSelect: openAgentTab(using:)
+                )
+                .transition(.opacity.combined(with: .scale(scale: 0.98)))
+            }
+
+            if let sessionSearchPalette {
+                SessionSearchPaletteOverlay(
+                    state: sessionSearchPalette,
+                    onClose: { self.sessionSearchPalette = nil },
+                    onSelect: selectSessionFromSearch(using:)
+                )
+                .transition(.opacity.combined(with: .scale(scale: 0.98)))
+            }
         }
         .frame(minWidth: 1_040, minHeight: 680)
         .background(theme.shellBackground.color)
         .preferredColorScheme(activeTheme.colorScheme.swiftUIColorScheme)
         .tint(theme.accent.color)
         .environment(\.shellThemePalette, theme)
+        .environment(\.shellUIFontSize, store.appPreferences.terminalFontSize)
         .onAppear(perform: applyActiveTheme)
         .onChange(of: activeTheme) { _, _ in applyActiveTheme() }
         .task {
@@ -143,6 +175,12 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .showSessionCommandPalette)) { _ in
             showSessionCommandPalette()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .showAgentTabPalette)) { _ in
+            showAgentTabPalette()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .showSessionSearchPalette)) { _ in
+            showSessionSearchPalette()
         }
         .onReceive(NotificationCenter.default.publisher(for: .performSelectedFileCommand)) { notification in
             guard let commandID = notification.object as? AppCommandID else { return }
@@ -189,6 +227,8 @@ struct ContentView: View {
             return
         }
 
+        agentTabPalette = nil
+        sessionSearchPalette = nil
         sessionCommandPalette = SessionCommandPaletteState(project: project, isLoading: true)
         Task {
             do {
@@ -206,6 +246,43 @@ struct ContentView: View {
         }
     }
 
+    private func showAgentTabPalette() {
+        guard let session = store.selectedSession else {
+            userMessage = UserMessage(title: "Session required", detail: "Select a session before opening a new agent tab.")
+            return
+        }
+
+        sessionCommandPalette = nil
+        sessionSearchPalette = nil
+        agentTabPalette = AgentTabPaletteState(session: session, isLoading: true)
+        Task {
+            do {
+                let options = try await loadAgentTabOptions()
+                await MainActor.run {
+                    guard agentTabPalette?.sessionID == session.id else { return }
+                    agentTabPalette = AgentTabPaletteState(session: session, options: options, isLoading: false)
+                }
+            } catch {
+                await MainActor.run {
+                    agentTabPalette = nil
+                    userMessage = UserMessage(title: "Agent tabs unavailable", detail: String(describing: error))
+                }
+            }
+        }
+    }
+
+    private func showSessionSearchPalette() {
+        let rows = sessionSearchRows()
+        guard !rows.isEmpty else {
+            userMessage = UserMessage(title: "No sessions available", detail: "Create a session before searching for one.")
+            return
+        }
+
+        agentTabPalette = nil
+        sessionCommandPalette = nil
+        sessionSearchPalette = SessionSearchPaletteState(rows: rows)
+    }
+
     private func startSession(using option: SessionCommandOption) {
         guard let projectID = sessionCommandPalette?.projectID else { return }
         sessionCommandPalette = nil
@@ -219,40 +296,87 @@ struct ContentView: View {
         }
     }
 
+    private func openAgentTab(using option: SessionCommandOption) {
+        guard let sessionID = agentTabPalette?.sessionID,
+              let shortcutID = option.shortcutID
+        else { return }
+        agentTabPalette = nil
+
+        Task {
+            do {
+                _ = try await commandService.createAgentTab(sessionID: sessionID, shortcutID: shortcutID)
+            } catch {
+                userMessage = UserMessage(title: "Agent tab could not be created", detail: String(describing: error))
+            }
+        }
+    }
+
+    private func selectSessionFromSearch(using row: SessionSearchRow) {
+        sessionSearchPalette = nil
+
+        Task {
+            do {
+                try await commandService.selectSession(id: row.sessionID)
+            } catch {
+                userMessage = UserMessage(title: "Session could not be selected", detail: String(describing: error))
+            }
+        }
+    }
+
     private func loadSessionCommandOptions() async throws -> [SessionCommandOption] {
         let shortcuts = try await commandService.availableSessionShortcuts()
         var options: [SessionCommandOption] = [
             SessionCommandOption(
                 title: "Plain Session",
                 subtitle: "Start a shell in the selected project",
-                systemImage: "terminal",
-                shortcutID: nil
+                shortcut: nil,
+                fallbackSystemImage: "terminal"
             )
         ]
 
-        if let codexShortcut = shortcuts.first(where: { $0.label.caseInsensitiveCompare("Codex") == .orderedSame || $0.launchCommand.caseInsensitiveCompare("codex") == .orderedSame }) {
-            options.append(
-                SessionCommandOption(
-                    title: "Codex",
-                    subtitle: "Start a session with the Codex profile",
-                    systemImage: "sparkles",
-                    shortcutID: codexShortcut.id
-                )
-            )
-        }
-
-        if let claudeShortcut = shortcuts.first(where: { $0.label.caseInsensitiveCompare("Claude") == .orderedSame || $0.launchCommand.caseInsensitiveCompare("claude") == .orderedSame }) {
-            options.append(
-                SessionCommandOption(
-                    title: "Claude",
-                    subtitle: "Start a session with the Claude profile",
-                    systemImage: "bubble.left.and.bubble.right",
-                    shortcutID: claudeShortcut.id
-                )
+        options += shortcuts.map { shortcut in
+            SessionCommandOption(
+                title: shortcut.label,
+                subtitle: shortcutDescription(for: shortcut),
+                shortcut: shortcut,
+                fallbackSystemImage: nil
             )
         }
 
         return options
+    }
+
+    private func loadAgentTabOptions() async throws -> [SessionCommandOption] {
+        try await commandService.availableSessionShortcuts().map { shortcut in
+            SessionCommandOption(
+                title: shortcut.label,
+                subtitle: "Open a new agent tab with the \(shortcut.label) profile",
+                shortcut: shortcut,
+                fallbackSystemImage: nil
+            )
+        }
+    }
+
+    private func shortcutDescription(for shortcut: SessionShortcut) -> String {
+        if shortcut.isBuiltIn {
+            return "Start a session with the \(shortcut.label) profile"
+        }
+
+        return "Run \(shortcut.launchCommand) in the selected project"
+    }
+
+    private func sessionSearchRows() -> [SessionSearchRow] {
+        store.projects.flatMap { project in
+            store.orderedSessions(for: project.id).map { session in
+                SessionSearchRow(
+                    sessionID: session.id,
+                    sessionTitle: session.title,
+                    projectName: project.displayName,
+                    projectPath: project.path,
+                    isSelected: session.id == store.selectedSessionID
+                )
+            }
+        }
     }
 
     private func performSelectedFileCommand(_ commandID: AppCommandID) {
@@ -271,7 +395,11 @@ struct ContentView: View {
                 case .openProjectSelector,
                      .newPlainTab,
                      .newDefaultAgentTab,
+                     .newAgentTabWithProfile,
                      .closeSelectedTab,
+                     .renameSelectedSession,
+                     .renameSelectedTab,
+                     .deleteSelectedSession,
                      .previousTab,
                      .nextTab,
                      .previousSession,
@@ -301,7 +429,11 @@ struct ContentView: View {
         case .openProjectSelector,
              .newPlainTab,
              .newDefaultAgentTab,
+             .newAgentTabWithProfile,
              .closeSelectedTab,
+             .renameSelectedSession,
+             .renameSelectedTab,
+             .deleteSelectedSession,
              .previousTab,
              .nextTab,
              .previousSession,
@@ -319,13 +451,22 @@ struct ContentView: View {
 
 struct PilotDiagnosticsView: View {
     let diagnostics: PilotDiagnostics
+    let onDismiss: () -> Void
     @Environment(\.shellThemePalette) private var theme
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Label("Pilot diagnostics need attention", systemImage: "waveform.path.ecg.rectangle")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(theme.warning.color)
+            HStack(alignment: .top, spacing: 10) {
+                Label("Pilot diagnostics need attention", systemImage: "waveform.path.ecg.rectangle")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(theme.warning.color)
+                Spacer(minLength: 8)
+                Button("Dismiss", systemImage: "xmark", action: onDismiss)
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(theme.mutedText.color)
+                    .help("Dismiss diagnostics")
+            }
             Text(diagnostics.releaseBlockingReasons.joined(separator: " • "))
                 .font(.caption)
                 .foregroundStyle(theme.secondaryText.color)
@@ -475,6 +616,7 @@ struct ProjectSidebarView: View {
     let commandService: any WorkspaceCommandService
     @Binding var userMessage: UserMessage?
     @Environment(\.shellThemePalette) private var theme
+    @Environment(\.shellUIFontSize) private var uiFontSize
     @State private var pendingRemoval: WorkspaceProject?
     @State private var renameDraft: SessionRenameDraft?
     @State private var expandedProjectIDs: Set<UUID> = []
@@ -500,11 +642,11 @@ struct ProjectSidebarView: View {
                 )
             } else {
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 14) {
+                    LazyVStack(alignment: .leading, spacing: 10) {
                         ForEach(store.projects) { project in
                             let projectSessions = sessions(for: project.id)
                             let isExpanded = expandedProjectIDs.contains(project.id)
-                            VStack(alignment: .leading, spacing: 12) {
+                            VStack(alignment: .leading, spacing: 10) {
                                 ProjectRowView(
                                     project: project,
                                     isActive: project.id == store.selectedProjectID,
@@ -565,7 +707,7 @@ struct ProjectSidebarView: View {
                                     .padding(.top, 4)
                                 }
                             }
-                            .padding(12)
+                            .padding(10)
                             .background(theme.elevatedBackground.color.opacity(0.82), in: RoundedRectangle(cornerRadius: 18))
                             .overlay {
                                 RoundedRectangle(cornerRadius: 18)
@@ -573,11 +715,14 @@ struct ProjectSidebarView: View {
                             }
                         }
                     }
-                    .padding(16)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 6)
+                    .padding(.bottom, 16)
                 }
             }
         }
         .background(theme.sidebarBackground.color)
+        .font(.system(size: uiFontSize))
         .navigationSplitViewColumnWidth(min: 280, ideal: 360)
         .confirmationDialog("Remove project?", isPresented: removalDialogBinding, titleVisibility: .visible) {
             Button("Remove Project", role: .destructive) {
@@ -604,6 +749,14 @@ struct ProjectSidebarView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .showProjectSelector)) { _ in
             openProject()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .renameSelectedSession)) { _ in
+            guard let selectedSession = store.selectedSession else { return }
+            renameDraft = SessionRenameDraft(session: selectedSession)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .deleteSelectedSession)) { _ in
+            guard let selectedSessionID = store.selectedSessionID else { return }
+            removeSession(selectedSessionID)
         }
     }
 
@@ -725,6 +878,7 @@ struct ProjectRowView: View {
     let onSelectProject: () -> Void
     let onRemove: () -> Void
     @Environment(\.shellThemePalette) private var theme
+    @Environment(\.shellUIFontSize) private var uiFontSize
 
     var body: some View {
         HStack(spacing: 10) {
@@ -744,11 +898,11 @@ struct ProjectRowView: View {
                         .frame(width: 20)
                     VStack(alignment: .leading, spacing: 4) {
                         Text(project.displayName)
-                            .font(.headline)
+                            .font(.system(size: uiFontSize + 1, weight: .semibold))
                             .foregroundStyle(theme.primaryText.color)
                             .lineLimit(1)
                         Text(project.path)
-                            .font(.caption.monospaced())
+                            .font(.system(size: max(uiFontSize - 2, 10), design: .monospaced))
                             .foregroundStyle(theme.mutedText.color)
                             .lineLimit(1)
                     }
@@ -769,7 +923,7 @@ struct ProjectRowView: View {
                     .help("Remove selected project")
             }
         }
-        .padding(.vertical, 8)
+        .padding(.vertical, 6)
         .padding(.horizontal, 6)
         .background(isActive ? theme.activeBackground.color.opacity(0.42) : Color.clear, in: RoundedRectangle(cornerRadius: 10))
         .overlay {
@@ -919,8 +1073,12 @@ struct SidebarInlineEmptyState: View {
 struct SessionCommandOption: Identifiable, Equatable {
     let title: String
     let subtitle: String
-    let systemImage: String
-    let shortcutID: UUID?
+    let shortcut: SessionShortcut?
+    let fallbackSystemImage: String?
+
+    var shortcutID: UUID? {
+        shortcut?.id
+    }
 
     var id: String {
         shortcutID?.uuidString ?? "plain-session"
@@ -936,6 +1094,20 @@ struct SessionCommandPaletteState: Equatable {
     init(project: WorkspaceProject, options: [SessionCommandOption] = [], isLoading: Bool = true) {
         self.projectID = project.id
         self.projectName = project.displayName
+        self.options = options
+        self.isLoading = isLoading
+    }
+}
+
+struct AgentTabPaletteState: Equatable {
+    let sessionID: UUID
+    let sessionTitle: String
+    let options: [SessionCommandOption]
+    let isLoading: Bool
+
+    init(session: WorkspaceSession, options: [SessionCommandOption] = [], isLoading: Bool = true) {
+        sessionID = session.id
+        sessionTitle = session.title
         self.options = options
         self.isLoading = isLoading
     }
@@ -1046,10 +1218,8 @@ struct SessionCommandPaletteRow: View {
 
     var body: some View {
         HStack(spacing: 14) {
-            Image(systemName: option.systemImage)
-                .font(.headline)
-                .foregroundStyle(theme.selectedText.color)
-                .frame(width: 18)
+            AgentProfileIconView(shortcut: option.shortcut, fallbackSystemImage: option.fallbackSystemImage, size: 18)
+                .frame(width: 18, height: 18)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(option.title)
@@ -1076,6 +1246,260 @@ struct SessionCommandPaletteRow: View {
     }
 }
 
+struct AgentTabPaletteOverlay: View {
+    let state: AgentTabPaletteState
+    let onClose: () -> Void
+    let onSelect: (SessionCommandOption) -> Void
+    @Environment(\.shellThemePalette) private var theme
+    @State private var query = ""
+    @FocusState private var isSearchFocused: Bool
+
+    private var filteredOptions: [SessionCommandOption] {
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedQuery.isEmpty else { return state.options }
+        return state.options.filter {
+            $0.title.localizedCaseInsensitiveContains(trimmedQuery) ||
+                $0.subtitle.localizedCaseInsensitiveContains(trimmedQuery)
+        }
+    }
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.45)
+                .ignoresSafeArea()
+                .onTapGesture(perform: onClose)
+
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 12) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(theme.mutedText.color)
+                    TextField("Open agent tab…", text: $query)
+                        .textFieldStyle(.plain)
+                        .font(.title3)
+                        .foregroundStyle(theme.primaryText.color)
+                        .focused($isSearchFocused)
+                        .onSubmit {
+                            if let first = filteredOptions.first {
+                                onSelect(first)
+                            }
+                        }
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 18)
+
+                Divider().overlay(theme.border.color)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Profiles for \(state.sessionTitle)")
+                        .font(.caption)
+                        .foregroundStyle(theme.mutedText.color)
+
+                    if state.isLoading {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                            Text("Loading agent profiles…")
+                                .foregroundStyle(theme.secondaryText.color)
+                        }
+                        .padding(.vertical, 16)
+                    } else if filteredOptions.isEmpty {
+                        Text("No matching profiles")
+                            .foregroundStyle(theme.secondaryText.color)
+                            .padding(.vertical, 16)
+                    } else {
+                        ForEach(filteredOptions) { option in
+                            Button(action: { onSelect(option) }) {
+                                SessionCommandPaletteRow(option: option)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                .padding(16)
+
+                Divider().overlay(theme.border.color)
+
+                HStack {
+                    Text("↩︎ Open first match")
+                        .font(.caption2)
+                        .foregroundStyle(theme.mutedText.color)
+                    Spacer()
+                    Button("Cancel", action: onClose)
+                        .buttonStyle(.plain)
+                        .keyboardShortcut(.cancelAction)
+                        .foregroundStyle(theme.secondaryText.color)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+            }
+            .frame(width: 720)
+            .background(theme.shellBackground.color, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(theme.border.color, lineWidth: 1)
+            }
+            .shadow(color: .black.opacity(0.35), radius: 30, y: 12)
+        }
+        .task {
+            isSearchFocused = true
+        }
+    }
+}
+
+struct SessionSearchRow: Identifiable, Equatable {
+    let sessionID: UUID
+    let sessionTitle: String
+    let projectName: String
+    let projectPath: String
+    let isSelected: Bool
+
+    var id: UUID { sessionID }
+}
+
+struct SessionSearchPaletteState: Equatable {
+    let rows: [SessionSearchRow]
+}
+
+struct SessionSearchPaletteOverlay: View {
+    let state: SessionSearchPaletteState
+    let onClose: () -> Void
+    let onSelect: (SessionSearchRow) -> Void
+    @Environment(\.shellThemePalette) private var theme
+    @State private var query = ""
+    @FocusState private var isSearchFocused: Bool
+
+    private var filteredRows: [SessionSearchRow] {
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedQuery.isEmpty else { return state.rows }
+
+        return state.rows.filter { row in
+            row.sessionTitle.localizedCaseInsensitiveContains(trimmedQuery) ||
+                row.projectName.localizedCaseInsensitiveContains(trimmedQuery) ||
+                row.projectPath.localizedCaseInsensitiveContains(trimmedQuery)
+        }
+    }
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.45)
+                .ignoresSafeArea()
+                .onTapGesture(perform: onClose)
+
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 12) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(theme.mutedText.color)
+                    TextField("Search sessions…", text: $query)
+                        .textFieldStyle(.plain)
+                        .font(.title3)
+                        .foregroundStyle(theme.primaryText.color)
+                        .focused($isSearchFocused)
+                        .onSubmit {
+                            if let first = filteredRows.first {
+                                onSelect(first)
+                            }
+                        }
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 18)
+
+                Divider().overlay(theme.border.color)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Search across all project sessions")
+                        .font(.caption)
+                        .foregroundStyle(theme.mutedText.color)
+
+                    if filteredRows.isEmpty {
+                        Text("No matching sessions")
+                            .foregroundStyle(theme.secondaryText.color)
+                            .padding(.vertical, 16)
+                    } else {
+                        ForEach(filteredRows) { row in
+                            Button(action: { onSelect(row) }) {
+                                SessionSearchPaletteRow(row: row)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                .padding(16)
+
+                Divider().overlay(theme.border.color)
+
+                HStack {
+                    Text("↩︎ Select first match")
+                        .font(.caption2)
+                        .foregroundStyle(theme.mutedText.color)
+                    Spacer()
+                    Button("Cancel", action: onClose)
+                        .buttonStyle(.plain)
+                        .keyboardShortcut(.cancelAction)
+                        .foregroundStyle(theme.secondaryText.color)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+            }
+            .frame(width: 720)
+            .background(theme.shellBackground.color, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(theme.border.color, lineWidth: 1)
+            }
+            .shadow(color: .black.opacity(0.35), radius: 30, y: 12)
+        }
+        .task {
+            isSearchFocused = true
+        }
+    }
+}
+
+struct SessionSearchPaletteRow: View {
+    let row: SessionSearchRow
+    @Environment(\.shellThemePalette) private var theme
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Image(systemName: row.isSelected ? "rectangle.stack.fill" : "rectangle.stack")
+                .font(.headline)
+                .foregroundStyle(row.isSelected ? theme.selectedText.color : theme.secondaryAccent.color)
+                .frame(width: 18)
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text(row.sessionTitle)
+                        .font(.headline)
+                        .foregroundStyle(theme.primaryText.color)
+                    if row.isSelected {
+                        Text("Current")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(theme.accent.color)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(theme.accent.color.opacity(0.12), in: Capsule())
+                    }
+                }
+                Text("\(row.projectName) · \(row.projectPath)")
+                    .font(.callout)
+                    .foregroundStyle(theme.secondaryText.color)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 12)
+            Image(systemName: "arrow.turn.down.left")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(theme.mutedText.color)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(theme.elevatedBackground.color.opacity(0.92), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(row.isSelected ? theme.activeBorder.color.opacity(0.9) : theme.border.color, lineWidth: 1)
+        }
+    }
+}
+
 struct SessionRowView: View {
     let session: WorkspaceSession
     let isActive: Bool
@@ -1084,6 +1508,7 @@ struct SessionRowView: View {
     let onRename: () -> Void
     let onDelete: () -> Void
     @Environment(\.shellThemePalette) private var theme
+    @Environment(\.shellUIFontSize) private var uiFontSize
 
     var body: some View {
         HStack(spacing: 10) {
@@ -1094,7 +1519,7 @@ struct SessionRowView: View {
                         .frame(width: 20)
                     VStack(alignment: .leading, spacing: 0) {
                         Text(session.title)
-                            .font(.headline)
+                            .font(.system(size: uiFontSize, weight: .semibold))
                             .foregroundStyle(theme.primaryText.color)
                             .lineLimit(1)
                     }
@@ -1181,6 +1606,55 @@ struct SessionRenameView: View {
     }
 }
 
+struct TabRenameView: View {
+    let draft: TabRenameDraft
+    let onSave: (UUID, String?) -> Void
+    let onCancel: () -> Void
+    @Environment(\.shellThemePalette) private var theme
+    @State private var title: String
+    @FocusState private var focusedField: Bool
+
+    init(draft: TabRenameDraft, onSave: @escaping (UUID, String?) -> Void, onCancel: @escaping () -> Void) {
+        self.draft = draft
+        self.onSave = onSave
+        self.onCancel = onCancel
+        _title = State(initialValue: draft.currentTitle)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Rename Tab")
+                .font(.title2.weight(.semibold))
+                .foregroundStyle(theme.primaryText.color)
+            Text("Change this tab title without renaming anything on disk.")
+                .foregroundStyle(theme.secondaryText.color)
+            TextField(draft.placeholderTitle, text: $title)
+                .textFieldStyle(.roundedBorder)
+                .focused($focusedField)
+                .onSubmit(save)
+            Text("Leave empty to restore the default title.")
+                .font(.caption)
+                .foregroundStyle(theme.mutedText.color)
+            HStack {
+                Spacer()
+                Button("Cancel", action: onCancel)
+                    .keyboardShortcut(.cancelAction)
+                Button("Save", action: save)
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(24)
+        .frame(width: 420)
+        .background(theme.elevatedBackground.color)
+        .onAppear { focusedField = true }
+    }
+
+    private func save() {
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        onSave(draft.id, trimmedTitle.isEmpty ? nil : trimmedTitle)
+    }
+}
+
 struct WorkspaceDetailView: View {
     let store: WorkspaceStore
     let commandService: any WorkspaceCommandService
@@ -1209,7 +1683,7 @@ struct WorkspaceDetailView: View {
                 userMessage: $userMessage
             )
             Divider().overlay(theme.border.color)
-            HSplitView {
+            HStack(spacing: 0) {
                 WorkspacePrimaryHostAreaView(
                     store: store,
                     commandService: commandService,
@@ -1219,22 +1693,16 @@ struct WorkspaceDetailView: View {
                 )
                 .frame(minWidth: 420)
 
-                FileWorkspaceSidebarView(
-                    store: store,
-                    commandService: commandService,
-                    fileAccessService: fileAccessService,
-                    userMessage: $userMessage
-                )
-                .frame(
-                    minWidth: isFileWorkspaceSidebarVisible ? 280 : 0,
-                    idealWidth: isFileWorkspaceSidebarVisible ? 340 : 0,
-                    maxWidth: isFileWorkspaceSidebarVisible ? 460 : 0
-                )
-                .frame(width: isFileWorkspaceSidebarVisible ? nil : 0)
-                .clipped()
-                .opacity(isFileWorkspaceSidebarVisible ? 1 : 0)
-                .allowsHitTesting(isFileWorkspaceSidebarVisible)
-                .accessibilityHidden(!isFileWorkspaceSidebarVisible)
+                if isFileWorkspaceSidebarVisible {
+                    FileWorkspaceSidebarView(
+                        store: store,
+                        commandService: commandService,
+                        fileAccessService: fileAccessService,
+                        userMessage: $userMessage
+                    )
+                    .frame(width: 340)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                }
             }
         }
         .background(theme.contentBackground.color)
@@ -1262,15 +1730,16 @@ struct ActiveContextBanner: View {
     let onOpenSettings: () -> Void
     let isSidebarCollapsed: Bool
     @Environment(\.shellThemePalette) private var theme
+    @Environment(\.shellUIFontSize) private var uiFontSize
 
     var body: some View {
         HStack(spacing: 12) {
             Label(project?.displayName ?? "No project selected", systemImage: project == nil ? "exclamationmark.triangle" : "folder.fill")
-                .font(.headline)
+                .font(.system(size: uiFontSize + 1, weight: .semibold))
             Image(systemName: "chevron.right")
                 .foregroundStyle(theme.mutedText.color)
             Label(session?.title ?? "No session selected", systemImage: session == nil ? "rectangle.stack" : "rectangle.stack.fill")
-                .font(.subheadline.weight(.semibold))
+                .font(.system(size: uiFontSize, weight: .semibold))
             Spacer()
             Button(action: onShowSessionCommands) {
                 Image(systemName: "plus")
@@ -1308,11 +1777,12 @@ struct TabChromeView: View {
     @Environment(\.shellThemePalette) private var theme
     @State private var dirtyRefreshToken = 0
     @State private var pendingCloseConfirmation: TabCloseConfirmation?
+    @State private var renameDraft: TabRenameDraft?
 
     var body: some View {
         let _ = dirtyRefreshToken
         ScrollView(.horizontal) {
-            HStack(spacing: 6) {
+            HStack(spacing: 0) {
                 if store.tabsForSelectedSession.isEmpty {
                     Text(store.selectedSessionID == nil ? "Select a session to see tabs" : "No tabs in this session yet")
                         .font(.callout)
@@ -1324,6 +1794,7 @@ struct TabChromeView: View {
                             isActive: tab.id == store.selectedTabID,
                             isDirty: tab.kind == .file && fileBufferController.isDirty(tabID: tab.id),
                             onSelect: { selectTab(tab.id) },
+                            onRename: { renameDraft = TabRenameDraft(tab: tab) },
                             onClose: { closeTab(tab.id) }
                         )
                     }
@@ -1332,21 +1803,24 @@ struct TabChromeView: View {
                 Button(action: createPlainTab) {
                     Image(systemName: "plus")
                         .font(.system(size: 12, weight: .semibold))
-                        .frame(width: 24, height: 24)
-                        .background(theme.elevatedBackground.color.opacity(store.selectedSessionID == nil ? 0.38 : 0.9), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        .frame(width: 28, height: 28)
+                        .background(theme.elevatedBackground.color.opacity(store.selectedSessionID == nil ? 0.3 : 0.82), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                         .overlay {
-                            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                .stroke(theme.border.color, lineWidth: 1)
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .stroke(theme.border.color.opacity(0.85), lineWidth: 1)
                         }
                 }
                 .buttonStyle(.plain)
                 .disabled(store.selectedSessionID == nil)
                 .help("New tab (⌘T)")
+                .padding(.leading, 8)
+                .padding(.trailing, 12)
             }
             .padding(.horizontal, 8)
-            .padding(.vertical, 5)
+            .padding(.top, 6)
+            .padding(.bottom, 0)
         }
-        .frame(height: 38)
+        .frame(height: 42)
         .background(theme.tabBarBackground.color)
         .alert(
             pendingCloseConfirmation?.title ?? "Close tab?",
@@ -1374,6 +1848,24 @@ struct TabChromeView: View {
         .onReceive(NotificationCenter.default.publisher(for: .closeSelectedTab)) { _ in
             closeSelectedTab()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .renameSelectedTab)) { _ in
+            guard let selectedTab = store.selectedTab else { return }
+            renameDraft = TabRenameDraft(tab: selectedTab)
+        }
+        .sheet(item: $renameDraft) { draft in
+            TabRenameView(draft: draft) { tabID, title in
+                Task {
+                    do {
+                        _ = try await commandService.renameTab(tabID: tabID, title: title)
+                        renameDraft = nil
+                    } catch {
+                        userMessage = UserMessage(title: "Tab could not be renamed", detail: String(describing: error))
+                    }
+                }
+            } onCancel: {
+                renameDraft = nil
+            }
+        }
     }
 
     private func selectTab(_ id: UUID?) {
@@ -1387,20 +1879,15 @@ struct TabChromeView: View {
     }
 
     private func closeTab(_ id: UUID) {
+        let forceClose = store.tab(id: id)?.kind == .terminal
         Task {
             do {
-                try await commandService.closeTab(tabID: id, force: false)
+                try await commandService.closeTab(tabID: id, force: forceClose)
             } catch WorkspaceCommandError.dirtyFileTabCloseRejected {
                 pendingCloseConfirmation = TabCloseConfirmation(
                     tabID: id,
                     title: "File has unsaved changes",
                     detail: "Closing this file will discard its unsaved changes."
-                )
-            } catch WorkspaceCommandError.closeRejected {
-                pendingCloseConfirmation = TabCloseConfirmation(
-                    tabID: id,
-                    title: "Tab is still running",
-                    detail: "This terminal still has a live process. Force close it to interrupt the process and close the tab."
                 )
             } catch {
                 userMessage = UserMessage(title: "Tab could not be closed", detail: String(describing: error))
@@ -1477,14 +1964,17 @@ struct TabItemView: View {
     let isActive: Bool
     let isDirty: Bool
     let onSelect: () -> Void
+    let onRename: () -> Void
     let onClose: () -> Void
     @Environment(\.shellThemePalette) private var theme
+    @State private var isHovered = false
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 8) {
             Button(action: onSelect) {
-                HStack(spacing: 6) {
+                HStack(spacing: 8) {
                     Image(systemName: iconName)
+                        .font(.system(size: 13, weight: .semibold))
                     Text(title)
                         .lineLimit(1)
                     if isDirty {
@@ -1494,23 +1984,50 @@ struct TabItemView: View {
                             .accessibilityLabel("Unsaved changes")
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .buttonStyle(.plain)
             .foregroundStyle(isActive ? theme.primaryText.color : theme.secondaryText.color)
 
-            Button("Close tab", systemImage: "xmark", action: onClose)
-                .labelStyle(.iconOnly)
-                .buttonStyle(.borderless)
-                .foregroundStyle(isActive ? theme.selectedText.color : theme.mutedText.color)
-                .help(closeHelp)
+            if isActive || isHovered {
+                Button("Close tab", systemImage: "xmark", action: onClose)
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.borderless)
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(isActive ? theme.secondaryText.color : theme.mutedText.color)
+                    .frame(width: 18, height: 18)
+                    .background(theme.elevatedBackground.color.opacity(0.65), in: Circle())
+                    .help(closeHelp)
+            }
         }
-        .padding(.leading, 10)
-        .padding(.trailing, 6)
-        .padding(.vertical, 6)
-        .background(isActive ? theme.contentBackground.color : theme.elevatedBackground.color.opacity(0.8), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .padding(.leading, 14)
+        .padding(.trailing, 10)
+        .padding(.top, 9)
+        .padding(.bottom, 8)
+        .frame(minWidth: 140, idealWidth: 180, maxWidth: 220)
+        .background(tabBackground, in: tabShape)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(isActive ? theme.contentBackground.color : theme.border.color.opacity(0.25))
+                .frame(height: isActive ? 2 : 1)
+                .offset(y: 1)
+        }
         .overlay {
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .stroke(isActive ? theme.activeBorder.color : theme.border.color, lineWidth: 1)
+            tabShape.stroke(tabBorderColor, lineWidth: isActive ? 1.2 : 1)
+        }
+        .overlay(alignment: .leading) {
+            if !isActive {
+                Rectangle()
+                    .fill(theme.border.color.opacity(0.4))
+                    .frame(width: 1)
+                    .padding(.vertical, 8)
+            }
+        }
+        .contentShape(tabShape)
+        .onHover { isHovered = $0 }
+        .contextMenu {
+            Button("Rename Tab", systemImage: "pencil", action: onRename)
+            Button("Close Tab", systemImage: "xmark", action: onClose)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityLabel)
@@ -1518,13 +2035,46 @@ struct TabItemView: View {
     }
 
     private var title: String {
+        if let customTitle = tab.title?.trimmingCharacters(in: .whitespacesAndNewlines), !customTitle.isEmpty {
+            return customTitle
+        }
+
+        return defaultTabTitle
+    }
+
+    private var defaultTabTitle: String {
         if tab.kind == .file, let filePath = tab.fileReference?.path {
             let fileName = URL(fileURLWithPath: filePath).lastPathComponent
             return fileName.isEmpty ? filePath : fileName
         }
 
+        if tab.kind == .terminal {
+            return terminalTabTitle
+        }
+
         let directoryName = URL(fileURLWithPath: tab.workingDirectory).lastPathComponent
         return directoryName.isEmpty ? tab.workingDirectory : directoryName
+    }
+
+    private var terminalTabTitle: String {
+        guard let command = tab.launchCommand?.trimmingCharacters(in: .whitespacesAndNewlines), !command.isEmpty else {
+            return "Terminal"
+        }
+
+        let executableName = URL(fileURLWithPath: command).lastPathComponent.lowercased()
+        switch executableName {
+        case "codex":
+            return "Codex"
+        case "claude":
+            return "Claude"
+        case "opencode":
+            return "OpenCode"
+        default:
+            return executableName
+                .replacingOccurrences(of: "-", with: " ")
+                .replacingOccurrences(of: "_", with: " ")
+                .capitalized
+        }
     }
 
     private var iconName: String {
@@ -1548,10 +2098,28 @@ struct TabItemView: View {
     private var accessibilityLabel: String {
         switch tab.kind {
         case .terminal:
-            return "Terminal tab in \(tab.workingDirectory)"
+            return "Terminal tab \(title) in \(tab.workingDirectory)"
         case .file:
-            return isDirty ? "Unsaved file tab \(tab.fileReference?.path ?? tab.workingDirectory)" : "File tab \(tab.fileReference?.path ?? tab.workingDirectory)"
+            return isDirty ? "Unsaved file tab \(title)" : "File tab \(title)"
         }
+    }
+
+    private var tabShape: UnevenRoundedRectangle {
+        UnevenRoundedRectangle(
+            topLeadingRadius: 8,
+            bottomLeadingRadius: 0,
+            bottomTrailingRadius: 0,
+            topTrailingRadius: 8,
+            style: .continuous
+        )
+    }
+
+    private var tabBackground: Color {
+        isActive ? theme.contentBackground.color : theme.elevatedBackground.color.opacity(0.22)
+    }
+
+    private var tabBorderColor: Color {
+        isActive ? theme.activeBorder.color.opacity(0.9) : theme.border.color.opacity(0.55)
     }
 }
 
@@ -1580,9 +2148,9 @@ struct WorkspacePrimaryHostAreaView: View {
                     tab: selectedTab,
                     commandService: commandService,
                     fileBufferController: fileBufferController,
+                    fontSize: store.appPreferences.terminalFontSize,
                     userMessage: $userMessage
                 )
-                .id(selectedTab.id)
             } else {
                 TerminalPlaceholderView(selectedProject: store.selectedProject, selectedSession: store.selectedSession)
             }
@@ -1608,8 +2176,10 @@ struct FileEditorHostView: View {
     let tab: WorkspaceTab
     let commandService: any WorkspaceCommandService
     let fileBufferController: any WorkspaceFileBufferManaging
+    let fontSize: Double
     @Binding var userMessage: UserMessage?
     @Environment(\.shellThemePalette) private var theme
+    @Environment(\.shellUIFontSize) private var uiFontSize
     @Environment(\.colorScheme) private var colorScheme
     @State private var editorText = ""
     @State private var editorPosition = CodeEditor.Position()
@@ -1647,7 +2217,7 @@ struct FileEditorHostView: View {
                     )
                     .environment(\.codeEditorTheme, codeEditorTheme)
                     .environment(\.codeEditorLayoutConfiguration, CodeEditor.LayoutConfiguration(showMinimap: false, wrapText: false))
-                    .font(.system(.body, design: .monospaced))
+                    .font(.system(size: max(fontSize, 11), design: .monospaced))
                     .onChange(of: editorPosition) { _, newPosition in
                         updateEditorPosition(newPosition)
                     }
@@ -1662,9 +2232,10 @@ struct FileEditorHostView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .fileBufferDirtyStateChanged)) { notification in
             guard notification.object as? UUID == tab.id else { return }
-            refreshBufferSnapshot()
-            if let text = bufferSnapshot?.text {
-                editorText = text
+            if let buffer = fileBufferController.buffer(for: tab.id) {
+                applyBuffer(buffer)
+            } else {
+                refreshBufferSnapshot()
             }
         }
     }
@@ -1676,12 +2247,13 @@ struct FileEditorHostView: View {
                 .frame(width: 18)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.headline)
+                    .font(.system(size: uiFontSize + 1, weight: .semibold))
                     .foregroundStyle(theme.primaryText.color)
                     .lineLimit(1)
+                    .textSelection(.enabled)
                 if !subtitle.isEmpty {
                     Text(subtitle)
-                        .font(.caption.monospaced())
+                        .font(.system(size: max(uiFontSize - 2, 10), design: .monospaced))
                         .foregroundStyle(theme.mutedText.color)
                         .lineLimit(1)
                         .textSelection(.enabled)
@@ -1715,17 +2287,18 @@ struct FileEditorHostView: View {
     }
 
     private var title: String {
-        presentation?.title ?? tab.fileReference.map { FileEditorPresentation.fileName(for: $0.path) } ?? "File"
+        if let fileReference = tab.fileReference {
+            return FileEditorPresentation.relativePath(for: fileReference.path, projectRoot: fileReference.projectRoot)
+        }
+
+        return presentation?.path ?? tab.workingDirectory
     }
 
     private var subtitle: String {
-        if let presentation {
-            return presentation.subtitle
-        }
         if let fileReference = tab.fileReference {
-            return FileEditorPresentation.relativeDirectoryPath(for: fileReference.path, projectRoot: fileReference.projectRoot)
+            return fileReference.path
         }
-        return tab.workingDirectory
+        return presentation?.subtitle ?? tab.workingDirectory
     }
 
     private var editorTextBinding: Binding<String> {
@@ -1749,6 +2322,14 @@ struct FileEditorHostView: View {
     }
 
     private func loadBuffer() async {
+        if let buffer = fileBufferController.buffer(for: tab.id) {
+            applyBuffer(buffer)
+            loadError = nil
+            isLoading = false
+            notifyFileBufferChanged()
+            return
+        }
+
         isLoading = true
         loadError = nil
         do {
@@ -1756,12 +2337,7 @@ struct FileEditorHostView: View {
             guard let buffer = fileBufferController.buffer(for: tab.id) else {
                 throw WorkspaceFileBufferError.missingBuffer(tab.id)
             }
-            bufferSnapshot = buffer
-            editorText = buffer.text
-            editorPosition = CodeEditor.Position(
-                selections: [NSRange(location: buffer.editorPosition.cursorOffset, length: buffer.editorPosition.selectionLength)],
-                verticalScrollPosition: CGFloat(buffer.editorPosition.firstVisibleLine)
-            )
+            applyBuffer(buffer)
         } catch {
             loadError = String(describing: error)
             userMessage = UserMessage(title: "File unavailable", detail: String(describing: error))
@@ -1821,6 +2397,15 @@ struct FileEditorHostView: View {
         bufferSnapshot = fileBufferController.buffer(for: tab.id)
     }
 
+    private func applyBuffer(_ buffer: FileEditorBuffer) {
+        bufferSnapshot = buffer
+        editorText = buffer.text
+        editorPosition = CodeEditor.Position(
+            selections: [NSRange(location: buffer.editorPosition.cursorOffset, length: buffer.editorPosition.selectionLength)],
+            verticalScrollPosition: CGFloat(buffer.editorPosition.firstVisibleLine)
+        )
+    }
+
     private func notifyFileBufferChanged() {
         NotificationCenter.default.post(name: .fileBufferDirtyStateChanged, object: tab.id)
     }
@@ -1857,12 +2442,21 @@ struct FileWorkspaceSidebarView: View {
     let fileAccessService: any WorkspaceFileAccessing
     @Binding var userMessage: UserMessage?
     @Environment(\.shellThemePalette) private var theme
+    @Environment(\.shellUIFontSize) private var uiFontSize
     @State private var repositoryNodes: [WorkspaceFileNode] = []
     @State private var repositoryTreeIndex: WorkspaceFileTreeIndex?
     @State private var repositoryEntries: [FileWorkspaceTreeEntry] = []
     @State private var expandedDirectoryPaths: Set<String> = []
     @State private var repositoryError: String?
     @State private var isRepositoryLoading = false
+    @State private var searchQuery = ""
+    @State private var searchResults: [RepositorySearchResult] = []
+    @State private var repositorySearchIndex: [RepositorySearchIndexEntry] = []
+    @State private var searchTask: Task<Void, Never>?
+    @State private var creationDraft: ProjectItemCreationDraft?
+    @State private var repositoryRenameDraft: RepositoryItemRenameDraft?
+    @State private var pendingRepositoryItemDeletion: RepositoryItemContext?
+    @State private var contextMenuSelectionPath: String?
 
     var body: some View {
         ScrollView {
@@ -1872,6 +2466,7 @@ struct FileWorkspaceSidebarView: View {
             .padding(12)
         }
         .background(theme.sidebarBackground.color)
+        .font(.system(size: uiFontSize))
         .overlay(alignment: .leading) {
             Rectangle()
                 .fill(theme.border.color)
@@ -1883,16 +2478,52 @@ struct FileWorkspaceSidebarView: View {
         .onChange(of: store.selectedTabID) { _, _ in
             expandSelectedFileAncestors()
         }
+        .onChange(of: searchQuery) { _, newQuery in
+            scheduleSearch(for: newQuery)
+        }
+        .sheet(item: $creationDraft) { draft in
+            ProjectItemCreationView(draft: draft) { updatedDraft in
+                Task {
+                    await createProjectItem(from: updatedDraft)
+                }
+            } onCancel: {
+                creationDraft = nil
+            }
+        }
+        .sheet(item: $repositoryRenameDraft) { draft in
+            RepositoryItemRenameView(draft: draft) { updatedDraft in
+                Task {
+                    await renameRepositoryItem(from: updatedDraft)
+                }
+            } onCancel: {
+                repositoryRenameDraft = nil
+            }
+        }
+        .confirmationDialog("Delete item?", isPresented: pendingRepositoryItemDeletionBinding, titleVisibility: .visible) {
+            Button("Delete", role: .destructive) {
+                guard let pendingRepositoryItemDeletion else { return }
+                Task {
+                    await deleteRepositoryItem(pendingRepositoryItemDeletion)
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                pendingRepositoryItemDeletion = nil
+            }
+        } message: {
+            if let pendingRepositoryItemDeletion {
+                Text("Delete \(pendingRepositoryItemDeletion.relativePath)? This removes it from disk.")
+            }
+        }
+        .onDisappear {
+            searchTask?.cancel()
+        }
     }
 
     private var repositorySection: some View {
         FileWorkspaceSection(
             title: repositorySectionTitle,
             systemImage: "folder",
-            trailingActionLabel: "Reload files",
-            trailingActionSystemImage: "arrow.clockwise",
-            trailingActionDisabled: store.selectedProject == nil,
-            trailingAction: reloadRepository
+            actions: repositorySectionActions
         ) {
             if store.selectedProject == nil {
                 FileWorkspaceInlineEmptyState(title: "No project selected")
@@ -1901,7 +2532,7 @@ struct FileWorkspaceSidebarView: View {
                     ProgressView()
                         .controlSize(.small)
                     Text("Loading files")
-                        .font(.caption)
+                        .font(.system(size: max(uiFontSize - 2, 10)))
                         .foregroundStyle(theme.secondaryText.color)
                 }
                 .padding(.vertical, 8)
@@ -1910,15 +2541,80 @@ struct FileWorkspaceSidebarView: View {
             } else if repositoryEntries.isEmpty {
                 FileWorkspaceInlineEmptyState(title: "No files")
             } else {
-                LazyVStack(alignment: .leading, spacing: 3) {
-                    ForEach(repositoryEntries) { entry in
-                        RepositoryTreeRow(entry: entry) {
-                            handleRepositoryEntry(entry)
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundStyle(theme.mutedText.color)
+                        TextField("Search project files…", text: $searchQuery)
+                            .textFieldStyle(.roundedBorder)
+                            .onSubmit {
+                                if let first = searchResults.first {
+                                    handleSearchResult(first)
+                                }
+                            }
+                    }
+
+                    if !searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        if searchResults.isEmpty {
+                            FileWorkspaceInlineEmptyState(title: "No matching files")
+                        } else {
+                            LazyVStack(alignment: .leading, spacing: 4) {
+                                ForEach(searchResults) { result in
+                                    RepositorySearchResultRow(
+                                        result: result,
+                                        isHighlighted: contextMenuSelectionPath == result.path
+                                    ) {
+                                        handleSearchResult(result)
+                                    }
+                                    .contextMenu {
+                                        if let item = repositoryItemContext(for: result) {
+                                            repositoryItemContextMenu(for: item)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        LazyVStack(alignment: .leading, spacing: 3) {
+                            ForEach(repositoryEntries) { entry in
+                                RepositoryTreeRow(
+                                    entry: entry,
+                                    isHighlighted: contextMenuSelectionPath == entry.path
+                                ) {
+                                    handleRepositoryEntry(entry)
+                                }
+                                .contextMenu {
+                                    repositoryItemContextMenu(for: repositoryItemContext(for: entry))
+                                }
+                            }
                         }
                     }
                 }
             }
         }
+    }
+
+    private var repositorySectionActions: [FileWorkspaceSectionAction] {
+        [
+            FileWorkspaceSectionAction(
+                label: "Reload files",
+                systemImage: "arrow.clockwise",
+                isDisabled: store.selectedProject == nil,
+                action: reloadRepository
+            ),
+            FileWorkspaceSectionAction(
+                label: "Create folder",
+                systemImage: "folder.badge.plus",
+                isDisabled: store.selectedProject == nil,
+                action: showCreateFolderPrompt
+            ),
+            FileWorkspaceSectionAction(
+                label: "Create file",
+                systemImage: "doc.badge.plus",
+                isDisabled: store.selectedProject == nil,
+                action: showCreateFilePrompt
+            )
+        ]
     }
 
     private var repositorySectionTitle: String {
@@ -1931,10 +2627,14 @@ struct FileWorkspaceSidebarView: View {
 
     private func loadRepositoryNodes() async {
         guard let project = store.selectedProject else {
+            searchTask?.cancel()
             repositoryNodes = []
             repositoryTreeIndex = nil
             repositoryEntries = []
+            repositorySearchIndex = []
+            searchResults = []
             repositoryError = nil
+            searchQuery = ""
             isRepositoryLoading = false
             return
         }
@@ -1944,12 +2644,32 @@ struct FileWorkspaceSidebarView: View {
         do {
             repositoryNodes = try await fileAccessService.enumerateProjectFiles(projectRoot: project.path)
             repositoryTreeIndex = WorkspaceFileTreeBuilder.makeIndex(projectRoot: project.path, nodes: repositoryNodes)
+            repositorySearchIndex = repositoryNodes
+                .filter { !$0.isDirectory }
+                .map { node in
+                    let title = FileEditorPresentation.fileName(for: node.reference.path)
+                    let subtitle = FileEditorPresentation.relativePath(for: node.reference.path, projectRoot: project.path)
+                    return RepositorySearchIndexEntry(
+                        path: node.reference.path,
+                        title: title,
+                        subtitle: subtitle,
+                        normalizedTitle: title.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current),
+                        normalizedSubtitle: subtitle.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+                    )
+                }
+                .sorted { lhs, rhs in
+                    lhs.subtitle.localizedStandardCompare(rhs.subtitle) == .orderedAscending
+                }
             expandSelectedFileAncestors()
             rebuildRepositoryEntries()
+            scheduleSearch(for: searchQuery, immediately: true)
         } catch {
+            searchTask?.cancel()
             repositoryNodes = []
             repositoryTreeIndex = nil
             repositoryEntries = []
+            repositorySearchIndex = []
+            searchResults = []
             repositoryError = "Files unavailable"
             userMessage = UserMessage(title: "Repository files unavailable", detail: String(describing: error))
         }
@@ -1962,7 +2682,70 @@ struct FileWorkspaceSidebarView: View {
         }
     }
 
+    private func showCreateFolderPrompt() {
+        guard let project = store.selectedProject else { return }
+        creationDraft = ProjectItemCreationDraft(projectRoot: project.path, kind: .folder)
+    }
+
+    private func showCreateFilePrompt() {
+        guard let project = store.selectedProject else { return }
+        creationDraft = ProjectItemCreationDraft(projectRoot: project.path, kind: .file)
+    }
+
+    private func showCreateFilePrompt(in directoryPath: String) {
+        guard let project = store.selectedProject else { return }
+        let relativeDirectory = FileEditorPresentation.relativePath(for: directoryPath, projectRoot: project.path)
+        creationDraft = ProjectItemCreationDraft(
+            projectRoot: project.path,
+            kind: .file,
+            relativePath: relativeDirectory.isEmpty ? "" : "\(relativeDirectory)/"
+        )
+    }
+
+    private func scheduleSearch(for query: String, immediately: Bool = false) {
+        searchTask?.cancel()
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedQuery.isEmpty else {
+            searchResults = []
+            return
+        }
+
+        let normalizedQuery = trimmedQuery.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+        let index = repositorySearchIndex
+        searchTask = Task {
+            if !immediately {
+                try? await Task.sleep(for: .milliseconds(75))
+            }
+            guard !Task.isCancelled else { return }
+            let results = index.lazy
+                .filter { entry in
+                    entry.normalizedTitle.contains(normalizedQuery) ||
+                        entry.normalizedSubtitle.contains(normalizedQuery)
+                }
+                .prefix(250)
+                .map { entry in
+                    RepositorySearchResult(path: entry.path, title: entry.title, subtitle: entry.subtitle)
+                }
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                searchResults = Array(results)
+            }
+        }
+    }
+
+    private var pendingRepositoryItemDeletionBinding: Binding<Bool> {
+        Binding(
+            get: { pendingRepositoryItemDeletion != nil },
+            set: { isPresented in
+                if !isPresented {
+                    pendingRepositoryItemDeletion = nil
+                }
+            }
+        )
+    }
+
     private func handleRepositoryEntry(_ entry: FileWorkspaceTreeEntry) {
+        contextMenuSelectionPath = nil
         if entry.isDirectory {
             toggleDirectory(entry.path)
             return
@@ -1977,6 +2760,154 @@ struct FileWorkspaceSidebarView: View {
             do {
                 _ = try await commandService.openFileTab(sessionID: sessionID, path: entry.path)
                 expandAncestors(of: entry.path)
+            } catch {
+                userMessage = UserMessage(title: "File could not be opened", detail: String(describing: error))
+            }
+        }
+    }
+
+    private func handleSearchResult(_ result: RepositorySearchResult) {
+        handleRepositoryFile(at: result.path)
+    }
+
+    private func repositoryItemContext(for entry: FileWorkspaceTreeEntry) -> RepositoryItemContext {
+        RepositoryItemContext(
+            path: entry.path,
+            relativePath: entry.relativePath,
+            isDirectory: entry.isDirectory
+        )
+    }
+
+    private func repositoryItemContext(for result: RepositorySearchResult) -> RepositoryItemContext? {
+        guard store.selectedProject != nil else { return nil }
+        return RepositoryItemContext(path: result.path, relativePath: result.subtitle, isDirectory: false)
+    }
+
+    @ViewBuilder
+    private func repositoryItemContextMenu(for item: RepositoryItemContext) -> some View {
+        let _ = markContextMenuSelection(item.path)
+        if item.isDirectory {
+            Button("Create File", systemImage: "doc.badge.plus") {
+                showCreateFilePrompt(in: item.path)
+                clearContextMenuSelection(item.path)
+            }
+        }
+        Button("Open in Finder", systemImage: "folder") {
+            revealInFinder(item.path)
+            clearContextMenuSelection(item.path)
+        }
+        .onAppear {
+            contextMenuSelectionPath = item.path
+        }
+        .onDisappear {
+            clearContextMenuSelection(item.path)
+        }
+        Button("Copy Path", systemImage: "doc.on.doc") {
+            copyToPasteboard(item.path)
+            clearContextMenuSelection(item.path)
+        }
+        Button("Copy Relative Path", systemImage: "doc.on.doc") {
+            copyToPasteboard(item.relativePath)
+            clearContextMenuSelection(item.path)
+        }
+        Button("Rename", systemImage: "pencil") {
+            showRenamePrompt(for: item)
+            clearContextMenuSelection(item.path)
+        }
+        Button("Delete", systemImage: "trash", role: .destructive) {
+            pendingRepositoryItemDeletion = item
+            clearContextMenuSelection(item.path)
+        }
+    }
+
+    @discardableResult
+    private func markContextMenuSelection(_ path: String) -> Bool {
+        DispatchQueue.main.async {
+            contextMenuSelectionPath = path
+        }
+        return true
+    }
+
+    private func clearContextMenuSelection(_ path: String) {
+        if contextMenuSelectionPath == path {
+            contextMenuSelectionPath = nil
+        }
+    }
+
+    private func revealInFinder(_ path: String) {
+        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+    }
+
+    private func copyToPasteboard(_ value: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(value, forType: .string)
+    }
+
+    private func showRenamePrompt(for item: RepositoryItemContext) {
+        repositoryRenameDraft = RepositoryItemRenameDraft(item: item)
+    }
+
+    private func renameRepositoryItem(from draft: RepositoryItemRenameDraft) async {
+        guard let project = store.selectedProject else { return }
+        let trimmedName = draft.updatedName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else {
+            userMessage = UserMessage(title: "Item could not be renamed", detail: "Enter a new name before saving.")
+            return
+        }
+
+        let destinationPath = URL(fileURLWithPath: draft.item.path)
+            .deletingLastPathComponent()
+            .appendingPathComponent(trimmedName, isDirectory: draft.item.isDirectory)
+            .path
+
+        if destinationPath == draft.item.path {
+            repositoryRenameDraft = nil
+            return
+        }
+
+        do {
+            try await commandService.renameWorkspaceItem(projectID: project.id, path: draft.item.path, to: destinationPath)
+            repositoryRenameDraft = nil
+            await loadRepositoryNodes()
+            expandAncestors(of: destinationPath)
+        } catch WorkspaceCommandError.dirtyFileTabCloseRejected {
+            userMessage = UserMessage(
+                title: "Item has unsaved file tabs",
+                detail: "Save or revert open files inside this item before renaming it."
+            )
+        } catch {
+            userMessage = UserMessage(title: "Item could not be renamed", detail: String(describing: error))
+        }
+    }
+
+    private func deleteRepositoryItem(_ item: RepositoryItemContext) async {
+        guard let project = store.selectedProject else { return }
+        pendingRepositoryItemDeletion = nil
+
+        do {
+            try await commandService.deleteWorkspaceItem(projectID: project.id, path: item.path)
+            await loadRepositoryNodes()
+        } catch WorkspaceCommandError.dirtyFileTabCloseRejected {
+            userMessage = UserMessage(
+                title: "Item has unsaved file tabs",
+                detail: "Save or revert open files inside this item before deleting it."
+            )
+        } catch {
+            userMessage = UserMessage(title: "Item could not be deleted", detail: String(describing: error))
+        }
+    }
+
+    private func handleRepositoryFile(at path: String) {
+        contextMenuSelectionPath = nil
+        guard let sessionID = store.selectedSessionID else {
+            userMessage = UserMessage(title: "Session required", detail: "Select a session before opening a file.")
+            return
+        }
+
+        Task {
+            do {
+                _ = try await commandService.openFileTab(sessionID: sessionID, path: path)
+                expandAncestors(of: path)
             } catch {
                 userMessage = UserMessage(title: "File could not be opened", detail: String(describing: error))
             }
@@ -2023,33 +2954,55 @@ struct FileWorkspaceSidebarView: View {
         repositoryEntries = (repositoryTreeIndex ?? WorkspaceFileTreeBuilder.makeIndex(projectRoot: project.path, nodes: repositoryNodes))
             .visibleEntries(expandedDirectoryPaths: expandedDirectoryPaths)
     }
+
+    private func createProjectItem(from draft: ProjectItemCreationDraft) async {
+        let trimmedRelativePath = draft.relativePath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedRelativePath.isEmpty else {
+            userMessage = UserMessage(title: draft.kind.failureTitle, detail: "Enter a relative path inside the selected project.")
+            return
+        }
+
+        let absolutePath = URL(fileURLWithPath: draft.projectRoot, isDirectory: true)
+            .appendingPathComponent(trimmedRelativePath, isDirectory: draft.kind == .folder)
+            .path
+
+        do {
+            switch draft.kind {
+            case .file:
+                let fileReference = try await fileAccessService.createTextFile(path: absolutePath, projectRoot: draft.projectRoot, contents: draft.initialContents)
+                creationDraft = nil
+                await loadRepositoryNodes()
+                expandAncestors(of: fileReference.path)
+                handleRepositoryFile(at: fileReference.path)
+            case .folder:
+                let directoryPath = try await fileAccessService.createDirectory(path: absolutePath, projectRoot: draft.projectRoot)
+                creationDraft = nil
+                await loadRepositoryNodes()
+                expandAncestors(of: directoryPath)
+            }
+        } catch {
+            userMessage = UserMessage(title: draft.kind.failureTitle, detail: String(describing: error))
+        }
+    }
 }
 
 struct FileWorkspaceSection<Content: View>: View {
     let title: String
     let systemImage: String
-    let trailingActionLabel: String?
-    let trailingActionSystemImage: String?
-    let trailingActionDisabled: Bool
-    let trailingAction: (() -> Void)?
+    let actions: [FileWorkspaceSectionAction]
     @ViewBuilder let content: Content
     @Environment(\.shellThemePalette) private var theme
+    @Environment(\.shellUIFontSize) private var uiFontSize
 
     init(
         title: String,
         systemImage: String,
-        trailingActionLabel: String? = nil,
-        trailingActionSystemImage: String? = nil,
-        trailingActionDisabled: Bool = false,
-        trailingAction: (() -> Void)? = nil,
+        actions: [FileWorkspaceSectionAction] = [],
         @ViewBuilder content: () -> Content
     ) {
         self.title = title
         self.systemImage = systemImage
-        self.trailingActionLabel = trailingActionLabel
-        self.trailingActionSystemImage = trailingActionSystemImage
-        self.trailingActionDisabled = trailingActionDisabled
-        self.trailingAction = trailingAction
+        self.actions = actions
         self.content = content()
     }
 
@@ -2057,17 +3010,22 @@ struct FileWorkspaceSection<Content: View>: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Label(title, systemImage: systemImage)
-                    .font(.caption.weight(.semibold))
+                    .font(.system(size: max(uiFontSize - 1, 10), weight: .semibold))
                     .foregroundStyle(theme.secondaryText.color)
                     .lineLimit(1)
+                    .truncationMode(.middle)
                 Spacer(minLength: 8)
-                if let trailingAction, let trailingActionSystemImage {
-                    Button(trailingActionLabel ?? title, systemImage: trailingActionSystemImage, action: trailingAction)
-                        .labelStyle(.iconOnly)
-                        .buttonStyle(.borderless)
-                        .foregroundStyle(theme.secondaryText.color)
-                        .disabled(trailingActionDisabled)
-                        .help(trailingActionLabel ?? "")
+                HStack(spacing: 4) {
+                    ForEach(actions) { action in
+                        Button(action.label, systemImage: action.systemImage, action: action.action)
+                            .labelStyle(.iconOnly)
+                            .buttonStyle(.borderless)
+                            .controlSize(.small)
+                            .foregroundStyle(theme.secondaryText.color)
+                            .frame(width: 24, height: 24)
+                            .disabled(action.isDisabled)
+                            .help(action.label)
+                    }
                 }
             }
             content
@@ -2076,10 +3034,20 @@ struct FileWorkspaceSection<Content: View>: View {
     }
 }
 
+struct FileWorkspaceSectionAction: Identifiable {
+    let label: String
+    let systemImage: String
+    let isDisabled: Bool
+    let action: () -> Void
+
+    var id: String { "\(label)-\(systemImage)" }
+}
+
 struct FileWorkingSetRow: View {
     let entry: FileWorkspaceWorkingSetEntry
     let action: () -> Void
     @Environment(\.shellThemePalette) private var theme
+    @Environment(\.shellUIFontSize) private var uiFontSize
 
     var body: some View {
         Button(action: action) {
@@ -2090,7 +3058,7 @@ struct FileWorkingSetRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 5) {
                         Text(entry.title)
-                            .font(.subheadline.weight(.semibold))
+                            .font(.system(size: uiFontSize, weight: .semibold))
                             .foregroundStyle(theme.primaryText.color)
                             .lineLimit(1)
                         if entry.isDirty {
@@ -2101,7 +3069,7 @@ struct FileWorkingSetRow: View {
                     }
                     if !entry.subtitle.isEmpty {
                         Text(entry.subtitle)
-                            .font(.caption.monospaced())
+                            .font(.system(size: max(uiFontSize - 2, 10), design: .monospaced))
                             .foregroundStyle(theme.mutedText.color)
                             .lineLimit(1)
                     }
@@ -2124,8 +3092,11 @@ struct FileWorkingSetRow: View {
 
 struct RepositoryTreeRow: View {
     let entry: FileWorkspaceTreeEntry
+    let isHighlighted: Bool
     let action: () -> Void
     @Environment(\.shellThemePalette) private var theme
+    @Environment(\.shellUIFontSize) private var uiFontSize
+    @State private var isHovered = false
 
     var body: some View {
         Button(action: action) {
@@ -2146,7 +3117,7 @@ struct RepositoryTreeRow: View {
                         .frame(width: 16)
                 }
                 Text(entry.name)
-                    .font(.caption)
+                    .font(.system(size: max(uiFontSize - 1, 10)))
                     .foregroundStyle(theme.primaryText.color)
                     .lineLimit(1)
                 Spacer(minLength: 4)
@@ -2156,19 +3127,105 @@ struct RepositoryTreeRow: View {
             .padding(.vertical, 4)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
+            .background(
+                rowBackground,
+                in: RoundedRectangle(cornerRadius: 6)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(isHighlighted ? theme.activeBorder.color.opacity(0.9) : Color.clear, lineWidth: 1)
+            }
         }
         .buttonStyle(.plain)
         .help(entry.path)
+        .onHover { isHovered = $0 }
+    }
+
+    private var rowBackground: Color {
+        if isHighlighted {
+            return theme.activeBackground.color.opacity(0.24)
+        }
+
+        if isHovered {
+            return theme.elevatedBackground.color.opacity(0.52)
+        }
+
+        return .clear
+    }
+}
+
+struct RepositorySearchResult: Identifiable, Equatable {
+    let path: String
+    let title: String
+    let subtitle: String
+
+    var id: String { path }
+}
+
+struct RepositorySearchResultRow: View {
+    let result: RepositorySearchResult
+    let isHighlighted: Bool
+    let action: () -> Void
+    @Environment(\.shellThemePalette) private var theme
+    @Environment(\.shellUIFontSize) private var uiFontSize
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: "doc.text")
+                    .foregroundStyle(theme.accent.color)
+                    .frame(width: 16)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(result.title)
+                        .font(.system(size: max(uiFontSize - 1, 10), weight: .semibold))
+                        .foregroundStyle(theme.primaryText.color)
+                        .lineLimit(1)
+                    Text(result.subtitle)
+                        .font(.system(size: max(uiFontSize - 2, 10), design: .monospaced))
+                        .foregroundStyle(theme.mutedText.color)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 6)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                rowBackground,
+                in: RoundedRectangle(cornerRadius: 6)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(isHighlighted ? theme.activeBorder.color.opacity(0.9) : Color.clear, lineWidth: 1)
+            }
+        }
+        .buttonStyle(.plain)
+        .help(result.path)
+        .onHover { isHovered = $0 }
+    }
+
+    private var rowBackground: Color {
+        if isHighlighted {
+            return theme.activeBackground.color.opacity(0.28)
+        }
+
+        if isHovered {
+            return theme.elevatedBackground.color.opacity(0.68)
+        }
+
+        return theme.elevatedBackground.color.opacity(0.5)
     }
 }
 
 struct FileWorkspaceInlineEmptyState: View {
     let title: String
     @Environment(\.shellThemePalette) private var theme
+    @Environment(\.shellUIFontSize) private var uiFontSize
 
     var body: some View {
         Text(title)
-            .font(.caption)
+            .font(.system(size: max(uiFontSize - 1, 10)))
             .foregroundStyle(theme.mutedText.color)
             .padding(.horizontal, 8)
             .padding(.vertical, 7)
@@ -2198,6 +3255,34 @@ private extension LanguageConfiguration {
             return .atelierTypeScript()
         case "json":
             return .atelierJSON()
+        case "markdown":
+            return .atelierMarkdown()
+        case "java":
+            return .atelierJava()
+        case "kotlin", "kts":
+            return .atelierKotlin()
+        case "rust":
+            return .atelierRust()
+        case "go":
+            return .atelierGo()
+        case "ocaml":
+            return .atelierOCaml()
+        case "reasonml":
+            return .atelierReasonML()
+        case "rescript":
+            return .atelierReScript()
+        case "opam":
+            return .atelierOPAM()
+        case "maven":
+            return .atelierMaven()
+        case "makefile":
+            return .atelierMakefile()
+        case "xml":
+            return .atelierXML()
+        case "yaml":
+            return .atelierYAML()
+        case "shell":
+            return .atelierShell()
         default:
             return .none
         }
@@ -2279,16 +3364,17 @@ struct SidebarHeader: View {
     let systemImage: String
     let action: () -> Void
     @Environment(\.shellThemePalette) private var theme
+    @Environment(\.shellUIFontSize) private var uiFontSize
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
-                    .font(.title3.weight(.bold))
+                    .font(.system(size: uiFontSize + 5, weight: .bold))
                     .foregroundStyle(theme.primaryText.color)
                     .lineLimit(1)
                 Text(subtitle)
-                    .font(.caption)
+                    .font(.system(size: max(uiFontSize - 2, 10)))
                     .foregroundStyle(theme.mutedText.color)
                     .lineLimit(2)
             }
@@ -2301,7 +3387,7 @@ struct SidebarHeader: View {
         }
         .padding(.horizontal, 16)
         .padding(.top, 0)
-        .padding(.bottom, 10)
+        .padding(.bottom, 6)
         .background(theme.tabBarBackground.color)
     }
 }
@@ -2313,6 +3399,7 @@ struct EmptyStateView: View {
     var actionTitle: String?
     var action: (() -> Void)?
     @Environment(\.shellThemePalette) private var theme
+    @Environment(\.shellUIFontSize) private var uiFontSize
 
     var body: some View {
         VStack(spacing: 14) {
@@ -2320,10 +3407,10 @@ struct EmptyStateView: View {
                 .font(.system(size: 34))
                 .foregroundStyle(theme.accent.color)
             Text(title)
-                .font(.headline)
+                .font(.system(size: uiFontSize + 2, weight: .semibold))
                 .foregroundStyle(theme.primaryText.color)
             Text(message)
-                .font(.callout)
+                .font(.system(size: uiFontSize))
                 .foregroundStyle(theme.secondaryText.color)
                 .multilineTextAlignment(.center)
             if let actionTitle, let action {
@@ -2344,6 +3431,248 @@ struct SessionRenameDraft: Identifiable, Equatable {
     init(session: WorkspaceSession) {
         id = session.id
         title = session.title
+    }
+}
+
+struct TabRenameDraft: Identifiable, Equatable {
+    let id: UUID
+    let currentTitle: String
+    let placeholderTitle: String
+
+    init(tab: WorkspaceTab) {
+        id = tab.id
+        currentTitle = tab.title ?? ""
+        if tab.kind == .file, let filePath = tab.fileReference?.path {
+            let fileName = URL(fileURLWithPath: filePath).lastPathComponent
+            placeholderTitle = fileName.isEmpty ? filePath : fileName
+        } else if let command = tab.launchCommand?.trimmingCharacters(in: .whitespacesAndNewlines), !command.isEmpty {
+            let executableName = URL(fileURLWithPath: command).lastPathComponent.lowercased()
+            switch executableName {
+            case "codex":
+                placeholderTitle = "Codex"
+            case "claude":
+                placeholderTitle = "Claude"
+            case "opencode":
+                placeholderTitle = "OpenCode"
+            default:
+                placeholderTitle = executableName
+                    .replacingOccurrences(of: "-", with: " ")
+                    .replacingOccurrences(of: "_", with: " ")
+                    .capitalized
+            }
+        } else {
+            placeholderTitle = "Terminal"
+        }
+    }
+}
+
+enum ProjectItemKind: String, Identifiable {
+    case file
+    case folder
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .file:
+            return "Create File"
+        case .folder:
+            return "Create Folder"
+        }
+    }
+
+    var failureTitle: String {
+        switch self {
+        case .file:
+            return "File could not be created"
+        case .folder:
+            return "Folder could not be created"
+        }
+    }
+
+    var relativePathPlaceholder: String {
+        switch self {
+        case .file:
+            return "src/NewFile.swift"
+        case .folder:
+            return "src/NewFolder"
+        }
+    }
+}
+
+struct ProjectItemCreationDraft: Identifiable, Equatable {
+    let id = UUID()
+    let projectRoot: String
+    let kind: ProjectItemKind
+    var relativePath: String = ""
+    var initialContents: String = ""
+}
+
+struct ProjectItemCreationView: View {
+    @State private var draft: ProjectItemCreationDraft
+    @State private var fileName: String
+    let onSave: (ProjectItemCreationDraft) -> Void
+    let onCancel: () -> Void
+    @Environment(\.shellThemePalette) private var theme
+    @FocusState private var focusedField: Bool
+
+    init(draft: ProjectItemCreationDraft, onSave: @escaping (ProjectItemCreationDraft) -> Void, onCancel: @escaping () -> Void) {
+        _draft = State(initialValue: draft)
+        _fileName = State(initialValue: Self.initialFileName(for: draft))
+        self.onSave = onSave
+        self.onCancel = onCancel
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(draft.kind.title)
+                .font(.title2.weight(.semibold))
+                .foregroundStyle(theme.primaryText.color)
+            Text("Create a new item inside the selected project.")
+                .foregroundStyle(theme.secondaryText.color)
+            if draft.kind == .file {
+                if !fileParentRelativePath.isEmpty {
+                    Text("Create inside: \(fileParentRelativePath)")
+                        .font(.caption.monospaced())
+                        .foregroundStyle(theme.mutedText.color)
+                        .textSelection(.enabled)
+                }
+                TextField("NewFile.swift", text: $fileName)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($focusedField)
+            } else {
+                TextField(draft.kind.relativePathPlaceholder, text: $draft.relativePath)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($focusedField)
+            }
+            HStack {
+                Spacer()
+                Button("Cancel", action: onCancel)
+                    .keyboardShortcut(.cancelAction)
+                Button("Create") {
+                    onSave(resolvedDraft())
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(24)
+        .frame(width: 460)
+        .background(theme.elevatedBackground.color)
+        .onAppear { focusedField = true }
+    }
+
+    private var fileParentRelativePath: String {
+        let normalized = draft.relativePath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return "" }
+        if normalized.hasSuffix("/") {
+            return String(normalized.dropLast())
+        }
+
+        let parent = (normalized as NSString).deletingLastPathComponent
+        return parent == "." ? "" : parent
+    }
+
+    private func resolvedDraft() -> ProjectItemCreationDraft {
+        guard draft.kind == .file else { return draft }
+        var updatedDraft = draft
+        let trimmedName = fileName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if fileParentRelativePath.isEmpty {
+            updatedDraft.relativePath = trimmedName
+        } else {
+            updatedDraft.relativePath = "\(fileParentRelativePath)/\(trimmedName)"
+        }
+        return updatedDraft
+    }
+
+    private static func initialFileName(for draft: ProjectItemCreationDraft) -> String {
+        guard draft.kind == .file else { return "" }
+        let normalized = draft.relativePath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty, !normalized.hasSuffix("/") else { return "" }
+        let name = (normalized as NSString).lastPathComponent
+        return name == "/" ? "" : name
+    }
+}
+
+private struct RepositorySearchIndexEntry: Sendable {
+    let path: String
+    let title: String
+    let subtitle: String
+    let normalizedTitle: String
+    let normalizedSubtitle: String
+}
+
+private struct RepositoryItemContext: Identifiable, Equatable {
+    let path: String
+    let relativePath: String
+    let isDirectory: Bool
+
+    var id: String { path }
+
+    var displayName: String {
+        URL(fileURLWithPath: path).lastPathComponent
+    }
+}
+
+private struct RepositoryItemRenameDraft: Identifiable, Equatable {
+    let item: RepositoryItemContext
+    var updatedName: String
+
+    var id: String { item.id }
+
+    init(item: RepositoryItemContext) {
+        self.item = item
+        updatedName = item.displayName
+    }
+}
+
+private struct RepositoryItemRenameView: View {
+    @State private var draft: RepositoryItemRenameDraft
+    let onSave: (RepositoryItemRenameDraft) -> Void
+    let onCancel: () -> Void
+    @Environment(\.shellThemePalette) private var theme
+    @FocusState private var focusedField: Bool
+
+    init(
+        draft: RepositoryItemRenameDraft,
+        onSave: @escaping (RepositoryItemRenameDraft) -> Void,
+        onCancel: @escaping () -> Void
+    ) {
+        _draft = State(initialValue: draft)
+        self.onSave = onSave
+        self.onCancel = onCancel
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Rename \(draft.item.isDirectory ? "Folder" : "File")")
+                .font(.title2.weight(.semibold))
+                .foregroundStyle(theme.primaryText.color)
+            Text(draft.item.relativePath)
+                .font(.caption.monospaced())
+                .foregroundStyle(theme.mutedText.color)
+                .textSelection(.enabled)
+            TextField("New name", text: $draft.updatedName)
+                .textFieldStyle(.roundedBorder)
+                .focused($focusedField)
+                .onSubmit {
+                    onSave(draft)
+                }
+            HStack {
+                Spacer()
+                Button("Cancel", action: onCancel)
+                    .keyboardShortcut(.cancelAction)
+                Button("Rename") {
+                    onSave(draft)
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(24)
+        .frame(width: 460)
+        .background(theme.elevatedBackground.color)
+        .onAppear { focusedField = true }
     }
 }
 

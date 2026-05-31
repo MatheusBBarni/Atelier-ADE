@@ -11,7 +11,11 @@ struct AppCommandRegistryTests {
             .openProjectSelector,
             .newPlainTab,
             .newDefaultAgentTab,
+            .newAgentTabWithProfile,
             .closeSelectedTab,
+            .renameSelectedSession,
+            .renameSelectedTab,
+            .deleteSelectedSession,
             .previousTab,
             .nextTab,
             .previousSession,
@@ -29,7 +33,11 @@ struct AppCommandRegistryTests {
         #expect(defaults[.openProjectSelector] == KeybindingOverride(commandID: .openProjectSelector, keyEquivalent: "o"))
         #expect(defaults[.newPlainTab] == KeybindingOverride(commandID: .newPlainTab, keyEquivalent: "t"))
         #expect(defaults[.newDefaultAgentTab] == KeybindingOverride(commandID: .newDefaultAgentTab, keyEquivalent: "t", modifiers: [.command, .shift]))
+        #expect(defaults[.newAgentTabWithProfile] == KeybindingOverride(commandID: .newAgentTabWithProfile, keyEquivalent: "p", modifiers: [.command, .shift]))
         #expect(defaults[.closeSelectedTab] == KeybindingOverride(commandID: .closeSelectedTab, keyEquivalent: "w"))
+        #expect(defaults[.renameSelectedSession] == KeybindingOverride(commandID: .renameSelectedSession, keyEquivalent: "r"))
+        #expect(defaults[.renameSelectedTab] == KeybindingOverride(commandID: .renameSelectedTab, keyEquivalent: "r", modifiers: [.command, .shift]))
+        #expect(defaults[.deleteSelectedSession] == KeybindingOverride(commandID: .deleteSelectedSession, keyEquivalent: "w", modifiers: [.command, .shift]))
         #expect(defaults[.previousTab] == KeybindingOverride(commandID: .previousTab, keyEquivalent: "["))
         #expect(defaults[.nextTab] == KeybindingOverride(commandID: .nextTab, keyEquivalent: "]"))
         #expect(defaults[.previousSession] == KeybindingOverride(commandID: .previousSession, keyEquivalent: "upArrow"))

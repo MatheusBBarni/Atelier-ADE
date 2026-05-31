@@ -3,11 +3,13 @@ import Foundation
 public struct AppPreferences: Equatable, Sendable {
     public static let fixedID = 1
     public static let defaultThemeID = AppTheme.defaultID
+    public static let defaultTerminalFontSize: Double = 13
     public static let supportedThemeIDs: Set<String> = AppTheme.supportedIDs
 
     public var id: Int
     public var themeID: String
     public var defaultSessionShortcutID: UUID?
+    public var terminalFontSize: Double
     public var keybindings: [AppCommandID: KeybindingOverride]
     public var updatedAt: Date
 
@@ -15,12 +17,14 @@ public struct AppPreferences: Equatable, Sendable {
         id: Int = Self.fixedID,
         themeID: String = Self.defaultThemeID,
         defaultSessionShortcutID: UUID? = nil,
+        terminalFontSize: Double = Self.defaultTerminalFontSize,
         keybindings: [AppCommandID: KeybindingOverride] = [:],
         updatedAt: Date = Date(timeIntervalSince1970: 0)
     ) {
         self.id = id
         self.themeID = themeID
         self.defaultSessionShortcutID = defaultSessionShortcutID
+        self.terminalFontSize = terminalFontSize
         self.keybindings = keybindings
         self.updatedAt = updatedAt
     }
@@ -75,7 +79,11 @@ public enum AppCommandID: String, CaseIterable, Codable, Hashable, Sendable {
     case openProjectSelector
     case newPlainTab
     case newDefaultAgentTab
+    case newAgentTabWithProfile
     case closeSelectedTab
+    case renameSelectedSession
+    case renameSelectedTab
+    case deleteSelectedSession
     case previousTab
     case nextTab
     case previousSession

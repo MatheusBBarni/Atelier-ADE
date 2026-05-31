@@ -15,7 +15,8 @@ struct SQLiteWorkspaceMetadataStoreTests {
 
         #expect(tables == WorkspaceMigrations.metadataTables)
         #expect(try inspectColumnNames(path: path, tableName: "session_shortcuts").contains("has_user_override"))
-        #expect(try inspectColumnNames(path: path, tableName: "tabs").isSuperset(of: ["kind", "file_path"]))
+        #expect(try inspectColumnNames(path: path, tableName: "tabs").isSuperset(of: ["kind", "file_path", "title"]))
+        #expect(try inspectColumnNames(path: path, tableName: "app_preferences").contains("terminal_font_size"))
         #expect(try inspectUserVersion(path: path) == WorkspaceMigrations.currentUserVersion)
         #expect(try inspectAppPreferencesRowCount(path: path) == 1)
         #expect(preferences == .defaults)
@@ -103,6 +104,7 @@ struct SQLiteWorkspaceMetadataStoreTests {
             id: secondTabID,
             sessionID: newerSessionID,
             workingDirectory: project.path,
+            title: "Review",
             launchCommand: "codex",
             launchArgumentsJSON: "[\"resume\"]",
             ordinal: 1,
@@ -148,6 +150,7 @@ struct SQLiteWorkspaceMetadataStoreTests {
         #expect(loadedTabs.map(\.id) == [firstTabID, secondTabID])
         #expect(loadedTabs.first?.workingDirectory == project.path)
         #expect(loadedTabs.first?.ordinal == 0)
+        #expect(loadedTabs.last?.title == "Review")
         #expect(loadedTabs.last?.launchCommand == "codex")
         #expect(loadedTabs.last?.launchArgumentsJSON == "[\"resume\"]")
         #expect(loadedShortcuts == [shortcut])
@@ -245,10 +248,11 @@ struct SQLiteWorkspaceMetadataStoreTests {
 
         let store = try SQLiteWorkspaceMetadataStore(path: path)
 
-        #expect(try inspectUserVersion(path: path) == 2)
+        #expect(try inspectUserVersion(path: path) == WorkspaceMigrations.currentUserVersion)
         #expect(try inspectUserTableNames(path: path) == WorkspaceMigrations.metadataTables)
         #expect(try inspectColumnNames(path: path, tableName: "session_shortcuts").contains("has_user_override"))
-        #expect(try inspectColumnNames(path: path, tableName: "tabs").isSuperset(of: ["kind", "file_path"]))
+        #expect(try inspectColumnNames(path: path, tableName: "tabs").isSuperset(of: ["kind", "file_path", "title"]))
+        #expect(try inspectColumnNames(path: path, tableName: "app_preferences").contains("terminal_font_size"))
         #expect(try inspectAppPreferencesRowCount(path: path) == 1)
         #expect(try await store.loadProjects() == [fixture.project])
         #expect(try await store.loadSessions() == [fixture.session])
@@ -279,9 +283,11 @@ struct SQLiteWorkspaceMetadataStoreTests {
         let store = try SQLiteWorkspaceMetadataStore(path: path)
 
         #expect(try inspectUserVersion(path: path) == WorkspaceMigrations.currentUserVersion)
-        #expect(try inspectColumnNames(path: path, tableName: "tabs").isSuperset(of: ["kind", "file_path"]))
+        #expect(try inspectColumnNames(path: path, tableName: "tabs").isSuperset(of: ["kind", "file_path", "title"]))
+        #expect(try inspectColumnNames(path: path, tableName: "app_preferences").contains("terminal_font_size"))
         #expect(try await store.loadTabs() == [fixture.tab])
         #expect(try await store.loadRestoreSnapshot() == fixture.restoreSnapshot)
+        #expect(try await store.loadAppPreferences().terminalFontSize == AppPreferences.defaultTerminalFontSize)
     }
 
     @Test
@@ -317,6 +323,7 @@ struct SQLiteWorkspaceMetadataStoreTests {
         let nilDefaultPreferences = AppPreferences(
             themeID: "dracula",
             defaultSessionShortcutID: nil,
+            terminalFontSize: 15,
             keybindings: [
                 .previousTab: KeybindingOverride(commandID: .previousTab, keyEquivalent: "leftArrow", modifiers: [.command, .option])
             ],
@@ -336,6 +343,7 @@ struct SQLiteWorkspaceMetadataStoreTests {
         let nonNilDefaultPreferences = AppPreferences(
             themeID: "onedark",
             defaultSessionShortcutID: shortcut.id,
+            terminalFontSize: 17,
             keybindings: [
                 .openSettings: KeybindingOverride(commandID: .openSettings, keyEquivalent: ",", modifiers: [.command, .shift]),
                 .zoomOutTerminal: KeybindingOverride(commandID: .zoomOutTerminal, keyEquivalent: "-", modifiers: [.command])

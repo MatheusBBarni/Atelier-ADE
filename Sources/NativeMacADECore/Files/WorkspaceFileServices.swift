@@ -94,6 +94,57 @@ private enum LocalWorkspaceFileIO {
         }
     }
 
+    static func createDirectory(at path: String, projectRoot: String) throws {
+        try ensure(path, isContainedBy: projectRoot)
+        do {
+            try FileManager.default.createDirectory(
+                at: URL(fileURLWithPath: path, isDirectory: true),
+                withIntermediateDirectories: true
+            )
+        } catch {
+            throw WorkspaceFileAccessError.writeFailed(path: path, reason: String(describing: error))
+        }
+    }
+
+    static func createTextFile(_ text: String, at path: String, projectRoot: String) throws {
+        try ensure(path, isContainedBy: projectRoot)
+        let directoryURL = URL(fileURLWithPath: path).deletingLastPathComponent()
+        do {
+            try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+            try Data(text.utf8).write(to: URL(fileURLWithPath: path), options: [.atomic])
+        } catch {
+            throw WorkspaceFileAccessError.writeFailed(path: path, reason: String(describing: error))
+        }
+    }
+
+    static func renameItem(from sourcePath: String, to destinationPath: String, projectRoot: String) throws {
+        try ensure(sourcePath, isContainedBy: projectRoot)
+        try ensure(destinationPath, isContainedBy: projectRoot)
+        guard FileManager.default.fileExists(atPath: sourcePath) else {
+            throw WorkspaceFileAccessError.unreadableFile(sourcePath)
+        }
+        do {
+            try FileManager.default.moveItem(
+                at: URL(fileURLWithPath: sourcePath),
+                to: URL(fileURLWithPath: destinationPath)
+            )
+        } catch {
+            throw WorkspaceFileAccessError.writeFailed(path: destinationPath, reason: String(describing: error))
+        }
+    }
+
+    static func deleteItem(at path: String, projectRoot: String) throws {
+        try ensure(path, isContainedBy: projectRoot)
+        guard FileManager.default.fileExists(atPath: path) else {
+            throw WorkspaceFileAccessError.unreadableFile(path)
+        }
+        do {
+            try FileManager.default.removeItem(at: URL(fileURLWithPath: path))
+        } catch {
+            throw WorkspaceFileAccessError.writeFailed(path: path, reason: String(describing: error))
+        }
+    }
+
     private static func ensure(_ path: String, isContainedBy projectRoot: String) throws {
         guard path != projectRoot else {
             throw WorkspaceFileAccessError.filePathOutsideProject(filePath: path, projectRoot: projectRoot)
@@ -111,6 +162,10 @@ public protocol WorkspaceFileAccessing: AnyObject {
     func enumerateProjectFiles(projectRoot: String) async throws -> [WorkspaceFileNode]
     func loadTextFile(_ reference: WorkspaceFileReference) async throws -> String
     func saveTextFile(_ text: String, to reference: WorkspaceFileReference) async throws
+    func createDirectory(path: String, projectRoot: String) async throws -> String
+    func createTextFile(path: String, projectRoot: String, contents: String) async throws -> WorkspaceFileReference
+    func renameItem(path: String, to destinationPath: String, projectRoot: String) async throws -> WorkspaceFileReference
+    func deleteItem(path: String, projectRoot: String) async throws
 }
 
 @MainActor
@@ -124,6 +179,7 @@ public protocol WorkspaceFileBufferManaging: AnyObject {
     func saveBuffer(tabID: UUID) async throws
     func revertBuffer(for tab: WorkspaceTab) async throws
     func discardBuffer(tabID: UUID)
+    func updateBufferFileReference(tabID: UUID, fileReference: WorkspaceFileReference)
 }
 
 @MainActor
@@ -218,6 +274,46 @@ public final class LocalWorkspaceFileAccess: WorkspaceFileAccessing {
 
         try await Task.detached(priority: .userInitiated) {
             try LocalWorkspaceFileIO.saveTextFile(text, to: validatedReference.path)
+        }.value
+    }
+
+    public func createDirectory(path: String, projectRoot: String) async throws -> String {
+        let root = try validatedProjectRoot(projectRoot)
+        let directoryPath = try standardizedAbsolutePath(path, isDirectory: true)
+        try await Task.detached(priority: .userInitiated) {
+            try LocalWorkspaceFileIO.createDirectory(at: directoryPath, projectRoot: root)
+        }.value
+        return directoryPath
+    }
+
+    public func createTextFile(path: String, projectRoot: String, contents: String = "") async throws -> WorkspaceFileReference {
+        let root = try validatedProjectRoot(projectRoot)
+        let filePath = try standardizedAbsolutePath(path)
+        try await Task.detached(priority: .userInitiated) {
+            try LocalWorkspaceFileIO.createTextFile(contents, at: filePath, projectRoot: root)
+        }.value
+        return try await validatedFileReference(path: filePath, projectRoot: root)
+    }
+
+    public func renameItem(path: String, to destinationPath: String, projectRoot: String) async throws -> WorkspaceFileReference {
+        let root = try validatedProjectRoot(projectRoot)
+        let sourcePath = try standardizedAbsolutePath(path)
+        let resolvedDestinationPath = try standardizedAbsolutePath(destinationPath)
+        try await Task.detached(priority: .userInitiated) {
+            try LocalWorkspaceFileIO.renameItem(
+                from: sourcePath,
+                to: resolvedDestinationPath,
+                projectRoot: root
+            )
+        }.value
+        return WorkspaceFileReference(path: resolvedDestinationPath, projectRoot: root)
+    }
+
+    public func deleteItem(path: String, projectRoot: String) async throws {
+        let root = try validatedProjectRoot(projectRoot)
+        let itemPath = try standardizedAbsolutePath(path)
+        try await Task.detached(priority: .userInitiated) {
+            try LocalWorkspaceFileIO.deleteItem(at: itemPath, projectRoot: root)
         }.value
     }
 
@@ -341,6 +437,13 @@ public final class WorkspaceFileBufferController: WorkspaceFileBufferManaging {
         buffersByTabID[tabID] = nil
     }
 
+    public func updateBufferFileReference(tabID: UUID, fileReference: WorkspaceFileReference) {
+        guard var buffer = buffersByTabID[tabID] else { return }
+        buffer.fileReference = fileReference
+        buffer.languageConfigurationKey = Self.languageConfigurationKey(forPath: fileReference.path)
+        buffersByTabID[tabID] = buffer
+    }
+
     private func requireFileReference(for tab: WorkspaceTab) throws -> WorkspaceFileReference {
         guard tab.kind == .file else {
             throw WorkspaceFileBufferError.invalidFileTab(tab.id, "Terminal tabs do not have file buffers")
@@ -352,7 +455,19 @@ public final class WorkspaceFileBufferController: WorkspaceFileBufferManaging {
     }
 
     nonisolated public static func languageConfigurationKey(forPath path: String) -> String {
-        switch URL(fileURLWithPath: path).pathExtension.lowercased() {
+        let url = URL(fileURLWithPath: path)
+        let fileName = url.lastPathComponent.lowercased()
+        let pathExtension = url.pathExtension.lowercased()
+
+        if fileName == "pom.xml" {
+            return "maven"
+        }
+
+        if fileName == "makefile" {
+            return "makefile"
+        }
+
+        switch pathExtension {
         case "swift":
             return "swift"
         case "sql", "sqlite":
@@ -369,6 +484,10 @@ public final class WorkspaceFileBufferController: WorkspaceFileBufferManaging {
             return "javascript"
         case "ts", "tsx":
             return "typescript"
+        case "kt":
+            return "kotlin"
+        case "kts":
+            return "kts"
         case "json":
             return "json"
         case "md", "markdown":
@@ -383,6 +502,16 @@ public final class WorkspaceFileBufferController: WorkspaceFileBufferManaging {
             return "go"
         case "java":
             return "java"
+        case "ml", "mli":
+            return "ocaml"
+        case "re", "rei":
+            return "reasonml"
+        case "res", "resi":
+            return "rescript"
+        case "opam":
+            return "opam"
+        case "xml":
+            return "xml"
         case "c", "h":
             return "c"
         case "cc", "cpp", "cxx", "hpp", "hh":

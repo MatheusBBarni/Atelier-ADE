@@ -7,15 +7,20 @@ struct ConfigModalAppearanceAndShortcutsSection: View {
 
     @Environment(\.shellThemePalette) private var theme
     @State private var themeDraftID = AppTheme.defaultID
+    @State private var terminalFontSizeDraft = AppPreferences.defaultTerminalFontSize
     @State private var shortcutDrafts: [AppCommandID: KeybindingOverride] = [:]
     @State private var feedback: SettingsSectionFeedback?
-    @State private var isSavingTheme = false
+    @State private var isSavingAppearance = false
     @State private var isSavingShortcuts = false
+    @State private var isSyncingAppearanceDrafts = false
+    @State private var appearanceSaveTask: Task<Void, Never>?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
             if let feedback {
-                SettingsSectionFeedbackView(feedback: feedback)
+                SettingsSectionFeedbackView(feedback: feedback) {
+                    self.feedback = nil
+                }
             }
 
             appearanceSection
@@ -30,6 +35,12 @@ struct ConfigModalAppearanceAndShortcutsSection: View {
         .onChange(of: store.appPreferences) { _, _ in
             syncDraftsFromStore()
         }
+        .onChange(of: themeDraftID) { _, _ in
+            persistAppearanceIfNeeded()
+        }
+        .onChange(of: terminalFontSizeDraft) { _, _ in
+            persistAppearanceIfNeeded()
+        }
     }
 
     private var appearanceSection: some View {
@@ -37,48 +48,55 @@ struct ConfigModalAppearanceAndShortcutsSection: View {
             sectionHeader(
                 title: "Appearance",
                 systemImage: "paintpalette",
-                detail: "Theme changes update the app shell and terminal surfaces after saving."
+                detail: "Theme updates the app shell and terminal surfaces immediately. Font size updates the app shell and file editor immediately."
             )
 
             VStack(alignment: .leading, spacing: 14) {
-                themeGroup(title: "Dark Themes", themes: darkThemes)
-                themeGroup(title: "Light Themes", themes: lightThemes)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Font Size")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(theme.secondaryText.color)
 
-                Divider().overlay(theme.border.color.opacity(0.72))
+                    HStack(spacing: 10) {
+                        TextField(
+                            "13",
+                            value: $terminalFontSizeDraft,
+                            format: .number.precision(.fractionLength(0))
+                        )
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 72)
+                        .disabled(isSavingAppearance)
 
-                HStack(alignment: .center, spacing: 14) {
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text("Selected: \(selectedTheme.displayName)")
-                            .font(.callout.weight(.semibold))
-                            .foregroundStyle(theme.primaryText.color)
-                        Text("Current: \(store.activeTheme.displayName)")
+                        Stepper("", value: $terminalFontSizeDraft, in: 11 ... 24, step: 1)
+                            .labelsHidden()
+                            .disabled(isSavingAppearance)
+
+                        Text("Applies to the app shell and file editor.")
                             .font(.caption)
-                            .foregroundStyle(theme.secondaryText.color)
-                        Text(terminalAppearanceSummary(for: selectedTheme))
-                            .font(.caption.monospaced())
                             .foregroundStyle(theme.mutedText.color)
-                            .lineLimit(1)
                     }
+                }
 
-                    Spacer(minLength: 12)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Theme")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(theme.secondaryText.color)
 
-                    Button {
-                        Task { await saveTheme(themeDraftID) }
-                    } label: {
-                        Label("Save Theme", systemImage: "checkmark")
+                    Picker("Theme", selection: $themeDraftID) {
+                        Section("Dark") {
+                            ForEach(darkThemes) { option in
+                                Text(option.displayName).tag(option.id)
+                            }
+                        }
+
+                        Section("Light") {
+                            ForEach(lightThemes) { option in
+                                Text(option.displayName).tag(option.id)
+                            }
+                        }
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                    .disabled(isSavingTheme || themeDraftID == store.appPreferences.themeID)
-
-                    Button {
-                        Task { await saveTheme(AppTheme.defaultID) }
-                    } label: {
-                        Label("Reset Theme", systemImage: "arrow.counterclockwise")
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .disabled(isSavingTheme || store.appPreferences.themeID == AppTheme.defaultID)
+                    .pickerStyle(.menu)
+                    .disabled(isSavingAppearance)
                 }
             }
             .padding(12)
@@ -160,73 +178,6 @@ struct ConfigModalAppearanceAndShortcutsSection: View {
         AppTheme.catalog.filter { $0.colorScheme == .light }
     }
 
-    private func themeGroup(title: String, themes: [AppTheme]) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(theme.secondaryText.color)
-
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 170), spacing: 10)], spacing: 10) {
-                ForEach(themes) { option in
-                    themeOptionCard(option)
-                }
-            }
-        }
-    }
-
-    private func themeOptionCard(_ option: AppTheme) -> some View {
-        let isSelected = themeDraftID == option.id
-        let swatches = [
-            option.shellPalette.shellBackground,
-            option.shellPalette.elevatedBackground,
-            option.shellPalette.accent,
-            option.shellPalette.primaryText
-        ]
-
-        return Button {
-            themeDraftID = option.id
-        } label: {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(alignment: .top, spacing: 8) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(option.displayName)
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(option.shellPalette.primaryText.color)
-                            .multilineTextAlignment(.leading)
-                        Text(option.colorScheme == .dark ? "Dark" : "Light")
-                            .font(.caption)
-                            .foregroundStyle(option.shellPalette.mutedText.color)
-                    }
-                    Spacer(minLength: 8)
-                    if option.id == store.appPreferences.themeID {
-                        ShortcutStateBadge(title: "Current", tint: theme.secondaryAccent.color)
-                    }
-                }
-
-                HStack(spacing: 8) {
-                    ForEach(Array(swatches.enumerated()), id: \.offset) { swatchInfo in
-                        RoundedRectangle(cornerRadius: 5)
-                            .fill(swatchInfo.element.color)
-                            .frame(height: 18)
-                            .overlay {
-                                RoundedRectangle(cornerRadius: 5)
-                                    .stroke(theme.border.color.opacity(0.5), lineWidth: 1)
-                            }
-                    }
-                }
-            }
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(option.shellPalette.contentBackground.color.opacity(0.9), in: RoundedRectangle(cornerRadius: 10))
-            .overlay {
-                RoundedRectangle(cornerRadius: 10)
-                    .stroke(isSelected ? theme.activeBorder.color : theme.border.color.opacity(0.68), lineWidth: isSelected ? 2 : 1)
-            }
-        }
-        .buttonStyle(.plain)
-        .disabled(isSavingTheme)
-    }
-
     private var hasShortcutDraftChanges: Bool {
         AppCommandRegistry.managedCommandIDs.contains { commandID in
             draftKeybinding(for: commandID) != AppCommandRegistry.resolvedKeybinding(
@@ -251,29 +202,47 @@ struct ConfigModalAppearanceAndShortcutsSection: View {
     }
 
     private func syncDraftsFromStore() {
+        isSyncingAppearanceDrafts = true
         themeDraftID = store.appPreferences.themeID
+        terminalFontSizeDraft = store.appPreferences.terminalFontSize
         shortcutDrafts = AppCommandRegistry.managedCommandIDs.reduce(into: [:]) { drafts, commandID in
             drafts[commandID] = AppCommandRegistry.resolvedKeybinding(
                 for: commandID,
                 preferences: store.appPreferences
             )
         }
+        isSyncingAppearanceDrafts = false
     }
 
-    private func saveTheme(_ themeID: String) async {
-        isSavingTheme = true
-        feedback = nil
-        defer { isSavingTheme = false }
+    private func persistAppearanceIfNeeded() {
+        guard !isSyncingAppearanceDrafts else { return }
 
-        do {
-            var preferences = try await commandService.loadAppPreferences()
-            preferences.themeID = themeID
-            try await commandService.saveAppPreferences(preferences)
-            syncDraftsFromStore()
-            feedback = SettingsSectionFeedback(kind: .success, message: "\(AppTheme.resolve(id: themeID).displayName) theme saved.")
-        } catch {
-            themeDraftID = store.appPreferences.themeID
-            feedback = SettingsSectionFeedback(kind: .error, message: friendlyMessage(for: error))
+        let roundedFontSize = min(max(terminalFontSizeDraft.rounded(), 11), 24)
+        if roundedFontSize != terminalFontSizeDraft {
+            terminalFontSizeDraft = roundedFontSize
+            return
+        }
+
+        guard themeDraftID != store.appPreferences.themeID || roundedFontSize != store.appPreferences.terminalFontSize else {
+            return
+        }
+
+        appearanceSaveTask?.cancel()
+        let selectedThemeID = themeDraftID
+        appearanceSaveTask = Task {
+            isSavingAppearance = true
+            defer { isSavingAppearance = false }
+
+            do {
+                var preferences = try await commandService.loadAppPreferences()
+                preferences.themeID = selectedThemeID
+                preferences.terminalFontSize = roundedFontSize
+                try await commandService.saveAppPreferences(preferences)
+                feedback = nil
+            } catch {
+                feedback = SettingsSectionFeedback(kind: .error, message: friendlyMessage(for: error))
+                syncDraftsFromStore()
+            }
         }
     }
 
@@ -340,11 +309,6 @@ struct ConfigModalAppearanceAndShortcutsSection: View {
             keyEquivalent: keybinding.keyEquivalent.trimmingCharacters(in: .whitespacesAndNewlines),
             modifiers: KeyModifier.allCases.filter { keybinding.modifiers.contains($0) }
         )
-    }
-
-    private func terminalAppearanceSummary(for appTheme: AppTheme) -> String {
-        let appearance = appTheme.terminalAppearance
-        return "\(appearance.backgroundHex) bg / \(appearance.foregroundHex) text"
     }
 
     private func friendlyMessage(for error: Error) -> String {
@@ -481,6 +445,7 @@ private struct SettingsSectionFeedback: Equatable {
 
 private struct SettingsSectionFeedbackView: View {
     let feedback: SettingsSectionFeedback
+    let onDismiss: () -> Void
     @Environment(\.shellThemePalette) private var theme
 
     var body: some View {
@@ -493,6 +458,11 @@ private struct SettingsSectionFeedbackView: View {
                 .foregroundStyle(theme.primaryText.color)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
+            Button("Dismiss", systemImage: "xmark", action: onDismiss)
+                .labelStyle(.iconOnly)
+                .buttonStyle(.borderless)
+                .foregroundStyle(theme.mutedText.color)
+                .help("Dismiss message")
         }
         .padding(10)
         .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
@@ -538,9 +508,17 @@ private extension AppCommandID {
         case .newPlainTab:
             return "New Plain Tab"
         case .newDefaultAgentTab:
+            return "New Default Agent Tab"
+        case .newAgentTabWithProfile:
             return "New Agent Tab"
         case .closeSelectedTab:
             return "Close Tab"
+        case .renameSelectedSession:
+            return "Rename Session"
+        case .renameSelectedTab:
+            return "Rename Tab"
+        case .deleteSelectedSession:
+            return "Delete Session"
         case .previousTab:
             return "Previous Tab"
         case .nextTab:
@@ -574,13 +552,13 @@ private extension AppCommandID {
         switch self {
         case .openProjectSelector:
             return "Projects"
-        case .newPlainTab, .newDefaultAgentTab, .closeSelectedTab:
+        case .newPlainTab, .newDefaultAgentTab, .newAgentTabWithProfile, .closeSelectedTab, .renameSelectedTab:
             return "Tab actions"
         case .previousTab, .nextTab:
             return "Tab navigation"
         case .previousSession, .nextSession:
             return "Session navigation"
-        case .searchSessions:
+        case .searchSessions, .renameSelectedSession, .deleteSelectedSession:
             return "Sessions"
         case .saveFile, .revertFile, .openFileInExternalEditor:
             return "File commands"

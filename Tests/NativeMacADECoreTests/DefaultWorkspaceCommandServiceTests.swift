@@ -277,6 +277,17 @@ struct DefaultWorkspaceCommandServiceTests {
     }
 
     @Test
+    func savingPreferencesPersistsTerminalFontSize() async throws {
+        let harness = makeHarness()
+        let preferences = AppPreferences(themeID: "cursor", terminalFontSize: 16)
+
+        try await harness.service.saveAppPreferences(preferences)
+
+        #expect(try await harness.persistence.loadAppPreferences().terminalFontSize == 16)
+        #expect(harness.store.appPreferences.terminalFontSize == 16)
+    }
+
+    @Test
     func savingManagedKeybindingsRecordsChangedCountsAndResetClearsOnlyOneOverride() async throws {
         let harness = makeHarness()
         let overrides = managedKeybindingOverrides()
@@ -597,6 +608,55 @@ struct DefaultWorkspaceCommandServiceTests {
     }
 
     @Test
+    func creatingExplicitAgentTabUsesSelectedProfileInsteadOfSavedDefault() async throws {
+        let harness = makeHarness()
+        let project = try await harness.service.openProject(path: makeTemporaryProjectDirectory())
+        let savedDefaultShortcut = SessionShortcut(
+            label: "Default Claude",
+            launchCommand: "claude",
+            launchArgumentsJSON: "[\"--continue\"]"
+        )
+        let selectedShortcut = SessionShortcut(
+            label: "Selected Codex",
+            launchCommand: "codex",
+            launchArgumentsJSON: "[\"exec\"]"
+        )
+        try await harness.persistence.save(shortcut: savedDefaultShortcut)
+        try await harness.persistence.save(shortcut: selectedShortcut)
+        try await harness.persistence.save(appPreferences: AppPreferences(defaultSessionShortcutID: savedDefaultShortcut.id))
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+
+        let tab = try await harness.service.createAgentTab(sessionID: session.id, shortcutID: selectedShortcut.id)
+
+        #expect(tab.launchCommand == "codex")
+        #expect(tab.launchArgumentsJSON == "[\"exec\"]")
+        #expect(harness.terminal.createdTabs.last == tab)
+        #expect(harness.service.logger.events.contains { event in
+            event.name == "tab_created" &&
+                event.fields["tab_id"] == tab.id.uuidString &&
+                event.fields["shortcut_id"] == selectedShortcut.id.uuidString &&
+                event.fields["launch_profile_label"] == "Selected Codex" &&
+                event.fields["launch_profile_source"] == "explicit"
+        })
+    }
+
+    @Test
+    func creatingExplicitAgentTabWithMissingProfileDoesNotCreateSurface() async throws {
+        let harness = makeHarness()
+        let project = try await harness.service.openProject(path: makeTemporaryProjectDirectory())
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let createdTabsBefore = harness.terminal.createdTabs
+        let missingShortcutID = UUID()
+
+        await #expect(throws: WorkspaceCommandError.missingShortcut(missingShortcutID)) {
+            _ = try await harness.service.createAgentTab(sessionID: session.id, shortcutID: missingShortcutID)
+        }
+
+        #expect(harness.terminal.createdTabs == createdTabsBefore)
+        #expect(harness.store.tabs == createdTabsBefore)
+    }
+
+    @Test
     func creatingTabWithMissingStoredShortcutDoesNotCreateSurface() async throws {
         let missingShortcutID = UUID()
         let project = WorkspaceProject(path: "/tmp/native-mac-ade-missing-stored-shortcut", displayName: "missing-shortcut")
@@ -705,6 +765,24 @@ struct DefaultWorkspaceCommandServiceTests {
 
         #expect(harness.store.sessionsForSelectedProject.map(\.id) == [newerFirstSession.id, olderFirstSession.id])
         #expect(try await harness.persistence.loadSessions().first?.id == secondSession.id)
+    }
+
+    @Test
+    func renamingTabPersistsCustomTitleAndAllowsResetToDefault() async throws {
+        let harness = makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+        let project = try await harness.service.openProject(path: projectPath)
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let tab = try await harness.service.createTab(sessionID: session.id)
+
+        let renamedTab = try await harness.service.renameTab(tabID: tab.id, title: "Build logs")
+        #expect(renamedTab.title == "Build logs")
+        #expect(harness.store.tab(id: tab.id)?.title == "Build logs")
+        #expect(try await harness.persistence.loadTabs().last(where: { $0.id == tab.id })?.title == "Build logs")
+
+        let resetTab = try await harness.service.renameTab(tabID: tab.id, title: nil)
+        #expect(resetTab.title == nil)
+        #expect(harness.store.tab(id: tab.id)?.title == nil)
     }
 
     @Test
@@ -934,6 +1012,153 @@ struct DefaultWorkspaceCommandServiceTests {
         try await harness.service.openFileInExternalEditor(tabID: fileTab.id)
 
         #expect(harness.externalEditor.openedPaths == [fileURL.standardizedFileURL.resolvingSymlinksInPath().path])
+    }
+
+    @Test
+    func deletingCleanOpenFileClosesTabAndDiscardsBuffer() async throws {
+        let harness = makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+        let fileURL = try makeTemporaryProjectFile(in: projectPath, relativePath: "Sources/File.swift")
+        let project = try await harness.service.openProject(path: projectPath)
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let terminalTab = try #require(harness.store.tabs.first)
+        let fileTab = try await harness.service.openFileTab(sessionID: session.id, path: fileURL.path)
+
+        try await harness.service.deleteWorkspaceItem(projectID: project.id, path: fileURL.path)
+
+        #expect(FileManager.default.fileExists(atPath: fileURL.path) == false)
+        #expect(harness.store.tabs.map(\.id) == [terminalTab.id])
+        #expect(harness.store.selectedTabID == terminalTab.id)
+        #expect(try await harness.persistence.loadTabs().map(\.id) == [terminalTab.id])
+        #expect(harness.fileBuffers.buffer(for: fileTab.id) == nil)
+    }
+
+    @Test
+    func deletingFolderClosesContainedCleanFileTabsOnly() async throws {
+        let harness = makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+        let nestedFileURL = try makeTemporaryProjectFile(in: projectPath, relativePath: "Sources/Nested/File.swift")
+        let siblingFileURL = try makeTemporaryProjectFile(in: projectPath, relativePath: "Tests/FileTests.swift")
+        let project = try await harness.service.openProject(path: projectPath)
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let terminalTab = try #require(harness.store.tabs.first)
+        let nestedTab = try await harness.service.openFileTab(sessionID: session.id, path: nestedFileURL.path)
+        let siblingTab = try await harness.service.openFileTab(sessionID: session.id, path: siblingFileURL.path)
+        let folderPath = URL(fileURLWithPath: projectPath, isDirectory: true)
+            .appendingPathComponent("Sources", isDirectory: true)
+            .path
+
+        try await harness.service.deleteWorkspaceItem(projectID: project.id, path: folderPath)
+
+        #expect(FileManager.default.fileExists(atPath: nestedFileURL.path) == false)
+        #expect(FileManager.default.fileExists(atPath: siblingFileURL.path))
+        #expect(harness.store.tabs.map(\.id) == [terminalTab.id, siblingTab.id])
+        #expect(try await harness.persistence.loadTabs().map(\.id) == [terminalTab.id, siblingTab.id])
+        #expect(harness.fileBuffers.buffer(for: nestedTab.id) == nil)
+        #expect(harness.fileBuffers.buffer(for: siblingTab.id) != nil)
+    }
+
+    @Test
+    func deletingWorkspaceItemRejectsAffectedDirtyFileTabBeforeRemovingDiskOrMetadata() async throws {
+        let harness = makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+        let fileURL = try makeTemporaryProjectFile(in: projectPath, relativePath: "Sources/File.swift")
+        let project = try await harness.service.openProject(path: projectPath)
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let terminalTab = try #require(harness.store.tabs.first)
+        let fileTab = try await harness.service.openFileTab(sessionID: session.id, path: fileURL.path)
+        harness.fileBuffers.updateBuffer(tabID: fileTab.id, text: "let dirty = true\n")
+
+        await #expect(throws: WorkspaceCommandError.dirtyFileTabCloseRejected(fileTab.id)) {
+            try await harness.service.deleteWorkspaceItem(projectID: project.id, path: fileURL.path)
+        }
+
+        #expect(FileManager.default.fileExists(atPath: fileURL.path))
+        #expect(harness.store.tabs.map(\.id) == [terminalTab.id, fileTab.id])
+        #expect(try await harness.persistence.loadTabs().map(\.id) == [terminalTab.id, fileTab.id])
+        #expect(harness.fileBuffers.isDirty(tabID: fileTab.id))
+    }
+
+    @Test
+    func renamingCleanOpenFileUpdatesMetadataBufferAndFutureSavePath() async throws {
+        let harness = makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+        let fileURL = try makeTemporaryProjectFile(in: projectPath, relativePath: "Sources/File.swift")
+        let renamedURL = URL(fileURLWithPath: projectPath, isDirectory: true)
+            .appendingPathComponent("Sources/Renamed.swift")
+        let project = try await harness.service.openProject(path: projectPath)
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let fileTab = try await harness.service.openFileTab(sessionID: session.id, path: fileURL.path)
+        let expectedRenamedPath = renamedURL.standardizedFileURL.resolvingSymlinksInPath().path
+
+        try await harness.service.renameWorkspaceItem(projectID: project.id, path: fileURL.path, to: renamedURL.path)
+
+        #expect(FileManager.default.fileExists(atPath: fileURL.path) == false)
+        #expect(harness.store.tab(id: fileTab.id)?.fileReference?.path == expectedRenamedPath)
+        #expect(try await harness.persistence.loadTabs().first { $0.id == fileTab.id }?.fileReference?.path == expectedRenamedPath)
+        #expect(harness.fileBuffers.buffer(for: fileTab.id)?.fileReference.path == expectedRenamedPath)
+
+        harness.fileBuffers.updateBuffer(tabID: fileTab.id, text: "let value = 4\n")
+        try await harness.service.saveFileTab(tabID: fileTab.id)
+
+        #expect(try String(contentsOf: renamedURL, encoding: .utf8) == "let value = 4\n")
+    }
+
+    @Test
+    func renamingFolderUpdatesContainedCleanFileTabsAndBuffers() async throws {
+        let harness = makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+        let nestedFileURL = try makeTemporaryProjectFile(in: projectPath, relativePath: "Sources/Nested/File.swift")
+        let siblingFileURL = try makeTemporaryProjectFile(in: projectPath, relativePath: "Tests/FileTests.swift")
+        let project = try await harness.service.openProject(path: projectPath)
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let nestedTab = try await harness.service.openFileTab(sessionID: session.id, path: nestedFileURL.path)
+        let siblingTab = try await harness.service.openFileTab(sessionID: session.id, path: siblingFileURL.path)
+        let sourceFolderURL = URL(fileURLWithPath: projectPath, isDirectory: true)
+            .appendingPathComponent("Sources", isDirectory: true)
+        let renamedFolderURL = URL(fileURLWithPath: projectPath, isDirectory: true)
+            .appendingPathComponent("SourcesRenamed", isDirectory: true)
+        let expectedNestedPath = renamedFolderURL
+            .appendingPathComponent("Nested", isDirectory: true)
+            .appendingPathComponent("File.swift")
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+            .path
+        let expectedSiblingPath = siblingFileURL.standardizedFileURL.resolvingSymlinksInPath().path
+
+        try await harness.service.renameWorkspaceItem(projectID: project.id, path: sourceFolderURL.path, to: renamedFolderURL.path)
+
+        #expect(harness.store.tab(id: nestedTab.id)?.fileReference?.path == expectedNestedPath)
+        #expect(harness.store.tab(id: siblingTab.id)?.fileReference?.path == expectedSiblingPath)
+        #expect(harness.fileBuffers.buffer(for: nestedTab.id)?.fileReference.path == expectedNestedPath)
+        #expect(harness.fileBuffers.buffer(for: siblingTab.id)?.fileReference.path == expectedSiblingPath)
+
+        try "let disk = 9\n".write(to: URL(fileURLWithPath: expectedNestedPath), atomically: true, encoding: .utf8)
+        try await harness.service.revertFileTab(tabID: nestedTab.id)
+
+        #expect(harness.fileBuffers.bufferText(for: nestedTab.id) == "let disk = 9\n")
+    }
+
+    @Test
+    func renamingWorkspaceItemRejectsAffectedDirtyFileTabBeforeMovingDiskOrMetadata() async throws {
+        let harness = makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+        let fileURL = try makeTemporaryProjectFile(in: projectPath, relativePath: "Sources/File.swift")
+        let renamedURL = URL(fileURLWithPath: projectPath, isDirectory: true)
+            .appendingPathComponent("Sources/Renamed.swift")
+        let project = try await harness.service.openProject(path: projectPath)
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let fileTab = try await harness.service.openFileTab(sessionID: session.id, path: fileURL.path)
+        harness.fileBuffers.updateBuffer(tabID: fileTab.id, text: "let dirty = true\n")
+
+        await #expect(throws: WorkspaceCommandError.dirtyFileTabCloseRejected(fileTab.id)) {
+            try await harness.service.renameWorkspaceItem(projectID: project.id, path: fileURL.path, to: renamedURL.path)
+        }
+
+        #expect(FileManager.default.fileExists(atPath: fileURL.path))
+        #expect(FileManager.default.fileExists(atPath: renamedURL.path) == false)
+        #expect(harness.store.tab(id: fileTab.id)?.fileReference?.path == fileURL.standardizedFileURL.resolvingSymlinksInPath().path)
+        #expect(try await harness.persistence.loadTabs().first { $0.id == fileTab.id }?.fileReference?.path == fileURL.standardizedFileURL.resolvingSymlinksInPath().path)
     }
 
     @Test

@@ -20,6 +20,7 @@ struct WorkspaceModelsTests {
         let preferences = AppPreferences(
             themeID: "dracula",
             defaultSessionShortcutID: shortcutID,
+            terminalFontSize: 15,
             keybindings: [
                 .searchSessions: searchOverride,
                 .zoomInTerminal: zoomOverride
@@ -34,6 +35,8 @@ struct WorkspaceModelsTests {
         #expect(preferences.id == AppPreferences.fixedID)
         #expect(preferences.themeID == "dracula")
         #expect(preferences.defaultSessionShortcutID == shortcutID)
+        #expect(preferences.terminalFontSize == 15)
+        #expect(AppPreferences.defaults.terminalFontSize == TerminalAppearance.cursorDefault.fontSize)
         #expect(preferences.keybindings[.searchSessions] == searchOverride)
         #expect(preferences.keybindings[.zoomInTerminal] == zoomOverride)
         #expect(preferences.updatedAt == updatedAt)
@@ -44,7 +47,11 @@ struct WorkspaceModelsTests {
             .openProjectSelector,
             .newPlainTab,
             .newDefaultAgentTab,
+            .newAgentTabWithProfile,
             .closeSelectedTab,
+            .renameSelectedSession,
+            .renameSelectedTab,
+            .deleteSelectedSession,
             .previousTab,
             .nextTab,
             .previousSession,
@@ -61,7 +68,12 @@ struct WorkspaceModelsTests {
         ])
         #expect(AppCommandID.newPlainTab.defaultKeybinding.keyEquivalent == "t")
         #expect(AppCommandID.newDefaultAgentTab.defaultKeybinding.modifiers == [.command, .shift])
+        #expect(AppCommandID.newAgentTabWithProfile.defaultKeybinding.keyEquivalent == "p")
+        #expect(AppCommandID.newAgentTabWithProfile.defaultKeybinding.modifiers == [.command, .shift])
         #expect(AppCommandID.closeSelectedTab.defaultKeybinding.keyEquivalent == "w")
+        #expect(AppCommandID.renameSelectedSession.defaultKeybinding.keyEquivalent == "r")
+        #expect(AppCommandID.renameSelectedTab.defaultKeybinding.modifiers == [.command, .shift])
+        #expect(AppCommandID.deleteSelectedSession.defaultKeybinding.modifiers == [.command, .shift])
         #expect(AppCommandID.openProjectSelector.defaultKeybinding.keyEquivalent == "o")
         #expect(AppCommandID.toggleLeftSidebar.defaultKeybinding.keyEquivalent == "b")
         #expect(AppCommandID.openSettings.defaultKeybinding.keyEquivalent == ",")
@@ -104,6 +116,7 @@ struct WorkspaceModelsTests {
         let preferences = AppPreferences(
             themeID: "catppuccin",
             defaultSessionShortcutID: shortcut.id,
+            terminalFontSize: 14,
             keybindings: [
                 .nextTab: KeybindingOverride(commandID: .nextTab, keyEquivalent: "rightArrow", modifiers: [.command, .option])
             ],
@@ -120,6 +133,7 @@ struct WorkspaceModelsTests {
         var updatedPreferences = preferences
         updatedPreferences.themeID = "cursor"
         updatedPreferences.defaultSessionShortcutID = nil
+        updatedPreferences.terminalFontSize = 16
         try await store.save(appPreferences: updatedPreferences)
 
         var updatedShortcut = shortcut
@@ -209,6 +223,7 @@ struct WorkspaceModelsTests {
         let tab = WorkspaceTab(
             sessionID: sessionID,
             workingDirectory: "/Users/example/project",
+            title: "Review shell",
             launchCommand: "codex",
             launchArgumentsJSON: "[\"--ask-for-approval\",\"never\"]",
             ordinal: 2,
@@ -218,6 +233,7 @@ struct WorkspaceModelsTests {
 
         #expect(tab.sessionID == sessionID)
         #expect(tab.workingDirectory == "/Users/example/project")
+        #expect(tab.title == "Review shell")
         #expect(tab.launchCommand == "codex")
         #expect(tab.launchArgumentsJSON == "[\"--ask-for-approval\",\"never\"]")
         #expect(tab.ordinal == 2)

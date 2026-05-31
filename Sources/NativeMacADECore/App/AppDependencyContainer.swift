@@ -65,7 +65,6 @@ public struct AppDependencyContainer {
         terminalHostController.onSurfaceExited = { tabID, exitStatus in
             Task { @MainActor in
                 workspaceCommandService.recordTerminalProcessExit(tabID: tabID, exitStatus: exitStatus)
-                try? await workspaceCommandService.closeTab(tabID: tabID, force: true)
             }
         }
         return AppDependencyContainer(

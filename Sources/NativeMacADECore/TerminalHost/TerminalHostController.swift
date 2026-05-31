@@ -505,19 +505,11 @@ final class TerminalSessionDriver: NSObject {
             return nil
         }
 
-        let resolvedArguments = resolvedLaunchArguments(for: command)
-        let commandTokens = [Self.shellEscape(command)] + resolvedArguments.map(Self.shellEscape)
-        let environmentTokens = launchEnvironmentOverrides()
-            .sorted { $0.key < $1.key }
-            .map { key, value in
-                "\(key)=\(Self.shellEscape(value))"
-            }
-
-        if environmentTokens.isEmpty {
-            return (["exec"] + commandTokens).joined(separator: " ")
-        }
-
-        return (["exec", "env"] + environmentTokens + commandTokens).joined(separator: " ")
+        return TerminalLaunchCommandBuilder(
+            command: command,
+            arguments: resolvedLaunchArguments(for: command),
+            environment: launchEnvironmentOverrides()
+        ).commandLine()
     }
 
     private func resolvedLaunchArguments(for command: String) -> [String] {
@@ -576,8 +568,42 @@ final class TerminalSessionDriver: NSObject {
         return shell.isEmpty ? nil : shell
     }
 
-    private static func shellEscape(_ value: String) -> String {
+}
+
+struct TerminalLaunchCommandBuilder: Equatable, Sendable {
+    var command: String
+    var arguments: [String]
+    var environment: [String: String]
+
+    func commandLine() -> String {
+        let environmentTokens = environment
+            .sorted { $0.key < $1.key }
+            .map { key, value in
+                "\(key)=\(Self.shellEscape(value))"
+            }
+        let invocation = (environmentTokens + [Self.commandToken(command)] + arguments.map(Self.shellEscape))
+            .joined(separator: " ")
+
+        return "\(invocation); __ade_launch_status=$?; exit $__ade_launch_status"
+    }
+
+    static func shellEscape(_ value: String) -> String {
         "'" + value.replacingOccurrences(of: "'", with: "'\"'\"'") + "'"
+    }
+
+    private static func commandToken(_ value: String) -> String {
+        guard isSafeUnquotedCommandWord(value) else {
+            return shellEscape(value)
+        }
+
+        return value
+    }
+
+    private static func isSafeUnquotedCommandWord(_ value: String) -> Bool {
+        guard !value.isEmpty else { return false }
+
+        let allowedScalars = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_+-./:@")
+        return value.unicodeScalars.allSatisfy { allowedScalars.contains($0) }
     }
 }
 

@@ -167,11 +167,12 @@ public final class WorkspaceStore {
     }
 
     public func removeTab(id: UUID) {
+        let tabsBeforeRemoval = tabsForSelectedSession
         let removed = tabs.first { $0.id == id }
         tabs.removeAll { $0.id == id }
 
         if selectedTabID == id {
-            selectedTabID = nil
+            selectedTabID = replacementSelectedTabID(afterRemoving: id, from: tabsBeforeRemoval)
         }
 
         if let removed, selectedSessionID == removed.sessionID {
@@ -328,6 +329,21 @@ public final class WorkspaceStore {
         }
 
         selectedTabID = tabsForSelectedSession.first?.id
+    }
+
+    private func replacementSelectedTabID(afterRemoving tabID: UUID, from orderedTabs: [WorkspaceTab]) -> UUID? {
+        guard let removedIndex = orderedTabs.firstIndex(where: { $0.id == tabID }) else {
+            return nil
+        }
+
+        let remainingTabs = orderedTabs.filter { $0.id != tabID }
+        guard !remainingTabs.isEmpty else { return nil }
+
+        if removedIndex < remainingTabs.count {
+            return remainingTabs[removedIndex].id
+        }
+
+        return remainingTabs[max(removedIndex - 1, 0)].id
     }
 
     private func normalizeSelection() {

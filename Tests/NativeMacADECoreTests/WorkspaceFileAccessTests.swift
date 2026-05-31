@@ -74,6 +74,65 @@ struct WorkspaceFileAccessTests {
         #expect(nodes == nodes.sorted { $0.reference.path < $1.reference.path })
     }
 
+    @Test
+    func creatingProjectFilesAndDirectoriesStaysWithinProjectRoot() async throws {
+        let projectPath = try makeTemporaryProjectDirectory()
+        let access = LocalWorkspaceFileAccess()
+        let directoryPath = URL(fileURLWithPath: projectPath, isDirectory: true)
+            .appendingPathComponent("Sources/Generated", isDirectory: true)
+            .path
+        let filePath = URL(fileURLWithPath: projectPath, isDirectory: true)
+            .appendingPathComponent("Sources/Generated/Feature.kt")
+            .path
+
+        let createdDirectory = try await access.createDirectory(path: directoryPath, projectRoot: projectPath)
+        let createdFile = try await access.createTextFile(path: filePath, projectRoot: projectPath, contents: "fun main() = println(\"hi\")\n")
+
+        #expect(FileManager.default.fileExists(atPath: createdDirectory))
+        #expect(FileManager.default.fileExists(atPath: createdFile.path))
+        #expect(try String(contentsOfFile: createdFile.path, encoding: .utf8) == "fun main() = println(\"hi\")\n")
+    }
+
+    @Test
+    func renamingAndDeletingWorkspaceItemsStayWithinProjectRoot() async throws {
+        let projectPath = try makeTemporaryProjectDirectory()
+        let access = LocalWorkspaceFileAccess()
+        let fileURL = try makeTemporaryProjectFile(in: projectPath, relativePath: "Sources/App.swift", contents: "let app = true\n")
+        let renamedURL = URL(fileURLWithPath: projectPath, isDirectory: true)
+            .appendingPathComponent("Sources/Renamed.swift")
+
+        let renamedReference = try await access.renameItem(
+            path: fileURL.path,
+            to: renamedURL.path,
+            projectRoot: projectPath
+        )
+
+        #expect(FileManager.default.fileExists(atPath: fileURL.path) == false)
+        #expect(renamedReference.path == renamedURL.standardizedFileURL.resolvingSymlinksInPath().path)
+        #expect(try String(contentsOfFile: renamedReference.path, encoding: .utf8) == "let app = true\n")
+
+        try await access.deleteItem(path: renamedReference.path, projectRoot: projectPath)
+
+        #expect(FileManager.default.fileExists(atPath: renamedReference.path) == false)
+    }
+
+    @Test
+    func deletingOutsideProjectRootIsRejected() async throws {
+        let projectPath = try makeTemporaryProjectDirectory()
+        let outsidePath = try makeTemporaryProjectDirectory(named: "outside-delete")
+        let outsideFile = try makeTemporaryProjectFile(in: outsidePath, relativePath: "Secret.swift", contents: "let secret = true\n")
+        let access = LocalWorkspaceFileAccess()
+        let standardizedOutsideFile = outsideFile.standardizedFileURL.resolvingSymlinksInPath().path
+        let standardizedProjectPath = URL(fileURLWithPath: projectPath, isDirectory: true).standardizedFileURL.resolvingSymlinksInPath().path
+
+        await #expect(throws: WorkspaceFileAccessError.filePathOutsideProject(
+            filePath: standardizedOutsideFile,
+            projectRoot: standardizedProjectPath
+        )) {
+            try await access.deleteItem(path: outsideFile.path, projectRoot: projectPath)
+        }
+    }
+
     private func makeTemporaryProjectDirectory(named name: String = UUID().uuidString) throws -> String {
         let url = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
             .appendingPathComponent("native-mac-ade-file-access-\(UUID().uuidString)", isDirectory: true)

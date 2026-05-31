@@ -72,27 +72,28 @@ public actor SQLiteWorkspaceMetadataStore: WorkspacePersistenceStore {
     }
 
     public func loadTabs() async throws -> [WorkspaceTab] {
-        try query("SELECT id, session_id, working_directory, launch_command, launch_arguments_json, kind, file_path, ordinal, created_at, last_activated_at FROM tabs ORDER BY session_id ASC, ordinal ASC") { statement in
+        try query("SELECT id, session_id, working_directory, title, launch_command, launch_arguments_json, kind, file_path, ordinal, created_at, last_activated_at FROM tabs ORDER BY session_id ASC, ordinal ASC") { statement in
             let tabID = try uuid(statement, 0)
             let workingDirectory = try text(statement, 2)
-            let kind = try workspaceTabKind(statement, 5)
-            let filePath = optionalText(statement, 6)
+            let kind = try workspaceTabKind(statement, 6)
+            let filePath = optionalText(statement, 7)
             return try WorkspaceTab(
                 id: tabID,
                 sessionID: uuid(statement, 1),
                 kind: kind,
                 workingDirectory: workingDirectory,
-                launchCommand: optionalText(statement, 3),
-                launchArgumentsJSON: optionalText(statement, 4),
+                title: optionalText(statement, 3),
+                launchCommand: optionalText(statement, 4),
+                launchArgumentsJSON: optionalText(statement, 5),
                 fileReference: workspaceFileReference(
                     tabID: tabID,
                     kind: kind,
                     filePath: filePath,
                     workingDirectory: workingDirectory
                 ),
-                ordinal: int(statement, 7),
-                createdAt: date(statement, 8),
-                lastActivatedAt: date(statement, 9)
+                ordinal: int(statement, 8),
+                createdAt: date(statement, 9),
+                lastActivatedAt: date(statement, 10)
             )
         }
     }
@@ -112,13 +113,14 @@ public actor SQLiteWorkspaceMetadataStore: WorkspacePersistenceStore {
     }
 
     public func loadAppPreferences() async throws -> AppPreferences {
-        let preferences = try query("SELECT id, theme_id, default_session_shortcut_id, keybindings_json, updated_at FROM app_preferences WHERE id = 1") { statement in
+        let preferences = try query("SELECT id, theme_id, default_session_shortcut_id, terminal_font_size, keybindings_json, updated_at FROM app_preferences WHERE id = 1") { statement in
             try AppPreferences(
                 id: int(statement, 0),
                 themeID: text(statement, 1),
                 defaultSessionShortcutID: optionalUUID(statement, 2),
-                keybindings: AppPreferences.decodeKeybindingsJSON(text(statement, 3)),
-                updatedAt: date(statement, 4)
+                terminalFontSize: double(statement, 3),
+                keybindings: AppPreferences.decodeKeybindingsJSON(text(statement, 4)),
+                updatedAt: date(statement, 5)
             )
         }.first
         return preferences ?? .defaults
@@ -196,11 +198,12 @@ public actor SQLiteWorkspaceMetadataStore: WorkspacePersistenceStore {
     private func saveTab(_ tab: WorkspaceTab) throws {
         let filePath = try persistedFilePath(for: tab)
         try execute("""
-            INSERT INTO tabs (id, session_id, working_directory, launch_command, launch_arguments_json, kind, file_path, ordinal, created_at, last_activated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO tabs (id, session_id, working_directory, title, launch_command, launch_arguments_json, kind, file_path, ordinal, created_at, last_activated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 session_id = excluded.session_id,
                 working_directory = excluded.working_directory,
+                title = excluded.title,
                 launch_command = excluded.launch_command,
                 launch_arguments_json = excluded.launch_arguments_json,
                 kind = excluded.kind,
@@ -212,13 +215,14 @@ public actor SQLiteWorkspaceMetadataStore: WorkspacePersistenceStore {
             bind(statement, tab.id, 1)
             bind(statement, tab.sessionID, 2)
             bind(statement, tab.workingDirectory, 3)
-            bind(statement, tab.launchCommand, 4)
-            bind(statement, tab.launchArgumentsJSON, 5)
-            bind(statement, tab.kind.rawValue, 6)
-            bind(statement, filePath, 7)
-            bind(statement, tab.ordinal, 8)
-            bind(statement, tab.createdAt, 9)
-            bind(statement, tab.lastActivatedAt, 10)
+            bind(statement, tab.title, 4)
+            bind(statement, tab.launchCommand, 5)
+            bind(statement, tab.launchArgumentsJSON, 6)
+            bind(statement, tab.kind.rawValue, 7)
+            bind(statement, filePath, 8)
+            bind(statement, tab.ordinal, 9)
+            bind(statement, tab.createdAt, 10)
+            bind(statement, tab.lastActivatedAt, 11)
         }
     }
 
@@ -278,18 +282,20 @@ public actor SQLiteWorkspaceMetadataStore: WorkspacePersistenceStore {
     public func save(appPreferences: AppPreferences) async throws {
         let keybindingsJSON = try appPreferences.keybindingsJSON
         try execute("""
-            INSERT INTO app_preferences (id, theme_id, default_session_shortcut_id, keybindings_json, updated_at)
-            VALUES (1, ?, ?, ?, ?)
+            INSERT INTO app_preferences (id, theme_id, default_session_shortcut_id, terminal_font_size, keybindings_json, updated_at)
+            VALUES (1, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 theme_id = excluded.theme_id,
                 default_session_shortcut_id = excluded.default_session_shortcut_id,
+                terminal_font_size = excluded.terminal_font_size,
                 keybindings_json = excluded.keybindings_json,
                 updated_at = excluded.updated_at
             """) { statement in
             bind(statement, appPreferences.themeID, 1)
             bind(statement, appPreferences.defaultSessionShortcutID, 2)
-            bind(statement, keybindingsJSON, 3)
-            bind(statement, appPreferences.updatedAt, 4)
+            bind(statement, appPreferences.terminalFontSize, 3)
+            bind(statement, keybindingsJSON, 4)
+            bind(statement, appPreferences.updatedAt, 5)
         }
     }
 
@@ -446,6 +452,10 @@ private func bind(_ statement: OpaquePointer?, _ value: Date, _ index: Int32) {
     sqlite3_bind_double(statement, index, value.timeIntervalSince1970)
 }
 
+private func bind(_ statement: OpaquePointer?, _ value: Double, _ index: Int32) {
+    sqlite3_bind_double(statement, index, value)
+}
+
 private func bind(_ statement: OpaquePointer?, _ value: Int, _ index: Int32) {
     sqlite3_bind_int64(statement, index, sqlite3_int64(value))
 }
@@ -493,6 +503,10 @@ private func blob(_ statement: OpaquePointer?, _ index: Int32) -> Data? {
 
 private func date(_ statement: OpaquePointer?, _ index: Int32) -> Date {
     Date(timeIntervalSince1970: sqlite3_column_double(statement, index))
+}
+
+private func double(_ statement: OpaquePointer?, _ index: Int32) -> Double {
+    sqlite3_column_double(statement, index)
 }
 
 private func int(_ statement: OpaquePointer?, _ index: Int32) -> Int {

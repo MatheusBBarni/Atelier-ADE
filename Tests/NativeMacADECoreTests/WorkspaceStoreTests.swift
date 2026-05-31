@@ -277,6 +277,53 @@ struct WorkspaceStoreTests {
     }
 
     @Test
+    func removingSelectedTabPrefersNextTabThenFallsBackLeft() {
+        let projectID = UUID()
+        let sessionID = UUID()
+        let firstTabID = UUID()
+        let middleTabID = UUID()
+        let lastTabID = UUID()
+        let store = WorkspaceStore(
+            projects: [WorkspaceProject(id: projectID, path: "/tmp/project", displayName: "project")],
+            sessions: [WorkspaceSession(id: sessionID, projectID: projectID, title: "Session")],
+            tabs: [
+                WorkspaceTab(id: firstTabID, sessionID: sessionID, workingDirectory: "/tmp/project", ordinal: 0),
+                WorkspaceTab(id: middleTabID, sessionID: sessionID, workingDirectory: "/tmp/project", ordinal: 1),
+                WorkspaceTab(id: lastTabID, sessionID: sessionID, workingDirectory: "/tmp/project", ordinal: 2)
+            ],
+            selectedProjectID: projectID,
+            selectedSessionID: sessionID,
+            selectedTabID: middleTabID
+        )
+
+        store.removeTab(id: middleTabID)
+        #expect(store.selectedTabID == lastTabID)
+
+        store.selectTab(id: lastTabID)
+        store.removeTab(id: lastTabID)
+        #expect(store.selectedTabID == firstTabID)
+    }
+
+    @Test
+    func removingOnlySelectedTabClearsTabSelection() {
+        let projectID = UUID()
+        let sessionID = UUID()
+        let tabID = UUID()
+        let store = WorkspaceStore(
+            projects: [WorkspaceProject(id: projectID, path: "/tmp/project", displayName: "project")],
+            sessions: [WorkspaceSession(id: sessionID, projectID: projectID, title: "Session")],
+            tabs: [WorkspaceTab(id: tabID, sessionID: sessionID, workingDirectory: "/tmp/project", ordinal: 0)],
+            selectedProjectID: projectID,
+            selectedSessionID: sessionID,
+            selectedTabID: tabID
+        )
+
+        store.removeTab(id: tabID)
+
+        #expect(store.selectedTabID == nil)
+    }
+
+    @Test
     func restoreCoordinatorHydratesStoreFromPersistenceBoundary() async throws {
         let projectID = UUID()
         let sessionID = UUID()

@@ -56,10 +56,15 @@ struct AtelierApp: App {
 
                 Divider()
 
+                Button("Search Sessions…") {
+                    NotificationCenter.default.post(name: .showSessionSearchPalette, object: nil)
+                }
+                .managedKeyboardShortcut(.searchSessions, preferences: workspaceStore.appPreferences)
+                .disabled(workspaceStore.sessions.isEmpty)
+
                 Button("Start Session…") {
                     NotificationCenter.default.post(name: .showSessionCommandPalette, object: nil)
                 }
-                .managedKeyboardShortcut(.searchSessions, preferences: workspaceStore.appPreferences)
                 .disabled(workspaceStore.selectedProject == nil)
 
                 Button("New Tab") {
@@ -68,7 +73,13 @@ struct AtelierApp: App {
                 .managedKeyboardShortcut(.newPlainTab, preferences: workspaceStore.appPreferences)
                 .disabled(workspaceStore.selectedSession == nil)
 
-                Button("New Agent Tab") {
+                Button("New Agent Tab…") {
+                    NotificationCenter.default.post(name: .showAgentTabPalette, object: nil)
+                }
+                .managedKeyboardShortcut(.newAgentTabWithProfile, preferences: workspaceStore.appPreferences)
+                .disabled(workspaceStore.selectedSession == nil)
+
+                Button("New Default Agent Tab") {
                     NotificationCenter.default.post(name: .createDefaultAgentTab, object: nil)
                 }
                 .managedKeyboardShortcut(.newDefaultAgentTab, preferences: workspaceStore.appPreferences)
@@ -118,19 +129,37 @@ struct AtelierApp: App {
                 .managedKeyboardShortcut(.closeSelectedTab, preferences: workspaceStore.appPreferences)
                 .disabled(workspaceStore.selectedTab == nil)
 
+                Button("Rename Session") {
+                    NotificationCenter.default.post(name: .renameSelectedSession, object: nil)
+                }
+                .managedKeyboardShortcut(.renameSelectedSession, preferences: workspaceStore.appPreferences)
+                .disabled(workspaceStore.selectedSession == nil)
+
+                Button("Rename Tab") {
+                    NotificationCenter.default.post(name: .renameSelectedTab, object: nil)
+                }
+                .managedKeyboardShortcut(.renameSelectedTab, preferences: workspaceStore.appPreferences)
+                .disabled(workspaceStore.selectedTab == nil)
+
+                Button("Delete Session") {
+                    NotificationCenter.default.post(name: .deleteSelectedSession, object: nil)
+                }
+                .managedKeyboardShortcut(.deleteSelectedSession, preferences: workspaceStore.appPreferences)
+                .disabled(workspaceStore.selectedSession == nil)
+
                 Divider()
 
                 Button("Previous Session") {
                     selectAdjacentSession(direction: -1)
                 }
                 .managedKeyboardShortcut(.previousSession, preferences: workspaceStore.appPreferences)
-                .disabled(workspaceStore.sessionsForSelectedProject.count < 2)
+                .disabled(orderedSessionsAcrossProjects().count < 2)
 
                 Button("Next Session") {
                     selectAdjacentSession(direction: 1)
                 }
                 .managedKeyboardShortcut(.nextSession, preferences: workspaceStore.appPreferences)
-                .disabled(workspaceStore.sessionsForSelectedProject.count < 2)
+                .disabled(orderedSessionsAcrossProjects().count < 2)
 
                 Divider()
 
@@ -192,7 +221,7 @@ struct AtelierApp: App {
     }
 
     private func selectAdjacentSession(direction: Int) {
-        let sessions = workspaceStore.sessionsForSelectedProject
+        let sessions = orderedSessionsAcrossProjects()
         guard sessions.count > 1 else { return }
         let currentIndex = workspaceStore.selectedSessionID.flatMap { selectedSessionID in
             sessions.firstIndex { $0.id == selectedSessionID }
@@ -204,6 +233,12 @@ struct AtelierApp: App {
 
     private func wrappedIndex(_ index: Int, count: Int) -> Int {
         (index % count + count) % count
+    }
+
+    private func orderedSessionsAcrossProjects() -> [WorkspaceSession] {
+        workspaceStore.projects.flatMap { project in
+            workspaceStore.orderedSessions(for: project.id)
+        }
     }
 
     private static func installApplicationIcon() {
@@ -227,12 +262,17 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 
 extension Notification.Name {
     static let showProjectSelector = Notification.Name("Atelier.showProjectSelector")
+    static let showSessionSearchPalette = Notification.Name("Atelier.showSessionSearchPalette")
     static let toggleWorkspaceSidebar = Notification.Name("Atelier.toggleWorkspaceSidebar")
     static let toggleFileWorkspaceSidebar = Notification.Name("Atelier.toggleFileWorkspaceSidebar")
     static let showSessionCommandPalette = Notification.Name("Atelier.showSessionCommandPalette")
+    static let showAgentTabPalette = Notification.Name("Atelier.showAgentTabPalette")
     static let createPlainTab = Notification.Name("Atelier.createPlainTab")
     static let createDefaultAgentTab = Notification.Name("Atelier.createDefaultAgentTab")
     static let closeSelectedTab = Notification.Name("Atelier.closeSelectedTab")
+    static let renameSelectedSession = Notification.Name("Atelier.renameSelectedSession")
+    static let renameSelectedTab = Notification.Name("Atelier.renameSelectedTab")
+    static let deleteSelectedSession = Notification.Name("Atelier.deleteSelectedSession")
     static let performSelectedFileCommand = Notification.Name("Atelier.performSelectedFileCommand")
 }
 

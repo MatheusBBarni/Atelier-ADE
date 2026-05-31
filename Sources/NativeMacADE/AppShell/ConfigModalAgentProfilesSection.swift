@@ -17,15 +17,13 @@ struct ConfigModalAgentProfilesSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            header
-
             if let feedback {
-                AgentProfileFeedbackView(feedback: feedback)
+                AgentProfileFeedbackView(feedback: feedback) {
+                    self.feedback = nil
+                }
             }
 
-            defaultSelector
-
-            if let currentDraft = editorDraft {
+            if let currentDraft = editorDraft, currentDraft.isNew {
                 AgentProfileEditorView(
                     draft: Binding(
                         get: { editorDraft ?? currentDraft },
@@ -48,23 +46,39 @@ struct ConfigModalAgentProfilesSection: View {
             } else {
                 VStack(spacing: 10) {
                     ForEach(rowStates) { row in
-                        AgentProfileRowView(
-                            row: row,
-                            isBusy: isMutating,
-                            onMakeDefault: {
-                                Task { await saveDefaultSelection(row.profile.id.uuidString) }
-                            },
-                            onEdit: {
-                                editorDraft = AgentProfileEditorDraft(profile: row.profile, isDefault: row.isDefault)
-                                feedback = nil
-                            },
-                            onReset: {
-                                pendingReset = row.profile
-                            },
-                            onDelete: {
-                                pendingDelete = row.profile
+                        VStack(alignment: .leading, spacing: 8) {
+                            AgentProfileRowView(
+                                row: row,
+                                isBusy: isMutating,
+                                onMakeDefault: {
+                                    Task { await saveDefaultSelection(row.profile.id.uuidString) }
+                                },
+                                onEdit: {
+                                    showEditor(for: row)
+                                },
+                                onReset: {
+                                    pendingReset = row.profile
+                                },
+                                onDelete: {
+                                    pendingDelete = row.profile
+                                }
+                            )
+
+                            if editorDraft?.id == row.profile.id, editorDraft?.isNew == false {
+                                AgentProfileEditorView(
+                                    draft: Binding(
+                                        get: { editorDraft ?? AgentProfileEditorDraft(profile: row.profile, isDefault: row.isDefault) },
+                                        set: { editorDraft = $0 }
+                                    ),
+                                    isSaving: isMutating,
+                                    onCancel: { editorDraft = nil },
+                                    onSave: {
+                                        Task { await saveEditorDraft() }
+                                    }
+                                )
+                                .padding(.leading, 40)
                             }
-                        )
+                        }
                     }
                 }
             }
@@ -104,72 +118,56 @@ struct ConfigModalAgentProfilesSection: View {
         }
     }
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Label("Agent Profiles", systemImage: "person.crop.circle.badge.gearshape")
-                .font(.title3.weight(.semibold))
-                .foregroundStyle(theme.primaryText.color)
-            Text("Choose the default for new sessions, edit curated profiles, and add custom launch profiles.")
-                .font(.callout)
-                .foregroundStyle(theme.secondaryText.color)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    private var defaultSelector: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Default Agent Profile")
-                .font(.headline)
-                .foregroundStyle(theme.primaryText.color)
-
-            Picker("Default Agent Profile", selection: defaultSelection) {
-                Label("Plain Shell", systemImage: "terminal")
-                    .tag(plainDefaultSelectionID)
-
-                ForEach(profiles) { profile in
-                    Text(profile.label)
-                        .tag(profile.id.uuidString)
-                }
-            }
-            .pickerStyle(.menu)
-            .labelsHidden()
-            .disabled(isLoading || isMutating)
-            .frame(maxWidth: 360, alignment: .leading)
-
-            Text(defaultDescription)
-                .font(.caption)
-                .foregroundStyle(theme.mutedText.color)
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(theme.contentBackground.color, in: RoundedRectangle(cornerRadius: 8))
-        .overlay {
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(theme.border.color.opacity(0.72), lineWidth: 1)
-        }
-    }
-
     private var profileListHeader: some View {
-        HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Profiles")
-                    .font(.headline)
-                    .foregroundStyle(theme.primaryText.color)
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    AgentProfileIconView(shortcut: codexHeaderShortcut, fallbackSystemImage: "sparkles", size: 20)
+                    Text("Agent Profiles")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(theme.primaryText.color)
+                }
+                Text("Choose the default for new sessions, edit curated profiles, and add custom launch profiles.")
+                    .font(.callout)
+                    .foregroundStyle(theme.secondaryText.color)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 12)
+
+            VStack(alignment: .trailing, spacing: 8) {
                 Text("\(profiles.count) available")
                     .font(.caption)
                     .foregroundStyle(theme.mutedText.color)
+
+                HStack(spacing: 8) {
+                    if currentDefaultSelectionID != plainDefaultSelectionID {
+                        Button {
+                            Task { await saveDefaultSelection(plainDefaultSelectionID) }
+                        } label: {
+                            Label("Use Plain Shell", systemImage: "terminal")
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(isMutating)
+                    }
+
+                    Button {
+                        editorDraft = AgentProfileEditorDraft()
+                        feedback = nil
+                    } label: {
+                        Label("Add Agent Profile", systemImage: "plus")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .disabled(isMutating)
+                }
             }
-            Spacer()
-            Button {
-                editorDraft = AgentProfileEditorDraft()
-                feedback = nil
-            } label: {
-                Label("Add Agent Profile", systemImage: "plus")
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.small)
-            .disabled(isMutating)
         }
+    }
+
+    private var codexHeaderShortcut: SessionShortcut? {
+        SessionShortcut.builtInDefaults.first { $0.launchCommand == "codex" }
     }
 
     private var rowStates: [AgentProfileRowState] {
@@ -196,16 +194,6 @@ struct ConfigModalAgentProfilesSection: View {
         }
 
         return defaultProfileID.uuidString
-    }
-
-    private var defaultDescription: String {
-        guard let defaultProfileID = store.appPreferences.defaultSessionShortcutID,
-              let profile = profiles.first(where: { $0.id == defaultProfileID })
-        else {
-            return "New sessions start with a plain shell unless you choose a profile here."
-        }
-
-        return "New sessions start with \(profile.label). Existing sessions are unchanged."
     }
 
     private var deleteDialogPresented: Binding<Bool> {
@@ -344,6 +332,15 @@ struct ConfigModalAgentProfilesSection: View {
         }
     }
 
+    private func showEditor(for row: AgentProfileRowState) {
+        if editorDraft?.id == row.profile.id, editorDraft?.isNew == false {
+            editorDraft = nil
+        } else {
+            editorDraft = AgentProfileEditorDraft(profile: row.profile, isDefault: row.isDefault)
+        }
+        feedback = nil
+    }
+
     private func friendlyMessage(for error: Error) -> String {
         guard let commandError = error as? WorkspaceCommandError else {
             return "The Agent Profile change could not be saved."
@@ -390,6 +387,7 @@ private struct AgentProfileFeedback: Equatable {
 
 private struct AgentProfileFeedbackView: View {
     let feedback: AgentProfileFeedback
+    let onDismiss: () -> Void
     @Environment(\.shellThemePalette) private var theme
 
     var body: some View {
@@ -402,6 +400,11 @@ private struct AgentProfileFeedbackView: View {
                 .foregroundStyle(theme.primaryText.color)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
+            Button("Dismiss", systemImage: "xmark", action: onDismiss)
+                .labelStyle(.iconOnly)
+                .buttonStyle(.borderless)
+                .foregroundStyle(theme.mutedText.color)
+                .help("Dismiss message")
         }
         .padding(10)
         .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
@@ -446,9 +449,7 @@ private struct AgentProfileRowView: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            Image(systemName: row.profile.isBuiltIn ? "sparkles" : "terminal")
-                .font(.title3)
-                .foregroundStyle(row.profile.isBuiltIn ? theme.accent.color : theme.secondaryAccent.color)
+            AgentProfileIconView(shortcut: row.profile, fallbackSystemImage: nil, size: 28)
                 .frame(width: 28, height: 28)
 
             VStack(alignment: .leading, spacing: 8) {

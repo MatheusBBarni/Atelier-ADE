@@ -6,6 +6,26 @@ import Testing
 @MainActor
 struct WorkspaceFileBufferControllerTests {
     @Test
+    func languageConfigurationMappingCoversExtendedProjectFileTypes() {
+        #expect(WorkspaceFileBufferController.languageConfigurationKey(forPath: "/tmp/project/pom.xml") == "maven")
+        #expect(WorkspaceFileBufferController.languageConfigurationKey(forPath: "/tmp/project/src/Main.java") == "java")
+        #expect(WorkspaceFileBufferController.languageConfigurationKey(forPath: "/tmp/project/src/App.kt") == "kotlin")
+        #expect(WorkspaceFileBufferController.languageConfigurationKey(forPath: "/tmp/project/build.gradle.kts") == "kts")
+        #expect(WorkspaceFileBufferController.languageConfigurationKey(forPath: "/tmp/project/lib/app.ml") == "ocaml")
+        #expect(WorkspaceFileBufferController.languageConfigurationKey(forPath: "/tmp/project/lib/app.re") == "reasonml")
+        #expect(WorkspaceFileBufferController.languageConfigurationKey(forPath: "/tmp/project/lib/app.res") == "rescript")
+        #expect(WorkspaceFileBufferController.languageConfigurationKey(forPath: "/tmp/project/go/main.go") == "go")
+        #expect(WorkspaceFileBufferController.languageConfigurationKey(forPath: "/tmp/project/camlflow.opam") == "opam")
+        #expect(WorkspaceFileBufferController.languageConfigurationKey(forPath: "/tmp/project/config.xml") == "xml")
+        #expect(WorkspaceFileBufferController.languageConfigurationKey(forPath: "/tmp/project/data.json") == "json")
+        #expect(WorkspaceFileBufferController.languageConfigurationKey(forPath: "/tmp/project/Makefile") == "makefile")
+        #expect(WorkspaceFileBufferController.languageConfigurationKey(forPath: "/tmp/project/config.yaml") == "yaml")
+        #expect(WorkspaceFileBufferController.languageConfigurationKey(forPath: "/tmp/project/README.md") == "markdown")
+        #expect(WorkspaceFileBufferController.languageConfigurationKey(forPath: "/tmp/project/script.sh") == "shell")
+        #expect(WorkspaceFileBufferController.languageConfigurationKey(forPath: "/tmp/project/src/main.rs") == "rust")
+    }
+
+    @Test
     func editingMarksBufferDirtyAndSuccessfulSaveClearsDirtyState() async throws {
         let tab = makeFileTab(path: "/tmp/project/Sources/App.swift", projectRoot: "/tmp/project")
         let access = FakeWorkspaceFileAccess(loadText: "let value = 1\n")
@@ -82,6 +102,22 @@ struct WorkspaceFileBufferControllerTests {
         #expect(controller.isDirty(tabID: tab.id))
     }
 
+    @Test
+    func updatingBufferFileReferencePreservesTextAndRefreshesLanguage() async throws {
+        let tab = makeFileTab(path: "/tmp/project/Sources/App.swift", projectRoot: "/tmp/project")
+        let access = FakeWorkspaceFileAccess(loadText: "disk one\n")
+        let controller = WorkspaceFileBufferController(fileAccess: access)
+        let renamedReference = WorkspaceFileReference(path: "/tmp/project/Sources/App.kt", projectRoot: "/tmp/project")
+
+        try await controller.loadBuffer(for: tab)
+        controller.updateBufferFileReference(tabID: tab.id, fileReference: renamedReference)
+
+        #expect(controller.buffer(for: tab.id)?.fileReference == renamedReference)
+        #expect(controller.buffer(for: tab.id)?.languageConfigurationKey == "kotlin")
+        #expect(controller.bufferText(for: tab.id) == "disk one\n")
+        #expect(controller.isDirty(tabID: tab.id) == false)
+    }
+
     private func makeFileTab(path: String, projectRoot: String) -> WorkspaceTab {
         WorkspaceTab(
             sessionID: UUID(),
@@ -121,4 +157,18 @@ private final class FakeWorkspaceFileAccess: WorkspaceFileAccessing {
         if let saveError { throw saveError }
         savedTexts.append(text)
     }
+
+    func createDirectory(path: String, projectRoot: String) async throws -> String {
+        path
+    }
+
+    func createTextFile(path: String, projectRoot: String, contents: String) async throws -> WorkspaceFileReference {
+        WorkspaceFileReference(path: path, projectRoot: projectRoot)
+    }
+
+    func renameItem(path: String, to destinationPath: String, projectRoot: String) async throws -> WorkspaceFileReference {
+        WorkspaceFileReference(path: destinationPath, projectRoot: projectRoot)
+    }
+
+    func deleteItem(path: String, projectRoot: String) async throws {}
 }
