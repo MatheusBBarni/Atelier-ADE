@@ -1214,6 +1214,7 @@ struct SessionCommandPaletteOverlay: View {
 
 struct SessionCommandPaletteRow: View {
     let option: SessionCommandOption
+    var isHighlighted: Bool = false
     @Environment(\.shellThemePalette) private var theme
 
     var body: some View {
@@ -1241,7 +1242,7 @@ struct SessionCommandPaletteRow: View {
         .background(theme.elevatedBackground.color.opacity(0.92), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(theme.border.color, lineWidth: 1)
+                .stroke(isHighlighted ? theme.activeBorder.color.opacity(0.9) : theme.border.color, lineWidth: 1)
         }
     }
 }
@@ -1252,7 +1253,7 @@ struct AgentTabPaletteOverlay: View {
     let onSelect: (SessionCommandOption) -> Void
     @Environment(\.shellThemePalette) private var theme
     @State private var query = ""
-    @FocusState private var isSearchFocused: Bool
+    @State private var highlightedIndex = 0
 
     private var filteredOptions: [SessionCommandOption] {
         let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1273,16 +1274,20 @@ struct AgentTabPaletteOverlay: View {
                 HStack(spacing: 12) {
                     Image(systemName: "magnifyingglass")
                         .foregroundStyle(theme.mutedText.color)
-                    TextField("Open agent tab…", text: $query)
-                        .textFieldStyle(.plain)
-                        .font(.title3)
-                        .foregroundStyle(theme.primaryText.color)
-                        .focused($isSearchFocused)
-                        .onSubmit {
-                            if let first = filteredOptions.first {
-                                onSelect(first)
+                    PaletteSearchField(
+                        placeholder: "Open agent tab…",
+                        text: $query,
+                        onSubmit: {
+                            if let option = selectedOption {
+                                onSelect(option)
                             }
-                        }
+                        },
+                        onMoveUp: { handleMoveCommand(.up) },
+                        onMoveDown: { handleMoveCommand(.down) },
+                        textColor: NSColor(theme.primaryText.color),
+                        placeholderColor: NSColor(theme.mutedText.color)
+                    )
+                    .frame(height: 28)
                 }
                 .padding(.horizontal, 20)
                 .padding(.vertical, 18)
@@ -1306,9 +1311,9 @@ struct AgentTabPaletteOverlay: View {
                             .foregroundStyle(theme.secondaryText.color)
                             .padding(.vertical, 16)
                     } else {
-                        ForEach(filteredOptions) { option in
+                        ForEach(Array(filteredOptions.enumerated()), id: \.element.id) { index, option in
                             Button(action: { onSelect(option) }) {
-                                SessionCommandPaletteRow(option: option)
+                                SessionCommandPaletteRow(option: option, isHighlighted: index == highlightedIndex)
                             }
                             .buttonStyle(.plain)
                         }
@@ -1339,10 +1344,31 @@ struct AgentTabPaletteOverlay: View {
             }
             .shadow(color: .black.opacity(0.35), radius: 30, y: 12)
         }
-        .task {
-            isSearchFocused = true
+        .onChange(of: query) { _, _ in
+            highlightedIndex = 0
+        }
+        .onChange(of: state.options) { _, _ in
+            highlightedIndex = 0
         }
     }
+
+    private var selectedOption: SessionCommandOption? {
+        guard !filteredOptions.isEmpty else { return nil }
+        return filteredOptions[min(max(highlightedIndex, 0), filteredOptions.count - 1)]
+    }
+
+    private func handleMoveCommand(_ direction: MoveCommandDirection) {
+        guard !filteredOptions.isEmpty else { return }
+        switch direction {
+        case .down:
+            highlightedIndex = (highlightedIndex + 1) % filteredOptions.count
+        case .up:
+            highlightedIndex = (highlightedIndex - 1 + filteredOptions.count) % filteredOptions.count
+        default:
+            return
+        }
+    }
+
 }
 
 struct SessionSearchRow: Identifiable, Equatable {
@@ -1365,7 +1391,7 @@ struct SessionSearchPaletteOverlay: View {
     let onSelect: (SessionSearchRow) -> Void
     @Environment(\.shellThemePalette) private var theme
     @State private var query = ""
-    @FocusState private var isSearchFocused: Bool
+    @State private var highlightedIndex = 0
 
     private var filteredRows: [SessionSearchRow] {
         let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1388,16 +1414,20 @@ struct SessionSearchPaletteOverlay: View {
                 HStack(spacing: 12) {
                     Image(systemName: "magnifyingglass")
                         .foregroundStyle(theme.mutedText.color)
-                    TextField("Search sessions…", text: $query)
-                        .textFieldStyle(.plain)
-                        .font(.title3)
-                        .foregroundStyle(theme.primaryText.color)
-                        .focused($isSearchFocused)
-                        .onSubmit {
-                            if let first = filteredRows.first {
-                                onSelect(first)
+                    PaletteSearchField(
+                        placeholder: "Search sessions…",
+                        text: $query,
+                        onSubmit: {
+                            if let row = selectedRow {
+                                onSelect(row)
                             }
-                        }
+                        },
+                        onMoveUp: { handleMoveCommand(.up) },
+                        onMoveDown: { handleMoveCommand(.down) },
+                        textColor: NSColor(theme.primaryText.color),
+                        placeholderColor: NSColor(theme.mutedText.color)
+                    )
+                    .frame(height: 28)
                 }
                 .padding(.horizontal, 20)
                 .padding(.vertical, 18)
@@ -1414,9 +1444,9 @@ struct SessionSearchPaletteOverlay: View {
                             .foregroundStyle(theme.secondaryText.color)
                             .padding(.vertical, 16)
                     } else {
-                        ForEach(filteredRows) { row in
+                        ForEach(Array(filteredRows.enumerated()), id: \.element.id) { index, row in
                             Button(action: { onSelect(row) }) {
-                                SessionSearchPaletteRow(row: row)
+                                SessionSearchPaletteRow(row: row, isHighlighted: index == highlightedIndex)
                             }
                             .buttonStyle(.plain)
                         }
@@ -1447,14 +1477,154 @@ struct SessionSearchPaletteOverlay: View {
             }
             .shadow(color: .black.opacity(0.35), radius: 30, y: 12)
         }
-        .task {
-            isSearchFocused = true
+        .onChange(of: query) { _, _ in
+            highlightedIndex = 0
+        }
+        .onChange(of: state.rows) { _, _ in
+            highlightedIndex = 0
+        }
+    }
+
+    private var selectedRow: SessionSearchRow? {
+        guard !filteredRows.isEmpty else { return nil }
+        return filteredRows[min(max(highlightedIndex, 0), filteredRows.count - 1)]
+    }
+
+    private func handleMoveCommand(_ direction: MoveCommandDirection) {
+        guard !filteredRows.isEmpty else { return }
+        switch direction {
+        case .down:
+            highlightedIndex = (highlightedIndex + 1) % filteredRows.count
+        case .up:
+            highlightedIndex = (highlightedIndex - 1 + filteredRows.count) % filteredRows.count
+        default:
+            return
+        }
+    }
+
+}
+
+private struct PaletteSearchField: NSViewRepresentable {
+    let placeholder: String
+    @Binding var text: String
+    let onSubmit: () -> Void
+    let onMoveUp: () -> Void
+    let onMoveDown: () -> Void
+    let textColor: NSColor
+    let placeholderColor: NSColor
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(
+            text: $text,
+            onSubmit: onSubmit,
+            onMoveUp: onMoveUp,
+            onMoveDown: onMoveDown
+        )
+    }
+
+    func makeNSView(context: Context) -> PaletteTextField {
+        let field = PaletteTextField(frame: .zero)
+        field.isBordered = false
+        field.focusRingType = .none
+        field.drawsBackground = false
+        field.font = .systemFont(ofSize: NSFont.preferredFont(forTextStyle: .title3).pointSize)
+        field.delegate = context.coordinator
+        field.placeholderString = placeholder
+        field.stringValue = text
+        field.textColor = textColor
+        field.placeholderAttributedString = NSAttributedString(
+            string: placeholder,
+            attributes: [.foregroundColor: placeholderColor]
+        )
+        field.onSubmit = onSubmit
+        field.onMoveUp = onMoveUp
+        field.onMoveDown = onMoveDown
+        DispatchQueue.main.async {
+            field.window?.makeFirstResponder(field)
+        }
+        return field
+    }
+
+    func updateNSView(_ nsView: PaletteTextField, context: Context) {
+        if nsView.stringValue != text {
+            nsView.stringValue = text
+        }
+        nsView.textColor = textColor
+        nsView.placeholderAttributedString = NSAttributedString(
+            string: placeholder,
+            attributes: [.foregroundColor: placeholderColor]
+        )
+        nsView.onSubmit = onSubmit
+        nsView.onMoveUp = onMoveUp
+        nsView.onMoveDown = onMoveDown
+        context.coordinator.onSubmit = onSubmit
+        context.coordinator.onMoveUp = onMoveUp
+        context.coordinator.onMoveDown = onMoveDown
+    }
+
+    final class Coordinator: NSObject, NSTextFieldDelegate {
+        @Binding var text: String
+        var onSubmit: () -> Void
+        var onMoveUp: () -> Void
+        var onMoveDown: () -> Void
+
+        init(
+            text: Binding<String>,
+            onSubmit: @escaping () -> Void,
+            onMoveUp: @escaping () -> Void,
+            onMoveDown: @escaping () -> Void
+        ) {
+            _text = text
+            self.onSubmit = onSubmit
+            self.onMoveUp = onMoveUp
+            self.onMoveDown = onMoveDown
+        }
+
+        func controlTextDidChange(_ obj: Notification) {
+            guard let field = obj.object as? NSTextField else { return }
+            text = field.stringValue
+        }
+
+        func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+            switch commandSelector {
+            case #selector(NSResponder.insertNewline(_:)):
+                onSubmit()
+                return true
+            case #selector(NSResponder.moveUp(_:)):
+                onMoveUp()
+                return true
+            case #selector(NSResponder.moveDown(_:)):
+                onMoveDown()
+                return true
+            default:
+                return false
+            }
+        }
+    }
+}
+
+private final class PaletteTextField: NSTextField {
+    var onSubmit: () -> Void = {}
+    var onMoveUp: () -> Void = {}
+    var onMoveDown: () -> Void = {}
+
+    override func keyDown(with event: NSEvent) {
+        switch event.keyCode {
+        case 126:
+            onMoveUp()
+        case 125:
+            onMoveDown()
+        case 36, 76:
+            onSubmit()
+        default:
+            super.keyDown(with: event)
         }
     }
 }
 
 struct SessionSearchPaletteRow: View {
     let row: SessionSearchRow
+    var isHighlighted: Bool = false
     @Environment(\.shellThemePalette) private var theme
 
     var body: some View {
@@ -1495,7 +1665,7 @@ struct SessionSearchPaletteRow: View {
         .background(theme.elevatedBackground.color.opacity(0.92), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(row.isSelected ? theme.activeBorder.color.opacity(0.9) : theme.border.color, lineWidth: 1)
+                .stroke((row.isSelected || isHighlighted) ? theme.activeBorder.color.opacity(0.9) : theme.border.color, lineWidth: 1)
         }
     }
 }
@@ -1782,7 +1952,7 @@ struct TabChromeView: View {
     var body: some View {
         let _ = dirtyRefreshToken
         ScrollView(.horizontal) {
-            HStack(spacing: 0) {
+            HStack(spacing: 1) {
                 if store.tabsForSelectedSession.isEmpty {
                     Text(store.selectedSessionID == nil ? "Select a session to see tabs" : "No tabs in this session yet")
                         .font(.callout)
@@ -1791,6 +1961,7 @@ struct TabChromeView: View {
                     ForEach(store.tabsForSelectedSession) { tab in
                         TabItemView(
                             tab: tab,
+                            legacySessionShortcutID: store.selectedSession?.shortcutID,
                             isActive: tab.id == store.selectedTabID,
                             isDirty: tab.kind == .file && fileBufferController.isDirty(tabID: tab.id),
                             onSelect: { selectTab(tab.id) },
@@ -1813,7 +1984,7 @@ struct TabChromeView: View {
                 .buttonStyle(.plain)
                 .disabled(store.selectedSessionID == nil)
                 .help("New tab (⌘T)")
-                .padding(.leading, 8)
+                .padding(.leading, 4)
                 .padding(.trailing, 12)
             }
             .padding(.horizontal, 8)
@@ -1961,6 +2132,7 @@ private struct TabCloseConfirmation: Identifiable {
 
 struct TabItemView: View {
     let tab: WorkspaceTab
+    let legacySessionShortcutID: UUID?
     let isActive: Bool
     let isDirty: Bool
     let onSelect: () -> Void
@@ -1970,11 +2142,10 @@ struct TabItemView: View {
     @State private var isHovered = false
 
     var body: some View {
-        HStack(spacing: 8) {
+        ZStack(alignment: .trailing) {
             Button(action: onSelect) {
                 HStack(spacing: 8) {
-                    Image(systemName: iconName)
-                        .font(.system(size: 13, weight: .semibold))
+                    tabIcon
                     Text(title)
                         .lineLimit(1)
                     if isDirty {
@@ -1983,8 +2154,10 @@ struct TabItemView: View {
                             .frame(width: 6, height: 6)
                             .accessibilityLabel("Unsaved changes")
                     }
+                    Spacer(minLength: 0)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .foregroundStyle(isActive ? theme.primaryText.color : theme.secondaryText.color)
@@ -2057,6 +2230,10 @@ struct TabItemView: View {
     }
 
     private var terminalTabTitle: String {
+        if let canonicalShortcut = canonicalTerminalShortcut {
+            return canonicalShortcut.label
+        }
+
         guard let command = tab.launchCommand?.trimmingCharacters(in: .whitespacesAndNewlines), !command.isEmpty else {
             return "Terminal"
         }
@@ -2084,6 +2261,48 @@ struct TabItemView: View {
         case .file:
             return isActive ? "doc.text.fill" : "doc.text"
         }
+    }
+
+    @ViewBuilder
+    private var tabIcon: some View {
+        if let agentShortcutForIcon {
+            AgentProfileIconView(shortcut: agentShortcutForIcon, fallbackSystemImage: nil, size: 18)
+                .frame(width: 18, height: 18)
+        } else {
+            Image(systemName: iconName)
+                .font(.system(size: 13, weight: .semibold))
+        }
+    }
+
+    private var agentShortcutForIcon: SessionShortcut? {
+        if let canonicalShortcut = canonicalTerminalShortcut {
+            return canonicalShortcut
+        }
+
+        guard tab.kind == .terminal,
+              let command = tab.launchCommand?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !command.isEmpty
+        else {
+            return nil
+        }
+
+        return SessionShortcut(label: "", launchCommand: command)
+    }
+
+    private var canonicalTerminalShortcut: SessionShortcut? {
+        guard tab.kind == .terminal else { return nil }
+
+        if let shortcutID = tab.shortcutID,
+           let shortcut = SessionShortcut.builtInDefaults.first(where: { $0.id == shortcutID }) {
+            return shortcut
+        }
+
+        guard tab.shortcutID == nil,
+              tab.launchCommand?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false,
+              let legacySessionShortcutID
+        else { return nil }
+
+        return SessionShortcut.builtInDefaults.first { $0.id == legacySessionShortcutID }
     }
 
     private var closeHelp: String {
@@ -2152,7 +2371,12 @@ struct WorkspacePrimaryHostAreaView: View {
                     userMessage: $userMessage
                 )
             } else {
-                TerminalPlaceholderView(selectedProject: store.selectedProject, selectedSession: store.selectedSession)
+                TerminalPlaceholderView(
+                    selectedProject: store.selectedProject,
+                    selectedSession: store.selectedSession,
+                    onCreatePlainTab: createPlainTabIfPossible,
+                    onCreateAgentTab: createAgentTabIfPossible
+                )
             }
         }
         .task(id: store.tabsForSelectedSession.map { "\($0.id.uuidString):\($0.kind.rawValue)" }) {
@@ -2169,6 +2393,21 @@ struct WorkspacePrimaryHostAreaView: View {
                 return
             }
         }
+    }
+
+    private func createPlainTabIfPossible() {
+        guard let selectedSessionID = store.selectedSessionID else { return }
+        Task {
+            do {
+                _ = try await commandService.createPlainTab(sessionID: selectedSessionID)
+            } catch {
+                userMessage = UserMessage(title: "Tab could not be created", detail: String(describing: error))
+            }
+        }
+    }
+
+    private func createAgentTabIfPossible() {
+        NotificationCenter.default.post(name: .showAgentTabPalette, object: nil)
     }
 }
 
@@ -2785,7 +3024,6 @@ struct FileWorkspaceSidebarView: View {
 
     @ViewBuilder
     private func repositoryItemContextMenu(for item: RepositoryItemContext) -> some View {
-        let _ = markContextMenuSelection(item.path)
         if item.isDirectory {
             Button("Create File", systemImage: "doc.badge.plus") {
                 showCreateFilePrompt(in: item.path)
@@ -2818,14 +3056,6 @@ struct FileWorkspaceSidebarView: View {
             pendingRepositoryItemDeletion = item
             clearContextMenuSelection(item.path)
         }
-    }
-
-    @discardableResult
-    private func markContextMenuSelection(_ path: String) -> Bool {
-        DispatchQueue.main.async {
-            contextMenuSelectionPath = path
-        }
-        return true
     }
 
     private func clearContextMenuSelection(_ path: String) {
@@ -3319,7 +3549,10 @@ struct TerminalHostView: NSViewRepresentable {
 struct TerminalPlaceholderView: View {
     let selectedProject: WorkspaceProject?
     let selectedSession: WorkspaceSession?
+    let onCreatePlainTab: () -> Void
+    let onCreateAgentTab: () -> Void
     @Environment(\.shellThemePalette) private var theme
+    @Environment(\.shellUIFontSize) private var uiFontSize
 
     var body: some View {
         ZStack {
@@ -3329,12 +3562,21 @@ struct TerminalPlaceholderView: View {
                     .font(.system(size: 44))
                     .foregroundStyle(theme.accent.color)
                 Text(title)
-                    .font(.title3.weight(.semibold))
+                    .font(.system(size: uiFontSize + 3, weight: .semibold))
                     .foregroundStyle(theme.primaryText.color)
                 Text(message)
-                    .font(.callout.monospaced())
+                    .font(.system(size: uiFontSize, design: .monospaced))
                     .foregroundStyle(theme.secondaryText.color)
                     .multilineTextAlignment(.center)
+                if selectedSession != nil {
+                    HStack(spacing: 10) {
+                        Button("New Tab", action: onCreatePlainTab)
+                            .buttonStyle(.bordered)
+                        Button("New Agent Tab…", action: onCreateAgentTab)
+                            .buttonStyle(.borderedProminent)
+                    }
+                    .padding(.top, 4)
+                }
             }
             .padding(28)
             .background(theme.elevatedBackground.color.opacity(0.72), in: RoundedRectangle(cornerRadius: 18))

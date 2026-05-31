@@ -139,6 +139,44 @@ struct RestoreCoordinatorTests {
     }
 
     @Test
+    func interleavedSnapshotOrderRenumbersTabsPerSession() async throws {
+        let projectPath = try makeTemporaryProjectDirectory()
+        let projectID = UUID()
+        let firstSessionID = UUID()
+        let secondSessionID = UUID()
+        let firstSessionFirstTabID = UUID()
+        let firstSessionSecondTabID = UUID()
+        let secondSessionFirstTabID = UUID()
+        let secondSessionSecondTabID = UUID()
+        let project = WorkspaceProject(id: projectID, path: projectPath, displayName: "ade")
+        let firstSession = WorkspaceSession(id: firstSessionID, projectID: projectID, title: "First")
+        let secondSession = WorkspaceSession(id: secondSessionID, projectID: projectID, title: "Second")
+        let firstSessionFirstTab = WorkspaceTab(id: firstSessionFirstTabID, sessionID: firstSessionID, workingDirectory: projectPath, ordinal: 0)
+        let firstSessionSecondTab = WorkspaceTab(id: firstSessionSecondTabID, sessionID: firstSessionID, workingDirectory: projectPath, ordinal: 1)
+        let secondSessionFirstTab = WorkspaceTab(id: secondSessionFirstTabID, sessionID: secondSessionID, workingDirectory: projectPath, ordinal: 0)
+        let secondSessionSecondTab = WorkspaceTab(id: secondSessionSecondTabID, sessionID: secondSessionID, workingDirectory: projectPath, ordinal: 1)
+        let persistence = InMemoryWorkspacePersistenceStore(
+            projects: [project],
+            sessions: [firstSession, secondSession],
+            tabs: [firstSessionFirstTab, firstSessionSecondTab, secondSessionFirstTab, secondSessionSecondTab],
+            restoreSnapshot: RestoreSnapshot(
+                selectedProjectID: projectID,
+                selectedSessionID: firstSessionID,
+                selectedTabID: firstSessionSecondTabID,
+                tabOrder: [firstSessionSecondTabID, secondSessionSecondTabID, firstSessionFirstTabID, secondSessionFirstTabID]
+            )
+        )
+        let coordinator = RestoreCoordinator(persistenceStore: persistence)
+
+        let result = try await coordinator.restoreWorkspace()
+
+        #expect(result.store.tabs(for: firstSessionID).map(\.id) == [firstSessionSecondTabID, firstSessionFirstTabID])
+        #expect(result.store.tabs(for: firstSessionID).map(\.ordinal) == [0, 1])
+        #expect(result.store.tabs(for: secondSessionID).map(\.id) == [secondSessionSecondTabID, secondSessionFirstTabID])
+        #expect(result.store.tabs(for: secondSessionID).map(\.ordinal) == [0, 1])
+    }
+
+    @Test
     func mixedFileTabRestorePreservesSnapshotOrderAndSkipsUnreadableFiles() async throws {
         let projectPath = try makeTemporaryProjectDirectory()
         let sourceDirectory = URL(fileURLWithPath: projectPath, isDirectory: true)

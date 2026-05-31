@@ -72,30 +72,45 @@ public actor SQLiteWorkspaceMetadataStore: WorkspacePersistenceStore {
     }
 
     public func loadTabs() async throws -> [WorkspaceTab] {
-        try query("SELECT id, session_id, working_directory, title, launch_command, launch_arguments_json, kind, file_path, ordinal, created_at, last_activated_at FROM tabs ORDER BY session_id ASC, ordinal ASC") { statement in
+        try query("SELECT id, session_id, working_directory, title, shortcut_id, launch_command, launch_arguments_json, kind, file_path, ordinal, created_at, last_activated_at FROM tabs ORDER BY session_id ASC, ordinal ASC") { statement in
             let tabID = try uuid(statement, 0)
             let workingDirectory = try text(statement, 2)
-            let kind = try workspaceTabKind(statement, 6)
-            let filePath = optionalText(statement, 7)
+            let kind = try workspaceTabKind(statement, 7)
+            let filePath = optionalText(statement, 8)
             return try WorkspaceTab(
                 id: tabID,
                 sessionID: uuid(statement, 1),
                 kind: kind,
                 workingDirectory: workingDirectory,
                 title: optionalText(statement, 3),
-                launchCommand: optionalText(statement, 4),
-                launchArgumentsJSON: optionalText(statement, 5),
+                shortcutID: optionalUUID(statement, 4),
+                launchCommand: optionalText(statement, 5),
+                launchArgumentsJSON: optionalText(statement, 6),
                 fileReference: workspaceFileReference(
                     tabID: tabID,
                     kind: kind,
                     filePath: filePath,
                     workingDirectory: workingDirectory
                 ),
-                ordinal: int(statement, 8),
-                createdAt: date(statement, 9),
-                lastActivatedAt: date(statement, 10)
+                ordinal: int(statement, 9),
+                createdAt: date(statement, 10),
+                lastActivatedAt: date(statement, 11)
             )
         }
+    }
+
+    public func nextTabOrdinal(for sessionID: UUID) async throws -> Int {
+        var statement: OpaquePointer?
+        let sql = "SELECT COALESCE(MAX(ordinal), -1) + 1 FROM tabs WHERE session_id = ?"
+        guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw SQLiteWorkspaceMetadataStoreError.prepareFailed(lastErrorMessage())
+        }
+        defer { sqlite3_finalize(statement) }
+        bind(statement, sessionID, 1)
+        guard sqlite3_step(statement) == SQLITE_ROW else {
+            throw SQLiteWorkspaceMetadataStoreError.stepFailed(lastErrorMessage())
+        }
+        return int(statement, 0)
     }
 
     public func loadSessionShortcuts() async throws -> [SessionShortcut] {
@@ -198,12 +213,13 @@ public actor SQLiteWorkspaceMetadataStore: WorkspacePersistenceStore {
     private func saveTab(_ tab: WorkspaceTab) throws {
         let filePath = try persistedFilePath(for: tab)
         try execute("""
-            INSERT INTO tabs (id, session_id, working_directory, title, launch_command, launch_arguments_json, kind, file_path, ordinal, created_at, last_activated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO tabs (id, session_id, working_directory, title, shortcut_id, launch_command, launch_arguments_json, kind, file_path, ordinal, created_at, last_activated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 session_id = excluded.session_id,
                 working_directory = excluded.working_directory,
                 title = excluded.title,
+                shortcut_id = excluded.shortcut_id,
                 launch_command = excluded.launch_command,
                 launch_arguments_json = excluded.launch_arguments_json,
                 kind = excluded.kind,
@@ -216,13 +232,14 @@ public actor SQLiteWorkspaceMetadataStore: WorkspacePersistenceStore {
             bind(statement, tab.sessionID, 2)
             bind(statement, tab.workingDirectory, 3)
             bind(statement, tab.title, 4)
-            bind(statement, tab.launchCommand, 5)
-            bind(statement, tab.launchArgumentsJSON, 6)
-            bind(statement, tab.kind.rawValue, 7)
-            bind(statement, filePath, 8)
-            bind(statement, tab.ordinal, 9)
-            bind(statement, tab.createdAt, 10)
-            bind(statement, tab.lastActivatedAt, 11)
+            bind(statement, tab.shortcutID, 5)
+            bind(statement, tab.launchCommand, 6)
+            bind(statement, tab.launchArgumentsJSON, 7)
+            bind(statement, tab.kind.rawValue, 8)
+            bind(statement, filePath, 9)
+            bind(statement, tab.ordinal, 10)
+            bind(statement, tab.createdAt, 11)
+            bind(statement, tab.lastActivatedAt, 12)
         }
     }
 
@@ -246,14 +263,44 @@ public actor SQLiteWorkspaceMetadataStore: WorkspacePersistenceStore {
     ) async throws {
         do {
             try executeRaw("BEGIN IMMEDIATE TRANSACTION")
-            if let project { try saveProject(project) }
-            if let session { try saveSession(session) }
-            if let tab { try saveTab(tab) }
+            if let project { try updateProjectActivation(project) }
+            if let session { try updateSessionActivation(session) }
+            if let tab { try updateTabActivation(tab) }
             try saveSnapshot(snapshot)
             try executeRaw("COMMIT")
         } catch {
             try? executeRaw("ROLLBACK")
             throw error
+        }
+    }
+
+    private func updateProjectActivation(_ project: WorkspaceProject) throws {
+        try executeRequiredUpdate(
+            "UPDATE projects SET last_opened_at = ? WHERE id = ?",
+            missingMessage: "Project \(project.id.uuidString) is missing for activation update"
+        ) { statement in
+            bind(statement, project.lastOpenedAt, 1)
+            bind(statement, project.id, 2)
+        }
+    }
+
+    private func updateSessionActivation(_ session: WorkspaceSession) throws {
+        try executeRequiredUpdate(
+            "UPDATE sessions SET last_activated_at = ? WHERE id = ?",
+            missingMessage: "Session \(session.id.uuidString) is missing for activation update"
+        ) { statement in
+            bind(statement, session.lastActivatedAt, 1)
+            bind(statement, session.id, 2)
+        }
+    }
+
+    private func updateTabActivation(_ tab: WorkspaceTab) throws {
+        try executeRequiredUpdate(
+            "UPDATE tabs SET last_activated_at = ? WHERE id = ?",
+            missingMessage: "Tab \(tab.id.uuidString) is missing for activation update"
+        ) { statement in
+            bind(statement, tab.lastActivatedAt, 1)
+            bind(statement, tab.id, 2)
         }
     }
 
@@ -348,6 +395,9 @@ public actor SQLiteWorkspaceMetadataStore: WorkspacePersistenceStore {
                 bind(statement, Date(), 1)
                 bind(statement, id, 2)
             }
+            try execute("UPDATE tabs SET shortcut_id = NULL WHERE shortcut_id = ?") { statement in
+                bind(statement, id, 1)
+            }
             try execute("DELETE FROM session_shortcuts WHERE id = ?") { statement in
                 bind(statement, id, 1)
             }
@@ -367,6 +417,17 @@ public actor SQLiteWorkspaceMetadataStore: WorkspacePersistenceStore {
         try bindValues(statement)
         guard sqlite3_step(statement) == SQLITE_DONE else {
             throw SQLiteWorkspaceMetadataStoreError.stepFailed(lastErrorMessage())
+        }
+    }
+
+    private func executeRequiredUpdate(
+        _ sql: String,
+        missingMessage: String,
+        bindValues: (OpaquePointer?) throws -> Void
+    ) throws {
+        try execute(sql, bindValues: bindValues)
+        guard sqlite3_changes(database) == 1 else {
+            throw SQLiteWorkspaceMetadataStoreError.invalidStoredValue(missingMessage)
         }
     }
 

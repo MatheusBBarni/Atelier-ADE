@@ -15,7 +15,7 @@ struct SQLiteWorkspaceMetadataStoreTests {
 
         #expect(tables == WorkspaceMigrations.metadataTables)
         #expect(try inspectColumnNames(path: path, tableName: "session_shortcuts").contains("has_user_override"))
-        #expect(try inspectColumnNames(path: path, tableName: "tabs").isSuperset(of: ["kind", "file_path", "title"]))
+        #expect(try inspectColumnNames(path: path, tableName: "tabs").isSuperset(of: ["kind", "file_path", "title", "shortcut_id"]))
         #expect(try inspectColumnNames(path: path, tableName: "app_preferences").contains("terminal_font_size"))
         #expect(try inspectUserVersion(path: path) == WorkspaceMigrations.currentUserVersion)
         #expect(try inspectAppPreferencesRowCount(path: path) == 1)
@@ -105,6 +105,7 @@ struct SQLiteWorkspaceMetadataStoreTests {
             sessionID: newerSessionID,
             workingDirectory: project.path,
             title: "Review",
+            shortcutID: shortcut.id,
             launchCommand: "codex",
             launchArgumentsJSON: "[\"resume\"]",
             ordinal: 1,
@@ -151,6 +152,7 @@ struct SQLiteWorkspaceMetadataStoreTests {
         #expect(loadedTabs.first?.workingDirectory == project.path)
         #expect(loadedTabs.first?.ordinal == 0)
         #expect(loadedTabs.last?.title == "Review")
+        #expect(loadedTabs.last?.shortcutID == shortcut.id)
         #expect(loadedTabs.last?.launchCommand == "codex")
         #expect(loadedTabs.last?.launchArgumentsJSON == "[\"resume\"]")
         #expect(loadedShortcuts == [shortcut])
@@ -251,7 +253,7 @@ struct SQLiteWorkspaceMetadataStoreTests {
         #expect(try inspectUserVersion(path: path) == WorkspaceMigrations.currentUserVersion)
         #expect(try inspectUserTableNames(path: path) == WorkspaceMigrations.metadataTables)
         #expect(try inspectColumnNames(path: path, tableName: "session_shortcuts").contains("has_user_override"))
-        #expect(try inspectColumnNames(path: path, tableName: "tabs").isSuperset(of: ["kind", "file_path", "title"]))
+        #expect(try inspectColumnNames(path: path, tableName: "tabs").isSuperset(of: ["kind", "file_path", "title", "shortcut_id"]))
         #expect(try inspectColumnNames(path: path, tableName: "app_preferences").contains("terminal_font_size"))
         #expect(try inspectAppPreferencesRowCount(path: path) == 1)
         #expect(try await store.loadProjects() == [fixture.project])
@@ -283,7 +285,7 @@ struct SQLiteWorkspaceMetadataStoreTests {
         let store = try SQLiteWorkspaceMetadataStore(path: path)
 
         #expect(try inspectUserVersion(path: path) == WorkspaceMigrations.currentUserVersion)
-        #expect(try inspectColumnNames(path: path, tableName: "tabs").isSuperset(of: ["kind", "file_path", "title"]))
+        #expect(try inspectColumnNames(path: path, tableName: "tabs").isSuperset(of: ["kind", "file_path", "title", "shortcut_id"]))
         #expect(try inspectColumnNames(path: path, tableName: "app_preferences").contains("terminal_font_size"))
         #expect(try await store.loadTabs() == [fixture.tab])
         #expect(try await store.loadRestoreSnapshot() == fixture.restoreSnapshot)
@@ -378,6 +380,15 @@ struct SQLiteWorkspaceMetadataStoreTests {
         let path = temporaryDatabasePath()
         let store = try SQLiteWorkspaceMetadataStore(path: path)
         let shortcut = SessionShortcut(label: "OpenCode", launchCommand: "opencode")
+        let project = WorkspaceProject(path: "/Users/example/delete-shortcut", displayName: "delete-shortcut")
+        let session = WorkspaceSession(projectID: project.id, title: "OpenCode", shortcutID: shortcut.id)
+        let tab = WorkspaceTab(
+            sessionID: session.id,
+            workingDirectory: project.path,
+            shortcutID: shortcut.id,
+            launchCommand: "opencode",
+            ordinal: 0
+        )
         let preferences = AppPreferences(
             themeID: "cursor",
             defaultSessionShortcutID: shortcut.id,
@@ -385,10 +396,15 @@ struct SQLiteWorkspaceMetadataStoreTests {
         )
 
         try await store.save(shortcut: shortcut)
+        try await store.save(project: project)
+        try await store.save(session: session)
+        try await store.save(tab: tab)
         try await store.save(appPreferences: preferences)
         try await store.deleteShortcut(id: shortcut.id)
 
         #expect(try await store.loadSessionShortcuts().isEmpty)
+        #expect(try await store.loadSessions().first?.shortcutID == nil)
+        #expect(try await store.loadTabs().first?.shortcutID == nil)
         #expect(try await store.loadAppPreferences().defaultSessionShortcutID == nil)
     }
 
@@ -451,6 +467,52 @@ struct SQLiteWorkspaceMetadataStoreTests {
         #expect(try await store.loadTabs().first?.lastActivatedAt == activatedAt)
         #expect(try await store.loadRestoreSnapshot()?.selectedTabID == tab.id)
         #expect(try await store.loadRestoreSnapshot()?.updatedAt == activatedAt)
+    }
+
+    @Test
+    func activationSaveUpdatesTabRecencyWithoutRewritingOrdinal() async throws {
+        let path = temporaryDatabasePath()
+        let store = try SQLiteWorkspaceMetadataStore(path: path)
+        let activatedAt = Date(timeIntervalSince1970: 300)
+        let project = WorkspaceProject(path: "/Users/example/reordered", displayName: "reordered")
+        let session = WorkspaceSession(projectID: project.id, title: "Reordered")
+        let firstTab = WorkspaceTab(
+            sessionID: session.id,
+            workingDirectory: project.path,
+            ordinal: 0,
+            lastActivatedAt: Date(timeIntervalSince1970: 40)
+        )
+        var restoredSecondTab = WorkspaceTab(
+            sessionID: session.id,
+            workingDirectory: project.path,
+            ordinal: 1,
+            lastActivatedAt: Date(timeIntervalSince1970: 50)
+        )
+        try await store.save(project: project)
+        try await store.save(session: session)
+        try await store.save(tab: firstTab)
+        try await store.save(tab: restoredSecondTab)
+
+        restoredSecondTab.ordinal = 0
+        restoredSecondTab.lastActivatedAt = activatedAt
+        try await store.saveActivation(
+            project: project,
+            session: session,
+            tab: restoredSecondTab,
+            snapshot: RestoreSnapshot(
+                selectedProjectID: project.id,
+                selectedSessionID: session.id,
+                selectedTabID: restoredSecondTab.id,
+                tabOrder: [restoredSecondTab.id, firstTab.id],
+                updatedAt: activatedAt
+            )
+        )
+
+        let loadedTabs = try await store.loadTabs()
+        #expect(loadedTabs.map(\.id) == [firstTab.id, restoredSecondTab.id])
+        #expect(loadedTabs.map(\.ordinal) == [0, 1])
+        #expect(loadedTabs.first { $0.id == restoredSecondTab.id }?.lastActivatedAt == activatedAt)
+        #expect(try await store.loadRestoreSnapshot()?.tabOrder == [restoredSecondTab.id, firstTab.id])
     }
 
     @Test

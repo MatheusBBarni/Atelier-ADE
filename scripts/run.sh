@@ -9,6 +9,8 @@ APP_BUNDLE_NAME="Atelier"
 BUNDLE_ID="com.matheusbbarni.Atelier"
 MIN_MACOS_VERSION="15.0"
 ICON_SOURCE="$ROOT_DIR/Sources/NativeMacADE/Resources/AppIcon.png"
+APP_VERSION="${APP_VERSION:-0.1.0}"
+APP_BUILD="${APP_BUILD:-1}"
 MODE="${1:-run}"
 
 if [[ $# -gt 0 ]]; then
@@ -43,10 +45,12 @@ create_icns() {
 }
 
 build_app_bundle() {
-  swift build --product "$PRODUCT" >&2
+  local build_args=("$@")
+
+  swift build --product "$PRODUCT" "${build_args[@]}" >&2
 
   local bin_path app_bundle contents_dir macos_dir resources_dir executable_path resource_bundle_path
-  bin_path="$(swift build --show-bin-path)"
+  bin_path="$(swift build --show-bin-path "${build_args[@]}")"
   executable_path="$bin_path/$PRODUCT"
   resource_bundle_path="$(find "$bin_path" -maxdepth 1 -type d -name "${PRODUCT}_*.bundle" | head -n 1)"
 
@@ -90,9 +94,9 @@ build_app_bundle() {
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
-  <string>0.1.0</string>
+  <string>$APP_VERSION</string>
   <key>CFBundleVersion</key>
-  <string>1</string>
+  <string>$APP_BUILD</string>
   <key>LSMinimumSystemVersion</key>
   <string>$MIN_MACOS_VERSION</string>
   <key>NSHighResolutionCapable</key>
@@ -115,7 +119,7 @@ case "$MODE" in
     exec swift build --product "$PRODUCT" "$@"
     ;;
   bundle)
-    build_app_bundle
+    build_app_bundle "$@"
     ;;
   test)
     exec swift test "$@"

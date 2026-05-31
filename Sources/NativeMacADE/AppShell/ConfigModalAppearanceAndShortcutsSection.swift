@@ -82,7 +82,7 @@ struct ConfigModalAppearanceAndShortcutsSection: View {
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(theme.secondaryText.color)
 
-                    Picker("Theme", selection: $themeDraftID) {
+                    Picker("", selection: $themeDraftID) {
                         Section("Dark") {
                             ForEach(darkThemes) { option in
                                 Text(option.displayName).tag(option.id)
@@ -96,10 +96,13 @@ struct ConfigModalAppearanceAndShortcutsSection: View {
                         }
                     }
                     .pickerStyle(.menu)
+                    .labelsHidden()
+                    .accessibilityLabel("Theme")
                     .disabled(isSavingAppearance)
                 }
             }
             .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background(theme.contentBackground.color, in: RoundedRectangle(cornerRadius: 8))
             .overlay {
                 RoundedRectangle(cornerRadius: 8)

@@ -122,7 +122,9 @@ struct ConfigModalAgentProfilesSection: View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 8) {
-                    AgentProfileIconView(shortcut: codexHeaderShortcut, fallbackSystemImage: "sparkles", size: 20)
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(theme.accent.color)
                     Text("Agent Profiles")
                         .font(.title3.weight(.semibold))
                         .foregroundStyle(theme.primaryText.color)
@@ -164,10 +166,6 @@ struct ConfigModalAgentProfilesSection: View {
                 }
             }
         }
-    }
-
-    private var codexHeaderShortcut: SessionShortcut? {
-        SessionShortcut.builtInDefaults.first { $0.launchCommand == "codex" }
     }
 
     private var rowStates: [AgentProfileRowState] {

@@ -4,6 +4,7 @@ public protocol WorkspacePersistenceStore: Sendable {
     func loadProjects() async throws -> [WorkspaceProject]
     func loadSessions() async throws -> [WorkspaceSession]
     func loadTabs() async throws -> [WorkspaceTab]
+    func nextTabOrdinal(for sessionID: UUID) async throws -> Int
     func loadSessionShortcuts() async throws -> [SessionShortcut]
     func loadAppPreferences() async throws -> AppPreferences
     func loadRestoreSnapshot() async throws -> RestoreSnapshot?
@@ -19,6 +20,15 @@ public protocol WorkspacePersistenceStore: Sendable {
     func deleteSession(id: UUID) async throws
     func deleteTab(id: UUID) async throws
     func deleteShortcut(id: UUID) async throws
+}
+
+public extension WorkspacePersistenceStore {
+    func nextTabOrdinal(for sessionID: UUID) async throws -> Int {
+        let ordinals = try await loadTabs()
+            .filter { $0.sessionID == sessionID }
+            .map(\.ordinal)
+        return (ordinals.max() ?? -1) + 1
+    }
 }
 
 public actor InMemoryWorkspacePersistenceStore: WorkspacePersistenceStore {
@@ -101,16 +111,22 @@ public actor InMemoryWorkspacePersistenceStore: WorkspacePersistenceStore {
         snapshot: RestoreSnapshot
     ) async throws {
         if let project {
-            projects.removeAll { $0.id == project.id }
-            projects.append(project)
+            guard let index = projects.firstIndex(where: { $0.id == project.id }) else {
+                throw InMemoryWorkspacePersistenceStoreError.missingProject(project.id)
+            }
+            projects[index].lastOpenedAt = project.lastOpenedAt
         }
         if let session {
-            sessions.removeAll { $0.id == session.id }
-            sessions.append(session)
+            guard let index = sessions.firstIndex(where: { $0.id == session.id }) else {
+                throw InMemoryWorkspacePersistenceStoreError.missingSession(session.id)
+            }
+            sessions[index].lastActivatedAt = session.lastActivatedAt
         }
         if let tab {
-            tabs.removeAll { $0.id == tab.id }
-            tabs.append(tab)
+            guard let index = tabs.firstIndex(where: { $0.id == tab.id }) else {
+                throw InMemoryWorkspacePersistenceStoreError.missingTab(tab.id)
+            }
+            tabs[index].lastActivatedAt = tab.lastActivatedAt
         }
         restoreSnapshot = snapshot
     }
@@ -148,9 +164,18 @@ public actor InMemoryWorkspacePersistenceStore: WorkspacePersistenceStore {
         for index in sessions.indices where sessions[index].shortcutID == id {
             sessions[index].shortcutID = nil
         }
+        for index in tabs.indices where tabs[index].shortcutID == id {
+            tabs[index].shortcutID = nil
+        }
         if appPreferences.defaultSessionShortcutID == id {
             appPreferences.defaultSessionShortcutID = nil
             appPreferences.updatedAt = Date()
         }
     }
+}
+
+private enum InMemoryWorkspacePersistenceStoreError: Error, Equatable, Sendable {
+    case missingProject(UUID)
+    case missingSession(UUID)
+    case missingTab(UUID)
 }

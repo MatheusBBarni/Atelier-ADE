@@ -148,12 +148,20 @@ struct WorkspaceModelsTests {
     func deletingShortcutInMemoryClearsMatchingDefaultSessionShortcutID() async throws {
         let shortcut = SessionShortcut(label: "Codex", launchCommand: "codex")
         let session = WorkspaceSession(projectID: UUID(), title: "Shortcut", shortcutID: shortcut.id)
+        let tab = WorkspaceTab(
+            sessionID: session.id,
+            workingDirectory: "/Users/example/project",
+            shortcutID: shortcut.id,
+            launchCommand: "codex",
+            ordinal: 0
+        )
         let preferences = AppPreferences(
             defaultSessionShortcutID: shortcut.id,
             updatedAt: Date(timeIntervalSince1970: 3_000)
         )
         let store = InMemoryWorkspacePersistenceStore(
             sessions: [session],
+            tabs: [tab],
             shortcuts: [shortcut],
             appPreferences: preferences
         )
@@ -162,6 +170,7 @@ struct WorkspaceModelsTests {
 
         #expect(try await store.loadAppPreferences().defaultSessionShortcutID == nil)
         #expect(try await store.loadSessions().first?.shortcutID == nil)
+        #expect(try await store.loadTabs().first?.shortcutID == nil)
     }
 
     @Test
@@ -217,6 +226,7 @@ struct WorkspaceModelsTests {
     @Test
     func tabMetadataPreservesRelaunchFieldsAndOrdering() {
         let sessionID = UUID()
+        let shortcutID = UUID()
         let createdAt = Date(timeIntervalSince1970: 100)
         let activatedAt = Date(timeIntervalSince1970: 200)
 
@@ -224,6 +234,7 @@ struct WorkspaceModelsTests {
             sessionID: sessionID,
             workingDirectory: "/Users/example/project",
             title: "Review shell",
+            shortcutID: shortcutID,
             launchCommand: "codex",
             launchArgumentsJSON: "[\"--ask-for-approval\",\"never\"]",
             ordinal: 2,
@@ -234,6 +245,7 @@ struct WorkspaceModelsTests {
         #expect(tab.sessionID == sessionID)
         #expect(tab.workingDirectory == "/Users/example/project")
         #expect(tab.title == "Review shell")
+        #expect(tab.shortcutID == shortcutID)
         #expect(tab.launchCommand == "codex")
         #expect(tab.launchArgumentsJSON == "[\"--ask-for-approval\",\"never\"]")
         #expect(tab.ordinal == 2)
@@ -241,6 +253,31 @@ struct WorkspaceModelsTests {
         #expect(tab.lastActivatedAt == activatedAt)
         #expect(tab.kind == .terminal)
         #expect(tab.fileReference == nil)
+    }
+
+    @Test
+    func terminalTabCodableRoundTripPreservesShortcutIDAndDefaultsLegacyMissingToNil() throws {
+        let shortcutID = UUID()
+        let tab = WorkspaceTab(
+            sessionID: UUID(),
+            workingDirectory: "/Users/example/project",
+            shortcutID: shortcutID,
+            launchCommand: "claude-dev",
+            ordinal: 0,
+            createdAt: Date(timeIntervalSince1970: 100),
+            lastActivatedAt: Date(timeIntervalSince1970: 200)
+        )
+
+        let encoded = try JSONEncoder().encode(tab)
+        let decoded = try JSONDecoder().decode(WorkspaceTab.self, from: encoded)
+        var legacyPayload = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        legacyPayload.removeValue(forKey: "shortcutID")
+        let legacyEncoded = try JSONSerialization.data(withJSONObject: legacyPayload)
+        let legacyDecoded = try JSONDecoder().decode(WorkspaceTab.self, from: legacyEncoded)
+
+        #expect(decoded == tab)
+        #expect(decoded.shortcutID == shortcutID)
+        #expect(legacyDecoded.shortcutID == nil)
     }
 
     @Test

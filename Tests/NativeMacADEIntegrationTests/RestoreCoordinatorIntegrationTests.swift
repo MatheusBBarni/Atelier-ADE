@@ -41,6 +41,42 @@ struct RestoreCoordinatorIntegrationTests {
     }
 
     @Test
+    func selectingRestoredReorderedTabDoesNotRewritePersistedOrdinal() async throws {
+        let activatedAt = Date(timeIntervalSince1970: 2_000)
+        let harness = try makeHarness(now: { activatedAt })
+        let projectPath = try makeTemporaryProjectDirectory()
+        let projectID = UUID()
+        let sessionID = UUID()
+        let firstTabID = UUID()
+        let secondTabID = UUID()
+        let project = WorkspaceProject(id: projectID, path: projectPath, displayName: "old-session")
+        let session = WorkspaceSession(id: sessionID, projectID: projectID, title: "Old Session")
+        let firstTab = WorkspaceTab(id: firstTabID, sessionID: sessionID, workingDirectory: projectPath, ordinal: 0)
+        let secondTab = WorkspaceTab(id: secondTabID, sessionID: sessionID, workingDirectory: projectPath, ordinal: 1)
+        try await harness.persistence.save(project: project)
+        try await harness.persistence.save(session: session)
+        try await harness.persistence.save(tab: firstTab)
+        try await harness.persistence.save(tab: secondTab)
+        try await harness.persistence.save(snapshot: RestoreSnapshot(
+            selectedProjectID: projectID,
+            selectedSessionID: sessionID,
+            selectedTabID: firstTabID,
+            tabOrder: [secondTabID, firstTabID]
+        ))
+
+        try await harness.service.restoreWorkspace()
+        try await harness.service.selectTab(id: secondTabID)
+
+        let persistedTabs = try await harness.persistence.loadTabs()
+        #expect(harness.store.tabsForSelectedSession.map(\.id) == [secondTabID, firstTabID])
+        #expect(harness.store.selectedTabID == secondTabID)
+        #expect(persistedTabs.map(\.id) == [firstTabID, secondTabID])
+        #expect(persistedTabs.map(\.ordinal) == [0, 1])
+        #expect(persistedTabs.first { $0.id == secondTabID }?.lastActivatedAt == activatedAt)
+        #expect(try await harness.persistence.loadRestoreSnapshot()?.tabOrder == [secondTabID, firstTabID])
+    }
+
+    @Test
     func relaunchMixedSessionRestoresOrderSelectionAndSkipsUnreadableFileTabs() async throws {
         let harness = try makeHarness()
         let projectPath = try makeTemporaryProjectDirectory()
@@ -295,7 +331,7 @@ struct RestoreCoordinatorIntegrationTests {
         #expect(harness.terminal.createdTabs.map(\.id) == [tabID])
     }
 
-    private func makeHarness() throws -> RestoreIntegrationHarness {
+    private func makeHarness(now: @escaping @MainActor () -> Date = Date.init) throws -> RestoreIntegrationHarness {
         let databasePath = temporaryDatabasePath()
         let store = WorkspaceStore()
         let persistence = try SQLiteWorkspaceMetadataStore(path: databasePath)
@@ -311,7 +347,8 @@ struct RestoreCoordinatorIntegrationTests {
             terminalSurfaceManager: terminal,
             fileAccess: fileAccess,
             fileBufferManager: fileBuffers,
-            externalEditorOpener: externalEditor
+            externalEditorOpener: externalEditor,
+            now: now
         )
         return RestoreIntegrationHarness(
             databasePath: databasePath,

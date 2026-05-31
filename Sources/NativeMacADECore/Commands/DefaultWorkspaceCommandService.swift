@@ -273,6 +273,7 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
 
         try await persist { try await persistenceStore.deleteShortcut(id: id) }
         let preferencesAfterDelete = try await loadNormalizedAppPreferences(healStaleReferences: true)
+        clearShortcutReferencesInStore(id: id)
         store.updateAppPreferences(preferencesAfterDelete)
 
         if preferencesBeforeDelete.defaultSessionShortcutID == id {
@@ -280,6 +281,15 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
                 "stale_profile_id": id.uuidString,
                 "reason": "deleted_profile"
             ])
+        }
+    }
+
+    private func clearShortcutReferencesInStore(id: UUID) {
+        for index in store.sessions.indices where store.sessions[index].shortcutID == id {
+            store.sessions[index].shortcutID = nil
+        }
+        for index in store.tabs.indices where store.tabs[index].shortcutID == id {
+            store.tabs[index].shortcutID = nil
         }
     }
 
@@ -321,6 +331,7 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
         let firstTab = WorkspaceTab(
             sessionID: session.id,
             workingDirectory: project.path,
+            shortcutID: launchIntent.shortcutID,
             launchCommand: launchIntent.launchCommand,
             launchArgumentsJSON: launchIntent.launchArgumentsJSON,
             ordinal: 0,
@@ -430,12 +441,14 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
         }
 
         let timestamp = now()
+        let ordinal = try await persist { try await persistenceStore.nextTabOrdinal(for: session.id) }
         let tab = WorkspaceTab(
             sessionID: session.id,
             workingDirectory: project.path,
+            shortcutID: launchIntent.shortcutID,
             launchCommand: launchIntent.launchCommand,
             launchArgumentsJSON: launchIntent.launchArgumentsJSON,
-            ordinal: store.nextTabOrdinal(for: session.id),
+            ordinal: ordinal,
             createdAt: timestamp,
             lastActivatedAt: timestamp
         )
@@ -507,12 +520,13 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
         }
 
         let timestamp = now()
+        let ordinal = try await persist { try await persistenceStore.nextTabOrdinal(for: session.id) }
         let tab = WorkspaceTab(
             sessionID: session.id,
             kind: .file,
             workingDirectory: fileReference.projectRoot,
             fileReference: fileReference,
-            ordinal: store.nextTabOrdinal(for: session.id),
+            ordinal: ordinal,
             createdAt: timestamp,
             lastActivatedAt: timestamp
         )

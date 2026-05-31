@@ -60,9 +60,11 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
         #expect(persistedSessions.map(\.id) == [session.id])
         #expect(launchedTab.sessionID == session.id)
         #expect(launchedTab.workingDirectory == project.path)
+        #expect(launchedTab.shortcutID == shortcut.id)
         #expect(launchedTab.launchCommand == "codex")
         #expect(launchedTab.launchArgumentsJSON == "[\"resume\"]")
         #expect(persistedTabs.map(\.id) == [launchedTab.id])
+        #expect(persistedTabs.first?.shortcutID == shortcut.id)
         #expect(persistedTabs.first?.launchCommand == launchedTab.launchCommand)
         #expect(persistedTabs.first?.launchArgumentsJSON == launchedTab.launchArgumentsJSON)
         #expect(harness.store.selectedTabID == launchedTab.id)
@@ -90,6 +92,8 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
         #expect(session.shortcutID == shortcut.id)
         #expect(persistedSessions.map(\.id) == [session.id])
         #expect(persistedTabs.map(\.id) == [launchedTab.id])
+        #expect(launchedTab.shortcutID == shortcut.id)
+        #expect(persistedTabs.first?.shortcutID == shortcut.id)
         #expect(launchedTab.launchCommand == "claude")
         #expect(launchedTab.launchArgumentsJSON == "[\"--continue\"]")
         #expect(harness.store.selectedTabID == launchedTab.id)
@@ -118,13 +122,16 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
         let deletedDefaultTab = try #require(harness.terminal.createdTabs.first { $0.sessionID == deletedDefaultSession.id })
 
         #expect(defaultSession.shortcutID == profile.id)
+        #expect(defaultTab.shortcutID == profile.id)
         #expect(defaultTab.launchCommand == "local-agent")
         #expect(defaultTab.launchArgumentsJSON == "[\"run\"]")
         #expect(clearedSession.shortcutID == nil)
+        #expect(clearedTab.shortcutID == nil)
         #expect(clearedTab.launchCommand == nil)
         #expect(clearedTab.launchArgumentsJSON == nil)
         #expect(try await harness.persistence.loadAppPreferences().defaultSessionShortcutID == nil)
         #expect(deletedDefaultSession.shortcutID == nil)
+        #expect(deletedDefaultTab.shortcutID == nil)
         #expect(deletedDefaultTab.launchCommand == nil)
         #expect(deletedDefaultTab.launchArgumentsJSON == nil)
     }
@@ -276,6 +283,9 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
         #expect(explicitSession.shortcutID == explicitShortcut.id)
         #expect(defaultSession.shortcutID == defaultShortcut.id)
         #expect(plainSession.shortcutID == nil)
+        #expect(launchedTabs.first { $0.sessionID == explicitSession.id }?.shortcutID == explicitShortcut.id)
+        #expect(launchedTabs.first { $0.sessionID == defaultSession.id }?.shortcutID == defaultShortcut.id)
+        #expect(launchedTabs.first { $0.sessionID == plainSession.id }?.shortcutID == nil)
         #expect(launchedTabs.first { $0.sessionID == explicitSession.id }?.launchCommand == "codex")
         #expect(launchedTabs.first { $0.sessionID == defaultSession.id }?.launchCommand == "claude")
         #expect(launchedTabs.first { $0.sessionID == plainSession.id }?.launchCommand == nil)
@@ -296,6 +306,7 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
         #expect(try await harness.persistence.loadAppPreferences().defaultSessionShortcutID == nil)
         #expect(harness.store.appPreferences.defaultSessionShortcutID == nil)
         #expect(session.shortcutID == nil)
+        #expect(tab.shortcutID == nil)
         #expect(tab.launchCommand == nil)
     }
 
@@ -333,10 +344,34 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
         let tab = try await harness.service.createTab(sessionID: session.id)
         let persistedTab = try #require(try await harness.persistence.loadTabs().first { $0.id == tab.id })
 
+        #expect(tab.shortcutID == shortcut.id)
         #expect(tab.launchCommand == "claude")
         #expect(tab.launchArgumentsJSON == "[\"--continue\"]")
+        #expect(persistedTab.shortcutID == shortcut.id)
         #expect(persistedTab.launchCommand == "claude")
         #expect(persistedTab.launchArgumentsJSON == "[\"--continue\"]")
+    }
+
+    @Test
+    func creatingTerminalTabUsesPersistedMaxOrdinalWhenStoreHasRestoredSubset() async throws {
+        let harness = try makeHarness()
+        let project = try await harness.service.openProject(path: makeTemporaryProjectDirectory())
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let initialTab = try #require(harness.store.tabs.first)
+        let persistedOnlyTab = WorkspaceTab(
+            sessionID: session.id,
+            workingDirectory: project.path,
+            ordinal: 1
+        )
+        try await harness.persistence.save(tab: persistedOnlyTab)
+
+        let createdTab = try await harness.service.createTab(sessionID: session.id)
+        let persistedTabs = try await harness.persistence.loadTabs()
+
+        #expect(createdTab.ordinal == 2)
+        #expect(harness.store.tabsForSelectedSession.map(\.id) == [initialTab.id, createdTab.id])
+        #expect(persistedTabs.map(\.id) == [initialTab.id, persistedOnlyTab.id, createdTab.id])
+        #expect(persistedTabs.map(\.ordinal) == [0, 1, 2])
     }
 
     @Test
@@ -362,6 +397,7 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
 
         #expect(updatedSession.shortcutID == originalSession.shortcutID)
         #expect(updatedSession.title == originalSession.title)
+        #expect(updatedTab.shortcutID == originalTab.shortcutID)
         #expect(updatedTab.launchCommand == originalTab.launchCommand)
         #expect(updatedTab.launchArgumentsJSON == originalTab.launchArgumentsJSON)
         #expect(updatedTab.workingDirectory == originalTab.workingDirectory)
@@ -682,6 +718,31 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
         #expect(presentation?.languageConfigurationKey == "swift")
         #expect(presentation?.isDirty == false)
         #expect(harness.terminal.createdTabs.map(\.id) == [terminalTab.id])
+    }
+
+    @Test
+    func openingFileTabUsesPersistedMaxOrdinalWhenStoreHasRestoredSubset() async throws {
+        let harness = try makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+        let fileURL = try makeTemporaryProjectFile(in: projectPath, relativePath: "Sources/File.swift")
+        let project = try await harness.service.openProject(path: projectPath)
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let initialTab = try #require(harness.store.tabs.first)
+        let persistedOnlyTab = WorkspaceTab(
+            sessionID: session.id,
+            workingDirectory: project.path,
+            ordinal: 1
+        )
+        try await harness.persistence.save(tab: persistedOnlyTab)
+
+        let fileTab = try await harness.service.openFileTab(sessionID: session.id, path: fileURL.path)
+        let persistedTabs = try await harness.persistence.loadTabs()
+
+        #expect(fileTab.kind == .file)
+        #expect(fileTab.ordinal == 2)
+        #expect(harness.store.tabsForSelectedSession.map(\.id) == [initialTab.id, fileTab.id])
+        #expect(persistedTabs.map(\.id) == [initialTab.id, persistedOnlyTab.id, fileTab.id])
+        #expect(persistedTabs.map(\.ordinal) == [0, 1, 2])
     }
 
     @Test

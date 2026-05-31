@@ -7,7 +7,7 @@ public enum WorkspaceMigrationError: Error, Equatable, Sendable {
 }
 
 public enum WorkspaceMigrations {
-    public static let currentUserVersion: Int32 = 4
+    public static let currentUserVersion: Int32 = 5
     public static let metadataTables: Set<String> = [
         "projects",
         "sessions",
@@ -37,6 +37,9 @@ public enum WorkspaceMigrations {
         }
         if existingUserVersion < 4 {
             try migrateToV4(database)
+        }
+        if existingUserVersion < 5 {
+            try migrateToV5(database)
         }
         try repairTabMetadataIfNeeded(database)
         try repairAppPreferencesMetadataIfNeeded(database)
@@ -82,6 +85,7 @@ public enum WorkspaceMigrations {
         session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
         working_directory TEXT NOT NULL,
         title TEXT,
+        shortcut_id TEXT REFERENCES session_shortcuts(id) ON DELETE SET NULL,
         launch_command TEXT,
         launch_arguments_json TEXT,
         kind TEXT NOT NULL DEFAULT 'terminal' CHECK (kind IN ('terminal', 'file')),
@@ -147,9 +151,14 @@ public enum WorkspaceMigrations {
         try addV4AppPreferencesFontSizeColumnIfNeeded(database)
     }
 
+    private static func migrateToV5(_ database: OpaquePointer?) throws {
+        try addV5TabShortcutIDColumnIfNeeded(database)
+    }
+
     private static func repairTabMetadataIfNeeded(_ database: OpaquePointer?) throws {
         try addV2TabMetadataColumnsIfNeeded(database)
         try addV3TabTitleColumnIfNeeded(database)
+        try addV5TabShortcutIDColumnIfNeeded(database)
     }
 
     private static func repairAppPreferencesMetadataIfNeeded(_ database: OpaquePointer?) throws {
@@ -174,6 +183,12 @@ public enum WorkspaceMigrations {
     private static func addV4AppPreferencesFontSizeColumnIfNeeded(_ database: OpaquePointer?) throws {
         if try !table("app_preferences", hasColumn: "terminal_font_size", database: database) {
             try execute(database, "ALTER TABLE app_preferences ADD COLUMN terminal_font_size REAL NOT NULL DEFAULT \(AppPreferences.defaultTerminalFontSize)")
+        }
+    }
+
+    private static func addV5TabShortcutIDColumnIfNeeded(_ database: OpaquePointer?) throws {
+        if try !table("tabs", hasColumn: "shortcut_id", database: database) {
+            try execute(database, "ALTER TABLE tabs ADD COLUMN shortcut_id TEXT REFERENCES session_shortcuts(id) ON DELETE SET NULL")
         }
     }
 

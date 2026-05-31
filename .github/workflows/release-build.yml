@@ -1,0 +1,80 @@
+name: Release build
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: App version for bundle metadata (for example 0.1.0)
+        required: false
+        type: string
+      build_number:
+        description: Build number for bundle metadata
+        required: false
+        type: string
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos-release:
+    runs-on: macos-15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Show Swift toolchain
+        run: swift --version
+
+      - name: Run test suite
+        run: swift test
+
+      - name: Resolve release metadata
+        env:
+          INPUT_VERSION: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.version || '' }}
+          INPUT_BUILD_NUMBER: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.build_number || '' }}
+        run: |
+          if [[ -n "$INPUT_VERSION" ]]; then
+            APP_VERSION="$INPUT_VERSION"
+          elif [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            APP_VERSION="${GITHUB_REF_NAME#v}"
+          else
+            APP_VERSION="0.1.0"
+          fi
+
+          if [[ -n "$INPUT_BUILD_NUMBER" ]]; then
+            APP_BUILD="$INPUT_BUILD_NUMBER"
+          else
+            APP_BUILD="$GITHUB_RUN_NUMBER"
+          fi
+
+          echo "APP_VERSION=$APP_VERSION" >> "$GITHUB_ENV"
+          echo "APP_BUILD=$APP_BUILD" >> "$GITHUB_ENV"
+
+      - name: Build release app bundle
+        id: bundle
+        run: |
+          chmod +x ./scripts/run.sh
+          APP_PATH="$(APP_VERSION="$APP_VERSION" APP_BUILD="$APP_BUILD" ./scripts/run.sh bundle -c release)"
+          ZIP_NAME="Atelier-macOS-${APP_VERSION}.zip"
+          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$ZIP_NAME"
+
+          echo "app_path=$APP_PATH" >> "$GITHUB_OUTPUT"
+          echo "zip_name=$ZIP_NAME" >> "$GITHUB_OUTPUT"
+          echo "zip_path=$PWD/$ZIP_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Upload zipped app artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Atelier-macOS-${{ env.APP_VERSION }}
+          path: ${{ steps.bundle.outputs.zip_path }}
+
+      - name: Publish GitHub release asset
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.bundle.outputs.zip_path }}
+          generate_release_notes: true

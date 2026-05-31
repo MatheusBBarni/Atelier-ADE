@@ -94,6 +94,7 @@ public struct Tab: Identifiable, Equatable, Codable, Sendable {
     public var kind: WorkspaceTabKind
     public var workingDirectory: String
     public var title: String?
+    public var shortcutID: UUID?
     public var launchCommand: String?
     public var launchArgumentsJSON: String?
     public var fileReference: WorkspaceFileReference?
@@ -107,6 +108,7 @@ public struct Tab: Identifiable, Equatable, Codable, Sendable {
         kind: WorkspaceTabKind = .terminal,
         workingDirectory: String,
         title: String? = nil,
+        shortcutID: UUID? = nil,
         launchCommand: String? = nil,
         launchArgumentsJSON: String? = nil,
         fileReference: WorkspaceFileReference? = nil,
@@ -119,6 +121,7 @@ public struct Tab: Identifiable, Equatable, Codable, Sendable {
         self.kind = kind
         self.workingDirectory = workingDirectory
         self.title = title
+        self.shortcutID = shortcutID
         self.launchCommand = launchCommand
         self.launchArgumentsJSON = launchArgumentsJSON
         self.fileReference = fileReference
@@ -133,6 +136,7 @@ public struct Tab: Identifiable, Equatable, Codable, Sendable {
         case kind
         case workingDirectory
         case title
+        case shortcutID
         case launchCommand
         case launchArgumentsJSON
         case fileReference
@@ -148,6 +152,7 @@ public struct Tab: Identifiable, Equatable, Codable, Sendable {
         kind = try container.decodeIfPresent(WorkspaceTabKind.self, forKey: .kind) ?? .terminal
         workingDirectory = try container.decode(String.self, forKey: .workingDirectory)
         title = try container.decodeIfPresent(String.self, forKey: .title)
+        shortcutID = try container.decodeIfPresent(UUID.self, forKey: .shortcutID)
         launchCommand = try container.decodeIfPresent(String.self, forKey: .launchCommand)
         launchArgumentsJSON = try container.decodeIfPresent(String.self, forKey: .launchArgumentsJSON)
         fileReference = try container.decodeIfPresent(WorkspaceFileReference.self, forKey: .fileReference)

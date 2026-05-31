@@ -24,7 +24,7 @@ private enum AgentProfileBrand {
     func assetName() -> String? {
         switch self {
         case .codex:
-            return "codex"
+            return "openai"
         case .claude:
             return "claude"
         case .opencode:
@@ -37,8 +37,22 @@ private enum AgentProfileBrand {
 
 extension SessionShortcut {
     fileprivate var agentProfileBrand: AgentProfileBrand {
+        if id == Self.builtInDefaults.first(where: { $0.label == "Codex" })?.id {
+            return .codex
+        }
+
+        if id == Self.builtInDefaults.first(where: { $0.label == "Claude" })?.id {
+            return .claude
+        }
+
+        if id == Self.builtInDefaults.first(where: { $0.label == "OpenCode" })?.id {
+            return .opencode
+        }
+
         let normalizedLabel = label.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let normalizedCommand = launchCommand.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let normalizedCommand = URL(fileURLWithPath: launchCommand.trimmingCharacters(in: .whitespacesAndNewlines))
+            .lastPathComponent
+            .lowercased()
 
         if normalizedLabel == "codex" || normalizedCommand == "codex" {
             return .codex
@@ -111,7 +125,15 @@ struct AgentProfileIconView: View {
             return svgURL
         }
 
+        if let svgURL = Bundle.module.url(forResource: assetName, withExtension: "svg") {
+            return svgURL
+        }
+
         if let pngURL = Bundle.module.url(forResource: assetName, withExtension: "png", subdirectory: "BrandIcons") {
+            return pngURL
+        }
+
+        if let pngURL = Bundle.module.url(forResource: assetName, withExtension: "png") {
             return pngURL
         }
 

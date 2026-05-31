@@ -260,7 +260,7 @@ public struct RestoreCoordinator {
         for tabID in snapshot.tabOrder where snapshotOrder[tabID] == nil {
             snapshotOrder[tabID] = snapshotOrder.count
         }
-        return tabs.sorted {
+        let sortedTabs = tabs.sorted {
             let lhsOrder = snapshotOrder[$0.id]
             let rhsOrder = snapshotOrder[$1.id]
             switch (lhsOrder, rhsOrder) {
@@ -274,9 +274,14 @@ public struct RestoreCoordinator {
                 if $0.sessionID == $1.sessionID { return $0.ordinal < $1.ordinal }
                 return $0.sessionID.uuidString < $1.sessionID.uuidString
             }
-        }.enumerated().map { offset, tab in
+        }
+
+        var nextOrdinalBySession: [UUID: Int] = [:]
+        return sortedTabs.map { tab in
             var orderedTab = tab
-            orderedTab.ordinal = offset
+            let nextOrdinal = nextOrdinalBySession[tab.sessionID, default: 0]
+            orderedTab.ordinal = nextOrdinal
+            nextOrdinalBySession[tab.sessionID] = nextOrdinal + 1
             return orderedTab
         }
     }

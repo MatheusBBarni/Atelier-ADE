@@ -58,6 +58,7 @@ struct DefaultWorkspaceCommandServiceTests {
         #expect(session.shortcutID == nil)
         #expect(firstTab.sessionID == session.id)
         #expect(firstTab.workingDirectory == project.path)
+        #expect(firstTab.shortcutID == nil)
         #expect(firstTab.launchCommand == nil)
         #expect(firstTab.launchArgumentsJSON == nil)
         #expect(firstTab.ordinal == 0)
@@ -91,6 +92,7 @@ struct DefaultWorkspaceCommandServiceTests {
         #expect(try await harness.persistence.loadTabs().count == 1)
         #expect(tab.sessionID == session.id)
         #expect(tab.workingDirectory == project.path)
+        #expect(tab.shortcutID == shortcut.id)
         #expect(tab.launchCommand == "codex")
         #expect(tab.launchArgumentsJSON == "[\"--model\",\"gpt-5.5\"]")
         #expect(harness.terminal.createdTabs == [tab])
@@ -126,6 +128,7 @@ struct DefaultWorkspaceCommandServiceTests {
 
         #expect(session.shortcutID == shortcut.id)
         #expect(tab.sessionID == session.id)
+        #expect(tab.shortcutID == shortcut.id)
         #expect(tab.launchCommand == "claude")
         #expect(tab.launchArgumentsJSON == "[\"--continue\"]")
         #expect(harness.store.sessions.count == 1)
@@ -172,6 +175,7 @@ struct DefaultWorkspaceCommandServiceTests {
         let tab = try #require(harness.store.tabs.first)
 
         #expect(session.shortcutID == nil)
+        #expect(tab.shortcutID == nil)
         #expect(tab.launchCommand == nil)
         #expect(tab.launchArgumentsJSON == nil)
         #expect(harness.store.sessions.count == 1)
@@ -192,6 +196,7 @@ struct DefaultWorkspaceCommandServiceTests {
         let tab = try #require(harness.store.tabs.first)
 
         #expect(session.shortcutID == builtInShortcut.id)
+        #expect(tab.shortcutID == builtInShortcut.id)
         #expect(tab.launchCommand == builtInShortcut.launchCommand)
         #expect(try await harness.persistence.loadSessionShortcuts().contains(builtInShortcut))
         #expect(try await harness.persistence.loadSessions().first?.shortcutID == builtInShortcut.id)
@@ -454,12 +459,19 @@ struct DefaultWorkspaceCommandServiceTests {
             launchArgumentsJSON: "[\"--continue\"]"
         ))
         try await harness.service.saveAppPreferences(AppPreferences(defaultSessionShortcutID: shortcut.id))
+        let project = try await harness.service.openProject(path: makeTemporaryProjectDirectory())
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: shortcut.id)
+        let tab = try #require(harness.store.tabs.first { $0.sessionID == session.id })
 
         try await harness.service.deleteSessionShortcut(id: shortcut.id)
 
         #expect(try await harness.persistence.loadSessionShortcuts().isEmpty)
         #expect(try await harness.persistence.loadAppPreferences().defaultSessionShortcutID == nil)
+        #expect(try await harness.persistence.loadSessions().first { $0.id == session.id }?.shortcutID == nil)
+        #expect(try await harness.persistence.loadTabs().first { $0.id == tab.id }?.shortcutID == nil)
         #expect(harness.store.appPreferences.defaultSessionShortcutID == nil)
+        #expect(harness.store.sessions.first { $0.id == session.id }?.shortcutID == nil)
+        #expect(harness.store.tabs.first { $0.id == tab.id }?.shortcutID == nil)
     }
 
     @Test
@@ -524,6 +536,7 @@ struct DefaultWorkspaceCommandServiceTests {
         let session = try await harness.service.createSession(projectID: project.id, shortcutID: shortcut.id)
         let tab = try await harness.service.createTab(sessionID: session.id)
 
+        #expect(tab.shortcutID == shortcut.id)
         #expect(tab.launchCommand == "claude")
         #expect(tab.launchArgumentsJSON == "[\"--continue\"]")
         #expect(harness.terminal.createdTabs.last == tab)
@@ -561,6 +574,7 @@ struct DefaultWorkspaceCommandServiceTests {
         let laterTab = try await harness.service.createTab(sessionID: session.id)
 
         #expect(session.shortcutID == originalShortcut.id)
+        #expect(laterTab.shortcutID == originalShortcut.id)
         #expect(laterTab.launchCommand == "codex")
         #expect(laterTab.launchArgumentsJSON == "[\"exec\"]")
     }
@@ -580,9 +594,39 @@ struct DefaultWorkspaceCommandServiceTests {
 
         let tab = try await harness.service.createPlainTab(sessionID: session.id)
 
+        #expect(tab.shortcutID == nil)
         #expect(tab.launchCommand == nil)
         #expect(tab.launchArgumentsJSON == nil)
         #expect(harness.store.selectedTabID == tab.id)
+    }
+
+    @Test
+    func creatingAgentTabInsidePlainSessionRetainsSelectedShortcutIdentity() async throws {
+        let harness = makeHarness()
+        let project = try await harness.service.openProject(path: makeTemporaryProjectDirectory())
+        let selectedShortcut = SessionShortcut(
+            id: SessionShortcut.builtInDefaults[1].id,
+            label: "Claude Dev Alias",
+            launchCommand: "claude-dev",
+            launchArgumentsJSON: "[\"--continue\"]",
+            isBuiltIn: true,
+            hasUserOverride: true
+        )
+        try await harness.persistence.save(shortcut: selectedShortcut)
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let firstTab = try #require(harness.store.tabs.first { $0.sessionID == session.id })
+
+        let tab = try await harness.service.createAgentTab(sessionID: session.id, shortcutID: selectedShortcut.id)
+        let persistedTab = try #require(try await harness.persistence.loadTabs().first { $0.id == tab.id })
+
+        #expect(session.shortcutID == nil)
+        #expect(firstTab.shortcutID == nil)
+        #expect(firstTab.launchCommand == nil)
+        #expect(tab.shortcutID == selectedShortcut.id)
+        #expect(tab.launchCommand == "claude-dev")
+        #expect(tab.launchArgumentsJSON == "[\"--continue\"]")
+        #expect(persistedTab.shortcutID == selectedShortcut.id)
+        #expect(harness.terminal.createdTabs.last == tab)
     }
 
     @Test
@@ -602,6 +646,7 @@ struct DefaultWorkspaceCommandServiceTests {
         let tab = try await harness.service.createDefaultAgentTab(sessionID: session.id)
 
         #expect(session.shortcutID == shortcut.id)
+        #expect(tab.shortcutID == shortcut.id)
         #expect(tab.launchCommand == "opencode")
         #expect(tab.launchArgumentsJSON == "[\"review\"]")
         #expect(harness.store.selectedTabID == tab.id)
@@ -628,6 +673,7 @@ struct DefaultWorkspaceCommandServiceTests {
 
         let tab = try await harness.service.createAgentTab(sessionID: session.id, shortcutID: selectedShortcut.id)
 
+        #expect(tab.shortcutID == selectedShortcut.id)
         #expect(tab.launchCommand == "codex")
         #expect(tab.launchArgumentsJSON == "[\"exec\"]")
         #expect(harness.terminal.createdTabs.last == tab)
