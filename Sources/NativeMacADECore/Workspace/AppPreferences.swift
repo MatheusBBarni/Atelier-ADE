@@ -72,6 +72,10 @@ public enum AppPreferencesSerializationError: Error, Equatable, Sendable {
 }
 
 public enum AppCommandID: String, CaseIterable, Codable, Hashable, Sendable {
+    case openProjectSelector
+    case newPlainTab
+    case newDefaultAgentTab
+    case closeSelectedTab
     case previousTab
     case nextTab
     case previousSession
@@ -82,6 +86,7 @@ public enum AppCommandID: String, CaseIterable, Codable, Hashable, Sendable {
     case openFileInExternalEditor
     case zoomInTerminal
     case zoomOutTerminal
+    case toggleLeftSidebar
     case toggleRightSidebar
     case openSettings
 

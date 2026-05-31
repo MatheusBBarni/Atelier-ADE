@@ -2,6 +2,10 @@ import Foundation
 
 public enum AppCommandRegistry {
     public static let managedCommandIDs: [AppCommandID] = [
+        .openProjectSelector,
+        .newPlainTab,
+        .newDefaultAgentTab,
+        .closeSelectedTab,
         .previousTab,
         .nextTab,
         .previousSession,
@@ -12,11 +16,16 @@ public enum AppCommandRegistry {
         .openFileInExternalEditor,
         .zoomInTerminal,
         .zoomOutTerminal,
+        .toggleLeftSidebar,
         .toggleRightSidebar,
         .openSettings
     ]
 
     public static let defaultKeybindings: [AppCommandID: KeybindingOverride] = [
+        .openProjectSelector: KeybindingOverride(commandID: .openProjectSelector, keyEquivalent: "o"),
+        .newPlainTab: KeybindingOverride(commandID: .newPlainTab, keyEquivalent: "t"),
+        .newDefaultAgentTab: KeybindingOverride(commandID: .newDefaultAgentTab, keyEquivalent: "t", modifiers: [.command, .shift]),
+        .closeSelectedTab: KeybindingOverride(commandID: .closeSelectedTab, keyEquivalent: "w"),
         .previousTab: KeybindingOverride(commandID: .previousTab, keyEquivalent: "["),
         .nextTab: KeybindingOverride(commandID: .nextTab, keyEquivalent: "]"),
         .previousSession: KeybindingOverride(commandID: .previousSession, keyEquivalent: "upArrow"),
@@ -27,6 +36,7 @@ public enum AppCommandRegistry {
         .openFileInExternalEditor: KeybindingOverride(commandID: .openFileInExternalEditor, keyEquivalent: "o", modifiers: [.command, .shift]),
         .zoomInTerminal: KeybindingOverride(commandID: .zoomInTerminal, keyEquivalent: "+"),
         .zoomOutTerminal: KeybindingOverride(commandID: .zoomOutTerminal, keyEquivalent: "-"),
+        .toggleLeftSidebar: KeybindingOverride(commandID: .toggleLeftSidebar, keyEquivalent: "b"),
         .toggleRightSidebar: KeybindingOverride(commandID: .toggleRightSidebar, keyEquivalent: "l"),
         .openSettings: KeybindingOverride(commandID: .openSettings, keyEquivalent: ",")
     ]
@@ -64,13 +74,18 @@ public enum AppCommandRegistry {
             return selectedTab?.kind == .file && selectedFileIsDirty
         case .revertFile, .openFileInExternalEditor:
             return selectedTab?.kind == .file
-        case .previousTab,
+        case .openProjectSelector,
+             .newPlainTab,
+             .newDefaultAgentTab,
+             .closeSelectedTab,
+             .previousTab,
              .nextTab,
              .previousSession,
              .nextSession,
              .searchSessions,
              .zoomInTerminal,
              .zoomOutTerminal,
+             .toggleLeftSidebar,
              .toggleRightSidebar,
              .openSettings:
             return true

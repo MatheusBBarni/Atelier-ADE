@@ -382,14 +382,33 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
     }
 
     public func createTab(sessionID: UUID) async throws -> WorkspaceTab {
+        let session = try requireSession(id: sessionID)
+        let launchIntent = try await resolveStoredLaunchIntent(for: session)
+        return try await createTerminalTab(session: session, launchIntent: launchIntent)
+    }
+
+    public func createPlainTab(sessionID: UUID) async throws -> WorkspaceTab {
+        let session = try requireSession(id: sessionID)
+        return try await createTerminalTab(
+            session: session,
+            launchIntent: ResolvedLaunchIntent(source: .plain, shortcut: nil)
+        )
+    }
+
+    public func createDefaultAgentTab(sessionID: UUID) async throws -> WorkspaceTab {
+        let session = try requireSession(id: sessionID)
+        let launchIntent = try await resolveLaunchIntent(explicitShortcutID: nil)
+        return try await createTerminalTab(session: session, launchIntent: launchIntent)
+    }
+
+    private func createTerminalTab(
+        session: WorkspaceSession,
+        launchIntent: ResolvedLaunchIntent
+    ) async throws -> WorkspaceTab {
         let startedAt = now()
-        guard let session = store.sessions.first(where: { $0.id == sessionID }) else {
-            throw WorkspaceCommandError.missingSession(sessionID)
-        }
         guard let project = store.projects.first(where: { $0.id == session.projectID }) else {
             throw WorkspaceCommandError.missingProject(session.projectID)
         }
-        let launchIntent = try await resolveStoredLaunchIntent(for: session)
 
         let timestamp = now()
         let tab = WorkspaceTab(
@@ -981,6 +1000,13 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
             throw WorkspaceCommandError.missingProject(id)
         }
         return project
+    }
+
+    private func requireSession(id: UUID) throws -> WorkspaceSession {
+        guard let session = store.sessions.first(where: { $0.id == id }) else {
+            throw WorkspaceCommandError.missingSession(id)
+        }
+        return session
     }
 
     private func persistedProject(matchingPath path: String) async throws -> WorkspaceProject? {

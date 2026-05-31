@@ -49,6 +49,8 @@ public protocol WorkspaceCommandService: AppShellStartupServicing {
     func createSession(projectID: UUID, shortcutID: UUID?) async throws -> WorkspaceSession
     func renameSession(sessionID: UUID, title: String) async throws
     func createTab(sessionID: UUID) async throws -> WorkspaceTab
+    func createPlainTab(sessionID: UUID) async throws -> WorkspaceTab
+    func createDefaultAgentTab(sessionID: UUID) async throws -> WorkspaceTab
     func openFileTab(sessionID: UUID, path: String) async throws -> WorkspaceTab
     func saveFileTab(tabID: UUID) async throws
     func revertFileTab(tabID: UUID) async throws

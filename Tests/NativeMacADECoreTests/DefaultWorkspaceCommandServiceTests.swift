@@ -555,6 +555,48 @@ struct DefaultWorkspaceCommandServiceTests {
     }
 
     @Test
+    func creatingPlainTabIgnoresStoredSessionShortcut() async throws {
+        let harness = makeHarness()
+        let project = try await harness.service.openProject(path: makeTemporaryProjectDirectory())
+        let shortcut = SessionShortcut(
+            label: "Claude Continue",
+            launchCommand: "claude",
+            launchArgumentsJSON: "[\"--continue\"]",
+            isBuiltIn: true
+        )
+        try await harness.persistence.save(shortcut: shortcut)
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: shortcut.id)
+
+        let tab = try await harness.service.createPlainTab(sessionID: session.id)
+
+        #expect(tab.launchCommand == nil)
+        #expect(tab.launchArgumentsJSON == nil)
+        #expect(harness.store.selectedTabID == tab.id)
+    }
+
+    @Test
+    func creatingDefaultAgentTabUsesSavedDefaultProfileInsteadOfSessionLaunchIntent() async throws {
+        let harness = makeHarness()
+        let project = try await harness.service.openProject(path: makeTemporaryProjectDirectory())
+        let shortcut = SessionShortcut(
+            label: "OpenCode Review",
+            launchCommand: "opencode",
+            launchArgumentsJSON: "[\"review\"]",
+            isBuiltIn: true
+        )
+        try await harness.persistence.save(shortcut: shortcut)
+        try await harness.persistence.save(appPreferences: AppPreferences(defaultSessionShortcutID: shortcut.id))
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+
+        let tab = try await harness.service.createDefaultAgentTab(sessionID: session.id)
+
+        #expect(session.shortcutID == shortcut.id)
+        #expect(tab.launchCommand == "opencode")
+        #expect(tab.launchArgumentsJSON == "[\"review\"]")
+        #expect(harness.store.selectedTabID == tab.id)
+    }
+
+    @Test
     func creatingTabWithMissingStoredShortcutDoesNotCreateSurface() async throws {
         let missingShortcutID = UUID()
         let project = WorkspaceProject(path: "/tmp/native-mac-ade-missing-stored-shortcut", displayName: "missing-shortcut")

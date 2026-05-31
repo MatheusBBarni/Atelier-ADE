@@ -8,6 +8,10 @@ struct AppCommandRegistryTests {
         let defaults = AppCommandRegistry.defaultKeybindings
 
         #expect(AppCommandRegistry.managedCommandIDs == [
+            .openProjectSelector,
+            .newPlainTab,
+            .newDefaultAgentTab,
+            .closeSelectedTab,
             .previousTab,
             .nextTab,
             .previousSession,
@@ -18,9 +22,14 @@ struct AppCommandRegistryTests {
             .openFileInExternalEditor,
             .zoomInTerminal,
             .zoomOutTerminal,
+            .toggleLeftSidebar,
             .toggleRightSidebar,
             .openSettings
         ])
+        #expect(defaults[.openProjectSelector] == KeybindingOverride(commandID: .openProjectSelector, keyEquivalent: "o"))
+        #expect(defaults[.newPlainTab] == KeybindingOverride(commandID: .newPlainTab, keyEquivalent: "t"))
+        #expect(defaults[.newDefaultAgentTab] == KeybindingOverride(commandID: .newDefaultAgentTab, keyEquivalent: "t", modifiers: [.command, .shift]))
+        #expect(defaults[.closeSelectedTab] == KeybindingOverride(commandID: .closeSelectedTab, keyEquivalent: "w"))
         #expect(defaults[.previousTab] == KeybindingOverride(commandID: .previousTab, keyEquivalent: "["))
         #expect(defaults[.nextTab] == KeybindingOverride(commandID: .nextTab, keyEquivalent: "]"))
         #expect(defaults[.previousSession] == KeybindingOverride(commandID: .previousSession, keyEquivalent: "upArrow"))
@@ -31,6 +40,7 @@ struct AppCommandRegistryTests {
         #expect(defaults[.openFileInExternalEditor] == KeybindingOverride(commandID: .openFileInExternalEditor, keyEquivalent: "o", modifiers: [.command, .shift]))
         #expect(defaults[.zoomInTerminal] == KeybindingOverride(commandID: .zoomInTerminal, keyEquivalent: "+"))
         #expect(defaults[.zoomOutTerminal] == KeybindingOverride(commandID: .zoomOutTerminal, keyEquivalent: "-"))
+        #expect(defaults[.toggleLeftSidebar] == KeybindingOverride(commandID: .toggleLeftSidebar, keyEquivalent: "b"))
         #expect(defaults[.toggleRightSidebar] == KeybindingOverride(commandID: .toggleRightSidebar, keyEquivalent: "l"))
         #expect(defaults[.openSettings] == KeybindingOverride(commandID: .openSettings, keyEquivalent: ","))
         #expect(AppCommandRegistry.resolvedKeybindings(for: .defaults) == defaults)

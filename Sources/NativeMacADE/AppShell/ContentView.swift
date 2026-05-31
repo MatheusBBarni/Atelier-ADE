@@ -268,13 +268,18 @@ struct ContentView: View {
                     NotificationCenter.default.post(name: .fileBufferDirtyStateChanged, object: selectedTab.id)
                 case .openFileInExternalEditor:
                     try await commandService.openFileInExternalEditor(tabID: selectedTab.id)
-                case .previousTab,
+                case .openProjectSelector,
+                     .newPlainTab,
+                     .newDefaultAgentTab,
+                     .closeSelectedTab,
+                     .previousTab,
                      .nextTab,
                      .previousSession,
                      .nextSession,
                      .searchSessions,
                      .zoomInTerminal,
                      .zoomOutTerminal,
+                     .toggleLeftSidebar,
                      .toggleRightSidebar,
                      .openSettings:
                     return
@@ -293,13 +298,18 @@ struct ContentView: View {
             return "File could not be reverted"
         case .openFileInExternalEditor:
             return "File could not be opened"
-        case .previousTab,
+        case .openProjectSelector,
+             .newPlainTab,
+             .newDefaultAgentTab,
+             .closeSelectedTab,
+             .previousTab,
              .nextTab,
              .previousSession,
              .nextSession,
              .searchSessions,
              .zoomInTerminal,
              .zoomOutTerminal,
+             .toggleLeftSidebar,
              .toggleRightSidebar,
              .openSettings:
             return "File command failed"
@@ -591,6 +601,9 @@ struct ProjectSidebarView: View {
             } onCancel: {
                 renameDraft = nil
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .showProjectSelector)) { _ in
+            openProject()
         }
     }
 
@@ -1316,7 +1329,7 @@ struct TabChromeView: View {
                     }
                 }
 
-                Button(action: createTab) {
+                Button(action: createPlainTab) {
                     Image(systemName: "plus")
                         .font(.system(size: 12, weight: .semibold))
                         .frame(width: 24, height: 24)
@@ -1351,6 +1364,15 @@ struct TabChromeView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .fileBufferDirtyStateChanged)) { _ in
             dirtyRefreshToken += 1
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .createPlainTab)) { _ in
+            createPlainTab()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .createDefaultAgentTab)) { _ in
+            createDefaultAgentTab()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .closeSelectedTab)) { _ in
+            closeSelectedTab()
         }
     }
 
@@ -1397,15 +1419,37 @@ struct TabChromeView: View {
         }
     }
 
-    private func createTab() {
-        guard let selectedSessionID = store.selectedSessionID else { return }
+    private func createPlainTab() {
+        guard let selectedSessionID = store.selectedSessionID else {
+            userMessage = UserMessage(title: "Session required", detail: "Select a session before creating a new tab.")
+            return
+        }
         Task {
             do {
-                _ = try await commandService.createTab(sessionID: selectedSessionID)
+                _ = try await commandService.createPlainTab(sessionID: selectedSessionID)
             } catch {
                 userMessage = UserMessage(title: "Tab could not be created", detail: String(describing: error))
             }
         }
+    }
+
+    private func createDefaultAgentTab() {
+        guard let selectedSessionID = store.selectedSessionID else {
+            userMessage = UserMessage(title: "Session required", detail: "Select a session before creating a new agent tab.")
+            return
+        }
+        Task {
+            do {
+                _ = try await commandService.createDefaultAgentTab(sessionID: selectedSessionID)
+            } catch {
+                userMessage = UserMessage(title: "Agent tab could not be created", detail: String(describing: error))
+            }
+        }
+    }
+
+    private func closeSelectedTab() {
+        guard let selectedTabID = store.selectedTabID else { return }
+        closeTab(selectedTabID)
     }
 
     private var closeConfirmationPresented: Binding<Bool> {
@@ -1635,11 +1679,13 @@ struct FileEditorHostView: View {
                     .font(.headline)
                     .foregroundStyle(theme.primaryText.color)
                     .lineLimit(1)
-                Text(subtitle)
-                    .font(.caption.monospaced())
-                    .foregroundStyle(theme.mutedText.color)
-                    .lineLimit(1)
-                    .textSelection(.enabled)
+                if !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(theme.mutedText.color)
+                        .lineLimit(1)
+                        .textSelection(.enabled)
+                }
             }
             Spacer(minLength: 12)
             if isDirty {
@@ -1676,7 +1722,10 @@ struct FileEditorHostView: View {
         if let presentation {
             return presentation.subtitle
         }
-        return tab.fileReference?.path ?? tab.workingDirectory
+        if let fileReference = tab.fileReference {
+            return FileEditorPresentation.relativeDirectoryPath(for: fileReference.path, projectRoot: fileReference.projectRoot)
+        }
+        return tab.workingDirectory
     }
 
     private var editorTextBinding: Binding<String> {
@@ -1809,6 +1858,7 @@ struct FileWorkspaceSidebarView: View {
     @Binding var userMessage: UserMessage?
     @Environment(\.shellThemePalette) private var theme
     @State private var repositoryNodes: [WorkspaceFileNode] = []
+    @State private var repositoryTreeIndex: WorkspaceFileTreeIndex?
     @State private var repositoryEntries: [FileWorkspaceTreeEntry] = []
     @State private var expandedDirectoryPaths: Set<String> = []
     @State private var repositoryError: String?
@@ -1882,6 +1932,7 @@ struct FileWorkspaceSidebarView: View {
     private func loadRepositoryNodes() async {
         guard let project = store.selectedProject else {
             repositoryNodes = []
+            repositoryTreeIndex = nil
             repositoryEntries = []
             repositoryError = nil
             isRepositoryLoading = false
@@ -1892,10 +1943,12 @@ struct FileWorkspaceSidebarView: View {
         repositoryError = nil
         do {
             repositoryNodes = try await fileAccessService.enumerateProjectFiles(projectRoot: project.path)
+            repositoryTreeIndex = WorkspaceFileTreeBuilder.makeIndex(projectRoot: project.path, nodes: repositoryNodes)
             expandSelectedFileAncestors()
             rebuildRepositoryEntries()
         } catch {
             repositoryNodes = []
+            repositoryTreeIndex = nil
             repositoryEntries = []
             repositoryError = "Files unavailable"
             userMessage = UserMessage(title: "Repository files unavailable", detail: String(describing: error))
@@ -1967,11 +2020,8 @@ struct FileWorkspaceSidebarView: View {
             repositoryEntries = []
             return
         }
-        repositoryEntries = WorkspaceFileTreeBuilder.visibleEntries(
-            projectRoot: project.path,
-            nodes: repositoryNodes,
-            expandedDirectoryPaths: expandedDirectoryPaths
-        )
+        repositoryEntries = (repositoryTreeIndex ?? WorkspaceFileTreeBuilder.makeIndex(projectRoot: project.path, nodes: repositoryNodes))
+            .visibleEntries(expandedDirectoryPaths: expandedDirectoryPaths)
     }
 }
 
@@ -2049,10 +2099,12 @@ struct FileWorkingSetRow: View {
                                 .frame(width: 6, height: 6)
                         }
                     }
-                    Text(entry.subtitle)
-                        .font(.caption.monospaced())
-                        .foregroundStyle(theme.mutedText.color)
-                        .lineLimit(1)
+                    if !entry.subtitle.isEmpty {
+                        Text(entry.subtitle)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(theme.mutedText.color)
+                            .lineLimit(1)
+                    }
                 }
                 Spacer(minLength: 6)
             }
@@ -2140,6 +2192,12 @@ private extension LanguageConfiguration {
             return .cabal()
         case "cypher":
             return .cypher()
+        case "javascript":
+            return .atelierJavaScript()
+        case "typescript":
+            return .atelierTypeScript()
+        case "json":
+            return .atelierJSON()
         default:
             return .none
         }

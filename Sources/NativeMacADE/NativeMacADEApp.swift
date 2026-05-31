@@ -49,6 +49,13 @@ struct AtelierApp: App {
             }
 
             CommandGroup(replacing: .newItem) {
+                Button("Open Project…") {
+                    NotificationCenter.default.post(name: .showProjectSelector, object: nil)
+                }
+                .managedKeyboardShortcut(.openProjectSelector, preferences: workspaceStore.appPreferences)
+
+                Divider()
+
                 Button("Start Session…") {
                     NotificationCenter.default.post(name: .showSessionCommandPalette, object: nil)
                 }
@@ -56,10 +63,15 @@ struct AtelierApp: App {
                 .disabled(workspaceStore.selectedProject == nil)
 
                 Button("New Tab") {
-                    guard let selectedSessionID = workspaceStore.selectedSessionID else { return }
-                    Task { try? await commandService.createTab(sessionID: selectedSessionID) }
+                    NotificationCenter.default.post(name: .createPlainTab, object: nil)
                 }
-                .keyboardShortcut("t", modifiers: [.command])
+                .managedKeyboardShortcut(.newPlainTab, preferences: workspaceStore.appPreferences)
+                .disabled(workspaceStore.selectedSession == nil)
+
+                Button("New Agent Tab") {
+                    NotificationCenter.default.post(name: .createDefaultAgentTab, object: nil)
+                }
+                .managedKeyboardShortcut(.newDefaultAgentTab, preferences: workspaceStore.appPreferences)
                 .disabled(workspaceStore.selectedSession == nil)
             }
 
@@ -100,6 +112,14 @@ struct AtelierApp: App {
 
                 Divider()
 
+                Button("Close Tab") {
+                    NotificationCenter.default.post(name: .closeSelectedTab, object: nil)
+                }
+                .managedKeyboardShortcut(.closeSelectedTab, preferences: workspaceStore.appPreferences)
+                .disabled(workspaceStore.selectedTab == nil)
+
+                Divider()
+
                 Button("Previous Session") {
                     selectAdjacentSession(direction: -1)
                 }
@@ -117,6 +137,7 @@ struct AtelierApp: App {
                 Button("Toggle Left Sidebar") {
                     NotificationCenter.default.post(name: .toggleWorkspaceSidebar, object: nil)
                 }
+                .managedKeyboardShortcut(.toggleLeftSidebar, preferences: workspaceStore.appPreferences)
 
                 Button("Toggle Right Sidebar") {
                     NotificationCenter.default.post(name: .toggleFileWorkspaceSidebar, object: nil)
@@ -205,9 +226,13 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 extension Notification.Name {
+    static let showProjectSelector = Notification.Name("Atelier.showProjectSelector")
     static let toggleWorkspaceSidebar = Notification.Name("Atelier.toggleWorkspaceSidebar")
     static let toggleFileWorkspaceSidebar = Notification.Name("Atelier.toggleFileWorkspaceSidebar")
     static let showSessionCommandPalette = Notification.Name("Atelier.showSessionCommandPalette")
+    static let createPlainTab = Notification.Name("Atelier.createPlainTab")
+    static let createDefaultAgentTab = Notification.Name("Atelier.createDefaultAgentTab")
+    static let closeSelectedTab = Notification.Name("Atelier.closeSelectedTab")
     static let performSelectedFileCommand = Notification.Name("Atelier.performSelectedFileCommand")
 }
 

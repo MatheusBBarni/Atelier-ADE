@@ -41,6 +41,10 @@ struct WorkspaceModelsTests {
         #expect(preferences.themeID == "dracula")
         #expect(decodedKeybindings == preferences.keybindings)
         #expect(AppCommandID.allCases == [
+            .openProjectSelector,
+            .newPlainTab,
+            .newDefaultAgentTab,
+            .closeSelectedTab,
             .previousTab,
             .nextTab,
             .previousSession,
@@ -51,9 +55,15 @@ struct WorkspaceModelsTests {
             .openFileInExternalEditor,
             .zoomInTerminal,
             .zoomOutTerminal,
+            .toggleLeftSidebar,
             .toggleRightSidebar,
             .openSettings
         ])
+        #expect(AppCommandID.newPlainTab.defaultKeybinding.keyEquivalent == "t")
+        #expect(AppCommandID.newDefaultAgentTab.defaultKeybinding.modifiers == [.command, .shift])
+        #expect(AppCommandID.closeSelectedTab.defaultKeybinding.keyEquivalent == "w")
+        #expect(AppCommandID.openProjectSelector.defaultKeybinding.keyEquivalent == "o")
+        #expect(AppCommandID.toggleLeftSidebar.defaultKeybinding.keyEquivalent == "b")
         #expect(AppCommandID.openSettings.defaultKeybinding.keyEquivalent == ",")
         #expect(AppCommandID.toggleRightSidebar.defaultKeybinding.keyEquivalent == "l")
         #expect(AppCommandID.toggleRightSidebar.defaultKeybinding.modifiers == [.command])

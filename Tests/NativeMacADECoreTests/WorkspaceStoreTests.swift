@@ -271,7 +271,7 @@ struct WorkspaceStoreTests {
         let workingSet = store.selectedSessionFileWorkingSetEntries(dirtyTabIDs: [olderFileTabID])
 
         #expect(workingSet.map(\.tabID) == [newerFileTabID, olderFileTabID])
-        #expect(workingSet.map(\.subtitle) == ["README.md", "Sources/App.swift"])
+        #expect(workingSet.map(\.subtitle) == ["", "Sources"])
         #expect(workingSet.map(\.isSelected) == [false, true])
         #expect(workingSet.map(\.isDirty) == [false, true])
     }

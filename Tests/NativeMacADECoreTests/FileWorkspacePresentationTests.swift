@@ -49,7 +49,7 @@ struct FileWorkspacePresentationTests {
 
         #expect(entries.map(\.tabID) == [newerFileTabID, olderFileTabID])
         #expect(entries.map(\.title) == ["README.md", "Older.swift"])
-        #expect(entries.map(\.subtitle) == ["README.md", "Sources/Older.swift"])
+        #expect(entries.map(\.subtitle) == ["", "Sources"])
         #expect(entries.map(\.isSelected) == [false, true])
         #expect(entries.map(\.isDirty) == [false, true])
     }
@@ -85,6 +85,9 @@ struct FileWorkspacePresentationTests {
         #expect(collapsed.first?.hasChildren == true)
         #expect(expanded.map(\.relativePath) == ["Sources", "Sources/App.swift", "README.md"])
         #expect(expanded.map(\.depth) == [0, 1, 0])
+
+        let index = WorkspaceFileTreeBuilder.makeIndex(projectRoot: projectRoot, nodes: [nested, readme, sources])
+        #expect(index.visibleEntries(expandedDirectoryPaths: [sources.reference.path]) == expanded)
     }
 
     @Test
@@ -116,7 +119,7 @@ struct FileWorkspacePresentationTests {
         )
 
         #expect(presentation?.title == "App.swift")
-        #expect(presentation?.subtitle == "Sources/App.swift")
+        #expect(presentation?.subtitle == "Sources")
         #expect(presentation?.languageConfigurationKey == "swift")
         #expect(presentation?.isDirty == true)
         #expect(terminalPresentation == nil)

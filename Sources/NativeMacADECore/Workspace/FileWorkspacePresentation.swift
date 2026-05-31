@@ -80,7 +80,7 @@ public struct FileEditorPresentation: Equatable, Sendable {
         self.tabID = tab.id
         self.path = fileReference.path
         self.title = Self.fileName(for: fileReference.path)
-        self.subtitle = Self.relativePath(for: fileReference.path, projectRoot: fileReference.projectRoot)
+        self.subtitle = Self.relativeDirectoryPath(for: fileReference.path, projectRoot: fileReference.projectRoot)
         self.languageConfigurationKey = buffer?.languageConfigurationKey ?? WorkspaceFileBufferController.languageConfigurationKey(forPath: fileReference.path)
         self.isDirty = buffer?.isDirty == true
     }
@@ -97,24 +97,33 @@ public struct FileEditorPresentation: Equatable, Sendable {
         guard standardizedPath.hasPrefix(rootPrefix) else { return standardizedPath }
         return String(standardizedPath.dropFirst(rootPrefix.count))
     }
+
+    public static func relativeDirectoryPath(for path: String, projectRoot: String) -> String {
+        let parentPath = URL(fileURLWithPath: path).deletingLastPathComponent().standardizedFileURL.path
+        let standardizedRoot = URL(fileURLWithPath: projectRoot, isDirectory: true).standardizedFileURL.path
+        guard parentPath != standardizedRoot else { return "" }
+        return relativePath(for: parentPath, projectRoot: projectRoot)
+    }
 }
 
-public enum WorkspaceFileTreeBuilder {
-    public static func visibleEntries(
-        projectRoot: String,
-        nodes: [WorkspaceFileNode],
-        expandedDirectoryPaths: Set<String>
-    ) -> [FileWorkspaceTreeEntry] {
-        let root = URL(fileURLWithPath: projectRoot, isDirectory: true).standardizedFileURL.path
-        let rootPrefix = root.hasSuffix("/") ? root : "\(root)/"
+public struct WorkspaceFileTreeIndex: Sendable {
+    private let projectRoot: String
+    private let sortedChildrenByParent: [String: [WorkspaceFileNode]]
+
+    public init(projectRoot: String, nodes: [WorkspaceFileNode]) {
+        self.projectRoot = URL(fileURLWithPath: projectRoot, isDirectory: true).standardizedFileURL.path
+        let rootPrefix = self.projectRoot.hasSuffix("/") ? self.projectRoot : "\(self.projectRoot)/"
 
         let childrenByParent = nodes.reduce(into: [String: [WorkspaceFileNode]]()) { result, node in
             guard node.reference.path.hasPrefix(rootPrefix) else { return }
-            let parent = URL(fileURLWithPath: node.reference.path).deletingLastPathComponent().standardizedFileURL.path
+            let parent = URL(fileURLWithPath: node.reference.path)
+                .deletingLastPathComponent()
+                .standardizedFileURL
+                .path
             result[parent, default: []].append(node)
         }
 
-        let sortedChildrenByParent = childrenByParent.mapValues { children in
+        sortedChildrenByParent = childrenByParent.mapValues { children in
             children.sorted { lhs, rhs in
                 if lhs.isDirectory != rhs.isDirectory {
                     return lhs.isDirectory && !rhs.isDirectory
@@ -122,15 +131,17 @@ public enum WorkspaceFileTreeBuilder {
                 return lhs.reference.path.localizedStandardCompare(rhs.reference.path) == .orderedAscending
             }
         }
+    }
 
+    public func visibleEntries(expandedDirectoryPaths: Set<String>) -> [FileWorkspaceTreeEntry] {
         func sortedChildren(of parent: String) -> [WorkspaceFileNode] {
             sortedChildrenByParent[parent, default: []]
         }
 
         func appendChildren(of parent: String, depth: Int, into entries: inout [FileWorkspaceTreeEntry]) {
             for child in sortedChildren(of: parent) {
-                let childChildren = sortedChildren(of: child.reference.path)
                 let isExpanded = expandedDirectoryPaths.contains(child.reference.path)
+                let hasChildren = !(sortedChildrenByParent[child.reference.path] ?? []).isEmpty
                 entries.append(FileWorkspaceTreeEntry(
                     reference: child.reference,
                     name: FileEditorPresentation.fileName(for: child.reference.path),
@@ -138,7 +149,7 @@ public enum WorkspaceFileTreeBuilder {
                     depth: depth,
                     isDirectory: child.isDirectory,
                     isExpanded: isExpanded,
-                    hasChildren: child.isDirectory && !childChildren.isEmpty
+                    hasChildren: child.isDirectory && hasChildren
                 ))
                 if child.isDirectory, isExpanded {
                     appendChildren(of: child.reference.path, depth: depth + 1, into: &entries)
@@ -147,8 +158,26 @@ public enum WorkspaceFileTreeBuilder {
         }
 
         var entries: [FileWorkspaceTreeEntry] = []
-        appendChildren(of: root, depth: 0, into: &entries)
+        appendChildren(of: projectRoot, depth: 0, into: &entries)
         return entries
+    }
+}
+
+public enum WorkspaceFileTreeBuilder {
+    public static func makeIndex(
+        projectRoot: String,
+        nodes: [WorkspaceFileNode]
+    ) -> WorkspaceFileTreeIndex {
+        WorkspaceFileTreeIndex(projectRoot: projectRoot, nodes: nodes)
+    }
+
+    public static func visibleEntries(
+        projectRoot: String,
+        nodes: [WorkspaceFileNode],
+        expandedDirectoryPaths: Set<String>
+    ) -> [FileWorkspaceTreeEntry] {
+        makeIndex(projectRoot: projectRoot, nodes: nodes)
+            .visibleEntries(expandedDirectoryPaths: expandedDirectoryPaths)
     }
 }
 
@@ -174,7 +203,7 @@ public extension WorkspaceStore {
                     tabID: tab.id,
                     path: fileReference.path,
                     title: FileEditorPresentation.fileName(for: fileReference.path),
-                    subtitle: FileEditorPresentation.relativePath(for: fileReference.path, projectRoot: fileReference.projectRoot),
+                    subtitle: FileEditorPresentation.relativeDirectoryPath(for: fileReference.path, projectRoot: fileReference.projectRoot),
                     isSelected: tab.id == selectedTabID,
                     isDirty: dirtyTabIDs.contains(tab.id),
                     lastActivatedAt: tab.lastActivatedAt

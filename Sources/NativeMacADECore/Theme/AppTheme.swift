@@ -145,7 +145,7 @@ public struct AppTheme: Identifiable, Equatable, Sendable {
 
     public static let catppuccin = AppTheme(
         id: "catppuccin",
-        displayName: "Catppuccin",
+        displayName: "Catppuccin Latte",
         colorScheme: .light,
         shellPalette: ShellThemePalette(
             shellBackground: NordColorToken(hex: "#EFF1F5"),
@@ -170,6 +170,126 @@ public struct AppTheme: Identifiable, Equatable, Sendable {
             foregroundHex: "#4C4F69",
             cursorHex: "#1E66F5",
             selectionHex: "#CCD0DA"
+        )
+    )
+
+    public static let catppuccinFrappe = AppTheme(
+        id: "catppuccin-frappe",
+        displayName: "Catppuccin Frappe",
+        colorScheme: .dark,
+        shellPalette: ShellThemePalette(
+            shellBackground: NordColorToken(hex: "#303446"),
+            sidebarBackground: NordColorToken(hex: "#292C3C"),
+            contentBackground: NordColorToken(hex: "#303446"),
+            elevatedBackground: NordColorToken(hex: "#3A3F55"),
+            tabBarBackground: NordColorToken(hex: "#292C3C"),
+            activeBackground: NordColorToken(hex: "#8CAAEE"),
+            activeBorder: NordColorToken(hex: "#CA9EE6"),
+            border: NordColorToken(hex: "#414559"),
+            primaryText: NordColorToken(hex: "#C6D0F5"),
+            secondaryText: NordColorToken(hex: "#B5BFE2"),
+            mutedText: NordColorToken(hex: "#A5ADCE", opacity: 0.76),
+            selectedText: NordColorToken(hex: "#FFFFFF"),
+            accent: NordColorToken(hex: "#8CAAEE"),
+            secondaryAccent: NordColorToken(hex: "#81C8BE"),
+            warning: NordColorToken(hex: "#E5C890"),
+            destructive: NordColorToken(hex: "#E78284")
+        ),
+        terminalAppearance: TerminalAppearance(
+            backgroundHex: "#303446",
+            foregroundHex: "#C6D0F5",
+            cursorHex: "#8CAAEE",
+            selectionHex: "#414559"
+        )
+    )
+
+    public static let catppuccinMacchiato = AppTheme(
+        id: "catppuccin-macchiato",
+        displayName: "Catppuccin Macchiato",
+        colorScheme: .dark,
+        shellPalette: ShellThemePalette(
+            shellBackground: NordColorToken(hex: "#24273A"),
+            sidebarBackground: NordColorToken(hex: "#1E2030"),
+            contentBackground: NordColorToken(hex: "#24273A"),
+            elevatedBackground: NordColorToken(hex: "#2B2D42"),
+            tabBarBackground: NordColorToken(hex: "#1E2030"),
+            activeBackground: NordColorToken(hex: "#8AADF4"),
+            activeBorder: NordColorToken(hex: "#C6A0F6"),
+            border: NordColorToken(hex: "#494D64"),
+            primaryText: NordColorToken(hex: "#CAD3F5"),
+            secondaryText: NordColorToken(hex: "#B8C0E0"),
+            mutedText: NordColorToken(hex: "#A5ADCB", opacity: 0.76),
+            selectedText: NordColorToken(hex: "#FFFFFF"),
+            accent: NordColorToken(hex: "#8AADF4"),
+            secondaryAccent: NordColorToken(hex: "#8BD5CA"),
+            warning: NordColorToken(hex: "#EED49F"),
+            destructive: NordColorToken(hex: "#ED8796")
+        ),
+        terminalAppearance: TerminalAppearance(
+            backgroundHex: "#24273A",
+            foregroundHex: "#CAD3F5",
+            cursorHex: "#8AADF4",
+            selectionHex: "#494D64"
+        )
+    )
+
+    public static let catppuccinMocha = AppTheme(
+        id: "catppuccin-mocha",
+        displayName: "Catppuccin Mocha",
+        colorScheme: .dark,
+        shellPalette: ShellThemePalette(
+            shellBackground: NordColorToken(hex: "#1E1E2E"),
+            sidebarBackground: NordColorToken(hex: "#181825"),
+            contentBackground: NordColorToken(hex: "#1E1E2E"),
+            elevatedBackground: NordColorToken(hex: "#313244"),
+            tabBarBackground: NordColorToken(hex: "#181825"),
+            activeBackground: NordColorToken(hex: "#89B4FA"),
+            activeBorder: NordColorToken(hex: "#CBA6F7"),
+            border: NordColorToken(hex: "#45475A"),
+            primaryText: NordColorToken(hex: "#CDD6F4"),
+            secondaryText: NordColorToken(hex: "#BAC2DE"),
+            mutedText: NordColorToken(hex: "#A6ADC8", opacity: 0.76),
+            selectedText: NordColorToken(hex: "#FFFFFF"),
+            accent: NordColorToken(hex: "#89B4FA"),
+            secondaryAccent: NordColorToken(hex: "#94E2D5"),
+            warning: NordColorToken(hex: "#F9E2AF"),
+            destructive: NordColorToken(hex: "#F38BA8")
+        ),
+        terminalAppearance: TerminalAppearance(
+            backgroundHex: "#1E1E2E",
+            foregroundHex: "#CDD6F4",
+            cursorHex: "#89B4FA",
+            selectionHex: "#45475A"
+        )
+    )
+
+    public static let nord = AppTheme(
+        id: "nord",
+        displayName: "Nord",
+        colorScheme: .dark,
+        shellPalette: ShellThemePalette(
+            shellBackground: NordColorToken(hex: "#2E3440"),
+            sidebarBackground: NordColorToken(hex: "#242933"),
+            contentBackground: NordColorToken(hex: "#2E3440"),
+            elevatedBackground: NordColorToken(hex: "#3B4252"),
+            tabBarBackground: NordColorToken(hex: "#242933"),
+            activeBackground: NordColorToken(hex: "#5E81AC"),
+            activeBorder: NordColorToken(hex: "#88C0D0"),
+            border: NordColorToken(hex: "#4C566A"),
+            primaryText: NordColorToken(hex: "#ECEFF4"),
+            secondaryText: NordColorToken(hex: "#E5E9F0"),
+            mutedText: NordColorToken(hex: "#D8DEE9", opacity: 0.72),
+            selectedText: NordColorToken(hex: "#FFFFFF"),
+            accent: NordColorToken(hex: "#88C0D0"),
+            secondaryAccent: NordColorToken(hex: "#81A1C1"),
+            warning: NordColorToken(hex: "#EBCB8B"),
+            destructive: NordColorToken(hex: "#BF616A")
+        ),
+        terminalAppearance: TerminalAppearance(
+            backgroundHex: "#2E3440",
+            foregroundHex: "#ECEFF4",
+            cursorHex: "#88C0D0",
+            selectionHex: "#4C566A"
         )
     )
 
@@ -199,9 +319,13 @@ public struct AppTheme: Identifiable, Equatable, Sendable {
     )
 
     public static let catalog: [AppTheme] = [
+        catppuccin,
         dracula,
         oneDark,
-        catppuccin,
+        catppuccinFrappe,
+        catppuccinMacchiato,
+        catppuccinMocha,
+        nord,
         cursor
     ]
 

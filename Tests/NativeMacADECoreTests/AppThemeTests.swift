@@ -8,15 +8,28 @@ struct AppThemeTests {
         #expect(AppTheme.resolve(id: "dracula") == .dracula)
         #expect(AppTheme.resolve(id: "onedark") == .oneDark)
         #expect(AppTheme.resolve(id: "catppuccin") == .catppuccin)
+        #expect(AppTheme.resolve(id: "catppuccin-frappe") == .catppuccinFrappe)
+        #expect(AppTheme.resolve(id: "catppuccin-macchiato") == .catppuccinMacchiato)
+        #expect(AppTheme.resolve(id: "catppuccin-mocha") == .catppuccinMocha)
+        #expect(AppTheme.resolve(id: "nord") == .nord)
         #expect(AppTheme.resolve(id: "cursor") == .cursor)
     }
 
     @Test
     func unknownThemeIDsFallBackToCursorDefault() {
         #expect(AppTheme.resolve(id: nil) == .cursor)
-        #expect(AppTheme.resolve(id: "nord") == .cursor)
+        #expect(AppTheme.resolve(id: "missing-theme") == .cursor)
         #expect(AppPreferences.defaultThemeID == "cursor")
-        #expect(AppPreferences.supportedThemeIDs == ["dracula", "onedark", "catppuccin", "cursor"])
+        #expect(AppPreferences.supportedThemeIDs == [
+            "catppuccin",
+            "dracula",
+            "onedark",
+            "catppuccin-frappe",
+            "catppuccin-macchiato",
+            "catppuccin-mocha",
+            "nord",
+            "cursor"
+        ])
     }
 
     @Test
@@ -46,5 +59,9 @@ struct AppThemeTests {
         #expect(catppuccinTheme.terminalAppearance.backgroundHex == "#EFF1F5")
         #expect(catppuccinTheme.terminalAppearance.foregroundHex == "#4C4F69")
         #expect(catppuccinTheme.terminalAppearance.cursorHex == "#1E66F5")
+
+        let nordTheme = AppTheme.resolve(id: "nord")
+        #expect(nordTheme.colorScheme == .dark)
+        #expect(nordTheme.terminalAppearance.backgroundHex == "#2E3440")
     }
 }
