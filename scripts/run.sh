@@ -45,12 +45,23 @@ create_icns() {
 }
 
 build_app_bundle() {
-  local build_args=("$@")
+  local build_args=()
+  if [[ $# -gt 0 ]]; then
+    build_args=("$@")
+  fi
 
-  swift build --product "$PRODUCT" "${build_args[@]}" >&2
+  if [[ ${#build_args[@]} -gt 0 ]]; then
+    swift build --product "$PRODUCT" "${build_args[@]}" >&2
+  else
+    swift build --product "$PRODUCT" >&2
+  fi
 
   local bin_path app_bundle contents_dir macos_dir resources_dir executable_path resource_bundle_path
-  bin_path="$(swift build --show-bin-path "${build_args[@]}")"
+  if [[ ${#build_args[@]} -gt 0 ]]; then
+    bin_path="$(swift build --show-bin-path "${build_args[@]}")"
+  else
+    bin_path="$(swift build --show-bin-path)"
+  fi
   executable_path="$bin_path/$PRODUCT"
   resource_bundle_path="$(find "$bin_path" -maxdepth 1 -type d -name "${PRODUCT}_*.bundle" | head -n 1)"
 

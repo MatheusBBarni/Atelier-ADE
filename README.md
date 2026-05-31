@@ -4,6 +4,8 @@ Atelier is an open-source agentic development environment for macOS, built for d
 
 The idea is simple: keep the app out of the way, keep the state on your machine, and make it obvious what each session, tab, and agent is doing. No browser shell pretending to be a desktop app. No mystery sync layer. Just a Mac app that feels like it belongs on macOS.
 
+![Atelier app screenshot](docs/images/app-image.png)
+
 ## What Atelier does today
 
 - keeps projects pinned in a persistent sidebar
