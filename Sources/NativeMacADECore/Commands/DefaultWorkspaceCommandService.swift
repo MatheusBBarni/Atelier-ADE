@@ -1513,7 +1513,7 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
         terminalSurfaceManager.releaseSurface(for: tab.id)
     }
 
-    private func persist<T>(_ operation: () async throws -> T) async throws -> T {
+    private func persist<T>(_ operation: @MainActor () async throws -> T) async throws -> T {
         do {
             return try await operation()
         } catch let error as WorkspaceCommandError {
