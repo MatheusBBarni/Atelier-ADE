@@ -6,6 +6,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PRODUCT="NativeMacADE"
 APP_NAME="Atelier"
 APP_BUNDLE_NAME="Atelier"
+APP_ICON_NAME="AppIcon"
 BUNDLE_ID="com.matheusbbarni.Atelier"
 MIN_MACOS_VERSION="15.0"
 ICON_SOURCE="$ROOT_DIR/Sources/NativeMacADE/Resources/AppIcon.png"
@@ -20,28 +21,54 @@ fi
 
 cd "$ROOT_DIR"
 
-create_icns() {
+compile_app_icon_assets() {
   local source_png="$1"
-  local output_icns="$2"
-  local temp_dir
-  local iconset_dir
+  local output_dir="$2"
+  local temp_dir asset_catalog_dir appiconset_dir partial_info_plist
 
   temp_dir="$(mktemp -d)"
-  iconset_dir="$temp_dir/AppIcon.iconset"
-  mkdir -p "$iconset_dir"
+  asset_catalog_dir="$temp_dir/Assets.xcassets"
+  appiconset_dir="$asset_catalog_dir/${APP_ICON_NAME}.appiconset"
+  partial_info_plist="$temp_dir/asset-catalog-info.plist"
+  mkdir -p "$appiconset_dir"
 
-  sips -z 16 16 "$source_png" --out "$iconset_dir/icon_16x16.png" >/dev/null
-  sips -z 32 32 "$source_png" --out "$iconset_dir/icon_16x16@2x.png" >/dev/null
-  sips -z 32 32 "$source_png" --out "$iconset_dir/icon_32x32.png" >/dev/null
-  sips -z 64 64 "$source_png" --out "$iconset_dir/icon_32x32@2x.png" >/dev/null
-  sips -z 128 128 "$source_png" --out "$iconset_dir/icon_128x128.png" >/dev/null
-  sips -z 256 256 "$source_png" --out "$iconset_dir/icon_128x128@2x.png" >/dev/null
-  sips -z 256 256 "$source_png" --out "$iconset_dir/icon_256x256.png" >/dev/null
-  sips -z 512 512 "$source_png" --out "$iconset_dir/icon_256x256@2x.png" >/dev/null
-  sips -z 512 512 "$source_png" --out "$iconset_dir/icon_512x512.png" >/dev/null
-  sips -z 1024 1024 "$source_png" --out "$iconset_dir/icon_512x512@2x.png" >/dev/null
+  cat > "$appiconset_dir/Contents.json" <<EOF
+{
+  "images" : [
+    { "filename" : "icon_16x16.png", "idiom" : "mac", "scale" : "1x", "size" : "16x16" },
+    { "filename" : "icon_16x16@2x.png", "idiom" : "mac", "scale" : "2x", "size" : "16x16" },
+    { "filename" : "icon_32x32.png", "idiom" : "mac", "scale" : "1x", "size" : "32x32" },
+    { "filename" : "icon_32x32@2x.png", "idiom" : "mac", "scale" : "2x", "size" : "32x32" },
+    { "filename" : "icon_128x128.png", "idiom" : "mac", "scale" : "1x", "size" : "128x128" },
+    { "filename" : "icon_128x128@2x.png", "idiom" : "mac", "scale" : "2x", "size" : "128x128" },
+    { "filename" : "icon_256x256.png", "idiom" : "mac", "scale" : "1x", "size" : "256x256" },
+    { "filename" : "icon_256x256@2x.png", "idiom" : "mac", "scale" : "2x", "size" : "256x256" },
+    { "filename" : "icon_512x512.png", "idiom" : "mac", "scale" : "1x", "size" : "512x512" },
+    { "filename" : "icon_512x512@2x.png", "idiom" : "mac", "scale" : "2x", "size" : "512x512" }
+  ],
+  "info" : { "author" : "xcode", "version" : 1 }
+}
+EOF
 
-  iconutil -c icns "$iconset_dir" -o "$output_icns"
+  sips -z 16 16 "$source_png" --out "$appiconset_dir/icon_16x16.png" >/dev/null
+  sips -z 32 32 "$source_png" --out "$appiconset_dir/icon_16x16@2x.png" >/dev/null
+  sips -z 32 32 "$source_png" --out "$appiconset_dir/icon_32x32.png" >/dev/null
+  sips -z 64 64 "$source_png" --out "$appiconset_dir/icon_32x32@2x.png" >/dev/null
+  sips -z 128 128 "$source_png" --out "$appiconset_dir/icon_128x128.png" >/dev/null
+  sips -z 256 256 "$source_png" --out "$appiconset_dir/icon_128x128@2x.png" >/dev/null
+  sips -z 256 256 "$source_png" --out "$appiconset_dir/icon_256x256.png" >/dev/null
+  sips -z 512 512 "$source_png" --out "$appiconset_dir/icon_256x256@2x.png" >/dev/null
+  sips -z 512 512 "$source_png" --out "$appiconset_dir/icon_512x512.png" >/dev/null
+  sips -z 1024 1024 "$source_png" --out "$appiconset_dir/icon_512x512@2x.png" >/dev/null
+
+  xcrun actool \
+    --platform macosx \
+    --minimum-deployment-target "$MIN_MACOS_VERSION" \
+    --app-icon "$APP_ICON_NAME" \
+    --output-partial-info-plist "$partial_info_plist" \
+    --compile "$output_dir" \
+    "$asset_catalog_dir" >/dev/null
+
   rm -rf "$temp_dir"
 }
 
@@ -93,7 +120,7 @@ build_app_bundle() {
   fi
 
   if [[ -f "$ICON_SOURCE" ]]; then
-    create_icns "$ICON_SOURCE" "$resources_dir/$PRODUCT.icns"
+    compile_app_icon_assets "$ICON_SOURCE" "$resources_dir"
   fi
 
   cat > "$contents_dir/Info.plist" <<EOF
@@ -108,7 +135,9 @@ build_app_bundle() {
   <key>CFBundleExecutable</key>
   <string>$PRODUCT</string>
   <key>CFBundleIconFile</key>
-  <string>$PRODUCT</string>
+  <string>$APP_ICON_NAME</string>
+  <key>CFBundleIconName</key>
+  <string>$APP_ICON_NAME</string>
   <key>CFBundleIdentifier</key>
   <string>$BUNDLE_ID</string>
   <key>CFBundleInfoDictionaryVersion</key>

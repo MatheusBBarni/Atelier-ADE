@@ -23,7 +23,6 @@ struct AtelierApp: App {
         terminalHostController = container.terminalHostController
         fileAccessService = container.fileAccessService
         fileBufferController = container.fileBufferController
-        Self.installApplicationIcon()
     }
 
     var body: some Scene {
@@ -239,17 +238,6 @@ struct AtelierApp: App {
         workspaceStore.projects.flatMap { project in
             workspaceStore.orderedSessions(for: project.id)
         }
-    }
-
-    private static func installApplicationIcon() {
-        guard let iconURL = Bundle.module.url(forResource: "AppIcon", withExtension: "png"),
-              let iconImage = NSImage(contentsOf: iconURL)
-        else {
-            return
-        }
-
-        iconImage.size = NSSize(width: 512, height: 512)
-        NSApplication.shared.applicationIconImage = iconImage
     }
 }
 
