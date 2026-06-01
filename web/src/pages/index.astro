@@ -52,31 +52,53 @@ const pageTitle = `${siteContent.productName} | Native macOS agent workspace`;
     </header>
 
     <main id="main">
-      <section class="hero" aria-labelledby="hero-title" style={`--hero-image: url(${appScreenshot.src});`}>
+      <section class="hero" aria-labelledby="hero-title">
         <div class="hero-backdrop" aria-hidden="true"></div>
         <div class="hero-inner">
-          <p class="eyebrow">{siteContent.hero.eyebrow}</p>
-          <h1 id="hero-title">{siteContent.hero.title}</h1>
-          <p class="hero-summary">{siteContent.hero.summary}</p>
+          <div class="hero-copy">
+            <p class="eyebrow">{siteContent.hero.eyebrow}</p>
+            <h1 id="hero-title">{siteContent.hero.title}</h1>
+            <p class="hero-summary">{siteContent.hero.summary}</p>
 
-          <ul class="hero-bullets" aria-label="Atelier principles">
-            {siteContent.hero.bullets.map((bullet) => <li>{bullet}</li>)}
-          </ul>
+            <ul class="hero-bullets" aria-label="Atelier principles">
+              {siteContent.hero.bullets.map((bullet) => <li>{bullet}</li>)}
+            </ul>
 
-          <div class="hero-actions" aria-label="Primary evaluation paths">
-            {primaryCta && <RepoStarCTA cta={primaryCta} />}
-            <div class="secondary-actions">
-              {
-                secondaryCtas.map((link) => (
-                  <a class="button button-secondary" href={link.href} aria-label={link.ariaLabel}>
-                    {link.label}
-                  </a>
-                ))
-              }
+            <div class="hero-actions" aria-label="Primary evaluation paths">
+              {primaryCta && <RepoStarCTA cta={primaryCta} />}
+              <div class="secondary-actions">
+                {
+                  secondaryCtas.map((link) => (
+                    <a class="button button-secondary" href={link.href} aria-label={link.ariaLabel}>
+                      {link.label}
+                    </a>
+                  ))
+                }
+              </div>
             </div>
+
+            <p class="status-note">{siteContent.statusNote}</p>
           </div>
 
-          <p class="status-note">{siteContent.statusNote}</p>
+          <figure class="hero-product" aria-label="Current Atelier app interface">
+            <div class="screenshot-frame hero-screenshot">
+              <div class="screenshot-label" aria-hidden="true">
+                <span>Current build</span>
+                <span>macOS workspace</span>
+              </div>
+              <img
+                src={appScreenshot.src}
+                width={appScreenshot.width}
+                height={appScreenshot.height}
+                alt=""
+                loading="eager"
+                decoding="async"
+              />
+            </div>
+            <figcaption>
+              Actual app surface: project sidebar, session state, terminal space, and file context.
+            </figcaption>
+          </figure>
         </div>
       </section>
 
@@ -88,14 +110,20 @@ const pageTitle = `${siteContent.productName} | Native macOS agent workspace`;
             <p>{siteContent.proof.description}</p>
           </div>
           <figure class="product-proof">
-            <img
-              src={appScreenshot.src}
-              width={appScreenshot.width}
-              height={appScreenshot.height}
-              alt={landingPageAssets.screenshot.alt}
-              loading="eager"
-              decoding="async"
-            />
+            <div class="screenshot-frame proof-screenshot">
+              <div class="screenshot-label" aria-hidden="true">
+                <span>Product proof</span>
+                <span>Current interface</span>
+              </div>
+              <img
+                src={appScreenshot.src}
+                width={appScreenshot.width}
+                height={appScreenshot.height}
+                alt={landingPageAssets.screenshot.alt}
+                loading="eager"
+                decoding="async"
+              />
+            </div>
             <figcaption>{siteContent.proof.caption}</figcaption>
           </figure>
         </div>
@@ -185,6 +213,8 @@ const pageTitle = `${siteContent.productName} | Native macOS agent workspace`;
     --rust: #a4553f;
     --blue: #335d7a;
     --gold: #b7802f;
+    --screen: #20222b;
+    --screen-line: rgb(255 255 255 / 14%);
     --shadow: 0 1.5rem 4rem rgb(23 25 22 / 14%);
     font-family:
       "Avenir Next", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
@@ -279,24 +309,26 @@ const pageTitle = `${siteContent.productName} | Native macOS agent workspace`;
 
   .hero {
     position: relative;
-    min-height: 78svh;
+    min-height: 82svh;
     display: grid;
     align-items: center;
+    isolation: isolate;
     overflow: hidden;
     border-bottom: 1px solid var(--line);
     background:
-      linear-gradient(90deg, rgb(247 248 243 / 96%) 0%, rgb(247 248 243 / 82%) 48%, rgb(247 248 243 / 36%) 100%),
-      var(--hero-image) right 8% center / min(70rem, 92vw) auto no-repeat,
+      radial-gradient(circle at 82% 24%, rgb(81 107 82 / 14%), transparent 32rem),
+      linear-gradient(135deg, #fbfbf5 0%, var(--paper) 48%, #edf1e8 100%),
       var(--paper);
   }
 
   .hero-backdrop {
     position: absolute;
     inset: auto 0 0;
-    height: 34%;
+    z-index: -1;
+    height: 42%;
     border-top: 1px solid var(--line);
     background:
-      linear-gradient(90deg, rgb(81 107 82 / 12%), rgb(164 85 63 / 10%), rgb(51 93 122 / 12%)),
+      linear-gradient(90deg, rgb(81 107 82 / 10%), rgb(164 85 63 / 7%), rgb(51 93 122 / 10%)),
       repeating-linear-gradient(
         90deg,
         rgb(23 25 22 / 6%) 0,
@@ -315,7 +347,15 @@ const pageTitle = `${siteContent.productName} | Native macOS agent workspace`;
   .hero-inner {
     position: relative;
     z-index: 1;
+    display: grid;
+    grid-template-columns: minmax(0, 0.88fr) minmax(24rem, 1.12fr);
+    gap: clamp(2rem, 5vw, 5rem);
+    align-items: center;
     padding: 5rem 0;
+  }
+
+  .hero-copy {
+    max-width: 43rem;
   }
 
   .eyebrow,
@@ -363,7 +403,7 @@ const pageTitle = `${siteContent.productName} | Native macOS agent workspace`;
   }
 
   .hero-summary {
-    max-width: 42rem;
+    max-width: 39rem;
     margin-bottom: 1.5rem;
     color: #343831;
     font-size: 1.35rem;
@@ -372,32 +412,33 @@ const pageTitle = `${siteContent.productName} | Native macOS agent workspace`;
 
   .hero-bullets {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 0.75rem;
-    max-width: 54rem;
+    grid-template-columns: 1fr;
+    gap: 0.65rem;
+    max-width: 38rem;
     margin: 0 0 2rem;
     padding: 0;
     list-style: none;
   }
 
   .hero-bullets li {
-    min-height: 5.25rem;
+    min-height: auto;
     display: flex;
-    align-items: flex-end;
-    padding: 1rem;
-    border-top: 3px solid var(--moss);
-    background: rgb(255 254 249 / 78%);
-    box-shadow: 0 0.75rem 2rem rgb(23 25 22 / 8%);
+    align-items: center;
+    padding: 0.85rem 1rem;
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--moss);
+    border-radius: 0.45rem;
+    background: rgb(255 254 249 / 84%);
     color: #2f342f;
     font-weight: 650;
   }
 
   .hero-bullets li:nth-child(2) {
-    border-color: var(--blue);
+    border-left-color: var(--blue);
   }
 
   .hero-bullets li:nth-child(3) {
-    border-color: var(--rust);
+    border-left-color: var(--rust);
   }
 
   .hero-actions {
@@ -468,6 +509,69 @@ const pageTitle = `${siteContent.productName} | Native macOS agent workspace`;
     font-weight: 700;
   }
 
+  .hero-product {
+    position: relative;
+    isolation: isolate;
+    margin: 0;
+  }
+
+  .hero-product::before {
+    content: "";
+    position: absolute;
+    inset: 2.25rem -1.15rem -1.35rem 1.15rem;
+    z-index: -1;
+    border: 1px solid rgb(81 107 82 / 24%);
+    border-radius: 1.2rem;
+    background: #e6ebe1;
+  }
+
+  .screenshot-frame {
+    overflow: hidden;
+    padding: 0.65rem;
+    border: 1px solid rgb(23 25 22 / 24%);
+    border-radius: 1.1rem;
+    background: var(--screen);
+    box-shadow: 0 2rem 5rem rgb(23 25 22 / 24%);
+  }
+
+  .screenshot-label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.25rem 0.35rem 0.65rem;
+    color: rgb(255 254 249 / 74%);
+    font-size: 0.72rem;
+    font-weight: 800;
+    line-height: 1.2;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .screenshot-label span:first-child {
+    color: #f2bd81;
+  }
+
+  .screenshot-frame img {
+    display: block;
+    width: 100%;
+    height: auto;
+    border: 1px solid var(--screen-line);
+    border-radius: 0.72rem;
+  }
+
+  .hero-product figcaption {
+    max-width: 38rem;
+  }
+
+  .hero-product figcaption,
+  .product-proof figcaption {
+    margin-top: 0.9rem;
+    color: var(--muted);
+    font-size: 0.92rem;
+    line-height: 1.5;
+  }
+
   .proof-section,
   .trust-section,
   .capabilities-section,
@@ -476,7 +580,7 @@ const pageTitle = `${siteContent.productName} | Native macOS agent workspace`;
   }
 
   .proof-section {
-    background: var(--surface);
+    background: linear-gradient(180deg, var(--surface), #f1f3ea);
   }
 
   .proof-grid,
@@ -498,20 +602,8 @@ const pageTitle = `${siteContent.productName} | Native macOS agent workspace`;
     margin: 0;
   }
 
-  .product-proof img {
-    display: block;
-    width: 100%;
-    height: auto;
-    border: 1px solid var(--line);
-    border-radius: 0.5rem;
+  .product-proof .screenshot-frame {
     box-shadow: var(--shadow);
-  }
-
-  .product-proof figcaption {
-    margin-top: 0.9rem;
-    color: var(--muted);
-    font-size: 0.92rem;
-    line-height: 1.5;
   }
 
   .trust-section {
@@ -650,14 +742,15 @@ const pageTitle = `${siteContent.productName} | Native macOS agent workspace`;
 
     .hero {
       min-height: auto;
-      background:
-        linear-gradient(180deg, rgb(247 248 243 / 98%) 0%, rgb(247 248 243 / 92%) 58%, rgb(247 248 243 / 72%) 100%),
-        var(--hero-image) center bottom 2rem / 58rem auto no-repeat,
-        var(--paper);
     }
 
     .hero-inner {
-      padding: 4rem 0 12rem;
+      grid-template-columns: 1fr;
+      padding: 4rem 0;
+    }
+
+    .hero-product {
+      max-width: 58rem;
     }
 
     h1 {
@@ -705,6 +798,23 @@ const pageTitle = `${siteContent.productName} | Native macOS agent workspace`;
 
     .hero-inner {
       padding-top: 3rem;
+    }
+
+    .hero-product::before {
+      display: none;
+    }
+
+    .screenshot-frame {
+      padding: 0.45rem;
+      border-radius: 0.85rem;
+    }
+
+    .screenshot-label {
+      align-items: flex-start;
+      flex-direction: column;
+      gap: 0.2rem;
+      padding: 0.15rem 0.25rem 0.45rem;
+      font-size: 0.66rem;
     }
 
     h1 {
