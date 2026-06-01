@@ -416,7 +416,7 @@ private struct ShortcutEditorRow: View {
     }
 }
 
-private struct SettingsSectionFeedback: Equatable {
+struct SettingsSectionFeedback: Equatable {
     enum Kind: Equatable {
         case success
         case error
@@ -426,7 +426,7 @@ private struct SettingsSectionFeedback: Equatable {
     var message: String
 }
 
-private struct SettingsSectionFeedbackView: View {
+struct SettingsSectionFeedbackView: View {
     let feedback: SettingsSectionFeedback
     let onDismiss: () -> Void
     @Environment(\.shellThemePalette) private var theme
