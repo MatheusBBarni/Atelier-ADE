@@ -66,23 +66,25 @@ struct AtelierApp: App {
                 }
                 .disabled(workspaceStore.selectedProject == nil)
 
-                Button("New Tab") {
-                    NotificationCenter.default.post(name: .createPlainTab, object: nil)
-                }
-                .managedKeyboardShortcut(.newPlainTab, preferences: workspaceStore.appPreferences)
-                .disabled(workspaceStore.selectedSession == nil)
+                if shouldShowTerminalCreationCommands {
+                    Button("New Tab") {
+                        NotificationCenter.default.post(name: .createPlainTab, object: nil)
+                    }
+                    .managedKeyboardShortcut(.newPlainTab, preferences: workspaceStore.appPreferences)
+                    .disabled(workspaceStore.selectedSession == nil)
 
-                Button("New Agent Tab…") {
-                    NotificationCenter.default.post(name: .showAgentTabPalette, object: nil)
-                }
-                .managedKeyboardShortcut(.newAgentTabWithProfile, preferences: workspaceStore.appPreferences)
-                .disabled(workspaceStore.selectedSession == nil)
+                    Button("New Agent Tab…") {
+                        NotificationCenter.default.post(name: .showAgentTabPalette, object: nil)
+                    }
+                    .managedKeyboardShortcut(.newAgentTabWithProfile, preferences: workspaceStore.appPreferences)
+                    .disabled(workspaceStore.selectedSession == nil)
 
-                Button("New Default Agent Tab") {
-                    NotificationCenter.default.post(name: .createDefaultAgentTab, object: nil)
+                    Button("New Default Agent Tab") {
+                        NotificationCenter.default.post(name: .createDefaultAgentTab, object: nil)
+                    }
+                    .managedKeyboardShortcut(.newDefaultAgentTab, preferences: workspaceStore.appPreferences)
+                    .disabled(workspaceStore.selectedSession == nil)
                 }
-                .managedKeyboardShortcut(.newDefaultAgentTab, preferences: workspaceStore.appPreferences)
-                .disabled(workspaceStore.selectedSession == nil)
             }
 
             CommandGroup(replacing: .saveItem) {
@@ -188,6 +190,12 @@ struct AtelierApp: App {
     private var selectedFileTab: WorkspaceTab? {
         guard let selectedTab = workspaceStore.selectedTab, selectedTab.kind == .file else { return nil }
         return selectedTab
+    }
+
+    private var shouldShowTerminalCreationCommands: Bool {
+        FocusWorkspacePolicy.shouldShowTerminalCreationAffordance(
+            in: workspaceStore.selectedFocusWorkspaceSessionState
+        )
     }
 
     private var selectedFileIsDirty: Bool {

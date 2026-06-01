@@ -371,9 +371,18 @@ struct ContentView: View {
             userMessage = UserMessage(title: "Session required", detail: "Select a session before opening a new agent tab.")
             return
         }
-
         sessionCommandPalette = nil
         sessionSearchPalette = nil
+        guard FocusWorkspacePolicy.shouldShowTerminalCreationAffordance(
+            in: store.focusWorkspaceSessionState(in: session.id)
+        ) else {
+            userMessage = UserMessage.commandFailure(
+                WorkspaceCommandError.focusWorkspaceRejected(.additionalTerminalTabBlocked),
+                fallbackTitle: "Agent tab could not be created"
+            )
+            return
+        }
+
         agentTabPalette = AgentTabPaletteState(session: session, isLoading: true)
         Task {
             do {
@@ -426,7 +435,7 @@ struct ContentView: View {
             do {
                 _ = try await commandService.createAgentTab(sessionID: sessionID, shortcutID: shortcutID)
             } catch {
-                userMessage = UserMessage(title: "Agent tab could not be created", detail: String(describing: error))
+                userMessage = UserMessage.commandFailure(error, fallbackTitle: "Agent tab could not be created")
             }
         }
     }
@@ -2193,6 +2202,9 @@ struct WorkspaceDetailView: View {
     @State private var isFileWorkspaceSidebarVisible = true
 
     var body: some View {
+        let shouldShowTabRow = FocusWorkspacePolicy.shouldShowTabRow(
+            in: store.selectedFocusWorkspaceSessionState
+        )
         VStack(spacing: 0) {
             ActiveContextBanner(
                 project: store.selectedProject,
@@ -2208,6 +2220,10 @@ struct WorkspaceDetailView: View {
                 fileBufferController: fileBufferController,
                 userMessage: $userMessage
             )
+            .frame(height: shouldShowTabRow ? 42 : 0)
+            .opacity(shouldShowTabRow ? 1 : 0)
+            .accessibilityHidden(!shouldShowTabRow)
+            .clipped()
             Divider().overlay(theme.border.color)
             HStack(spacing: 0) {
                 WorkspacePrimaryHostAreaView(
@@ -2236,6 +2252,12 @@ struct WorkspaceDetailView: View {
         .onReceive(NotificationCenter.default.publisher(for: .toggleFileWorkspaceSidebar)) { _ in
             toggleFileWorkspaceSidebar()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .createPlainTab)) { _ in
+            createPlainTabFromCommand()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .createDefaultAgentTab)) { _ in
+            createDefaultAgentTabFromCommand()
+        }
     }
 
     private func showSessionCommandPalette() {
@@ -2245,6 +2267,34 @@ struct WorkspaceDetailView: View {
     private func toggleFileWorkspaceSidebar() {
         withAnimation(.easeInOut(duration: 0.16)) {
             isFileWorkspaceSidebarVisible.toggle()
+        }
+    }
+
+    private func createPlainTabFromCommand() {
+        guard let selectedSessionID = store.selectedSessionID else {
+            userMessage = UserMessage(title: "Session required", detail: "Select a session before creating a new tab.")
+            return
+        }
+        Task {
+            do {
+                _ = try await commandService.createPlainTab(sessionID: selectedSessionID)
+            } catch {
+                userMessage = UserMessage.commandFailure(error, fallbackTitle: "Tab could not be created")
+            }
+        }
+    }
+
+    private func createDefaultAgentTabFromCommand() {
+        guard let selectedSessionID = store.selectedSessionID else {
+            userMessage = UserMessage(title: "Session required", detail: "Select a session before creating a new agent tab.")
+            return
+        }
+        Task {
+            do {
+                _ = try await commandService.createDefaultAgentTab(sessionID: selectedSessionID)
+            } catch {
+                userMessage = UserMessage.commandFailure(error, fallbackTitle: "Agent tab could not be created")
+            }
         }
     }
 }
@@ -2341,6 +2391,9 @@ struct TabChromeView: View {
         let _ = dirtyRefreshToken
         let visibleTabs = store.tabsForSelectedSession
         let visibleTabIDs = visibleTabs.map(\.id)
+        let shouldShowCreateTabButton = FocusWorkspacePolicy.shouldShowTerminalCreationAffordance(
+            in: store.selectedFocusWorkspaceSessionState
+        )
         ScrollView(.horizontal) {
             HStack(spacing: 1) {
                 if visibleTabs.isEmpty {
@@ -2383,21 +2436,23 @@ struct TabChromeView: View {
                     }
                 }
 
-                Button(action: createPlainTab) {
-                    Image(systemName: "plus")
-                        .font(.system(size: 12, weight: .semibold))
-                        .frame(width: 28, height: 28)
-                        .background(theme.elevatedBackground.color.opacity(store.selectedSessionID == nil ? 0.3 : 0.82), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .stroke(theme.border.color.opacity(0.85), lineWidth: 1)
+                if shouldShowCreateTabButton {
+                    Button(action: createPlainTab) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 12, weight: .semibold))
+                            .frame(width: 28, height: 28)
+                            .background(theme.elevatedBackground.color.opacity(store.selectedSessionID == nil ? 0.3 : 0.82), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .stroke(theme.border.color.opacity(0.85), lineWidth: 1)
+                            }
                         }
+                    .buttonStyle(.plain)
+                    .disabled(store.selectedSessionID == nil)
+                    .help("New tab (⌘T)")
+                    .padding(.leading, 4)
+                    .padding(.trailing, 12)
                 }
-                .buttonStyle(.plain)
-                .disabled(store.selectedSessionID == nil)
-                .help("New tab (⌘T)")
-                .padding(.leading, 4)
-                .padding(.trailing, 12)
             }
             .padding(.horizontal, 8)
             .padding(.top, 6)
@@ -2421,12 +2476,6 @@ struct TabChromeView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .fileBufferDirtyStateChanged)) { _ in
             dirtyRefreshToken += 1
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .createPlainTab)) { _ in
-            createPlainTab()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .createDefaultAgentTab)) { _ in
-            createDefaultAgentTab()
         }
         .onReceive(NotificationCenter.default.publisher(for: .closeSelectedTab)) { _ in
             closeSelectedTab()
@@ -2507,21 +2556,7 @@ struct TabChromeView: View {
             do {
                 _ = try await commandService.createPlainTab(sessionID: selectedSessionID)
             } catch {
-                userMessage = UserMessage(title: "Tab could not be created", detail: String(describing: error))
-            }
-        }
-    }
-
-    private func createDefaultAgentTab() {
-        guard let selectedSessionID = store.selectedSessionID else {
-            userMessage = UserMessage(title: "Session required", detail: "Select a session before creating a new agent tab.")
-            return
-        }
-        Task {
-            do {
-                _ = try await commandService.createDefaultAgentTab(sessionID: selectedSessionID)
-            } catch {
-                userMessage = UserMessage(title: "Agent tab could not be created", detail: String(describing: error))
+                userMessage = UserMessage.commandFailure(error, fallbackTitle: "Tab could not be created")
             }
         }
     }
@@ -3012,6 +3047,9 @@ struct WorkspacePrimaryHostAreaView: View {
                 TerminalPlaceholderView(
                     selectedProject: store.selectedProject,
                     selectedSession: store.selectedSession,
+                    showsTerminalCreationActions: FocusWorkspacePolicy.shouldShowTerminalCreationAffordance(
+                        in: store.selectedFocusWorkspaceSessionState
+                    ),
                     onCreatePlainTab: createPlainTabIfPossible,
                     onCreateAgentTab: createAgentTabIfPossible
                 )
@@ -3039,7 +3077,7 @@ struct WorkspacePrimaryHostAreaView: View {
             do {
                 _ = try await commandService.createPlainTab(sessionID: selectedSessionID)
             } catch {
-                userMessage = UserMessage(title: "Tab could not be created", detail: String(describing: error))
+                userMessage = UserMessage.commandFailure(error, fallbackTitle: "Tab could not be created")
             }
         }
     }
@@ -3643,7 +3681,7 @@ struct FileWorkspaceSidebarView: View {
                 _ = try await commandService.openFileTab(sessionID: sessionID, path: entry.path)
                 expandAncestors(of: entry.path)
             } catch {
-                userMessage = UserMessage(title: "File could not be opened", detail: String(describing: error))
+                userMessage = UserMessage.commandFailure(error, fallbackTitle: "File could not be opened")
             }
         }
     }
@@ -3782,7 +3820,7 @@ struct FileWorkspaceSidebarView: View {
                 _ = try await commandService.openFileTab(sessionID: sessionID, path: path)
                 expandAncestors(of: path)
             } catch {
-                userMessage = UserMessage(title: "File could not be opened", detail: String(describing: error))
+                userMessage = UserMessage.commandFailure(error, fallbackTitle: "File could not be opened")
             }
         }
     }
@@ -4192,6 +4230,7 @@ struct TerminalHostView: NSViewRepresentable {
 struct TerminalPlaceholderView: View {
     let selectedProject: WorkspaceProject?
     let selectedSession: WorkspaceSession?
+    let showsTerminalCreationActions: Bool
     let onCreatePlainTab: () -> Void
     let onCreateAgentTab: () -> Void
     @Environment(\.shellThemePalette) private var theme
@@ -4211,7 +4250,7 @@ struct TerminalPlaceholderView: View {
                     .font(.system(size: uiFontSize, design: .monospaced))
                     .foregroundStyle(theme.secondaryText.color)
                     .multilineTextAlignment(.center)
-                if selectedSession != nil {
+                if selectedSession != nil, showsTerminalCreationActions {
                     HStack(spacing: 10) {
                         Button("New Tab", action: onCreatePlainTab)
                             .buttonStyle(.bordered)
@@ -4565,6 +4604,25 @@ struct UserMessage: Identifiable, Equatable {
     let id = UUID()
     let title: String
     let detail: String
+
+    init(title: String, detail: String) {
+        self.title = title
+        self.detail = detail
+    }
+
+    init(focusWorkspacePresentation presentation: FocusWorkspaceBlockedActionPresentation) {
+        title = presentation.title
+        detail = presentation.detail
+    }
+
+    static func commandFailure(_ error: Error, fallbackTitle: String) -> UserMessage {
+        if let commandError = error as? WorkspaceCommandError,
+           let presentation = FocusWorkspaceBlockedActionPresentation(error: commandError) {
+            return UserMessage(focusWorkspacePresentation: presentation)
+        }
+
+        return UserMessage(title: fallbackTitle, detail: String(describing: error))
+    }
 }
 
 enum ProjectDirectoryPicker {

@@ -77,6 +77,13 @@ public enum FocusWorkspacePolicy {
         terminalCreationDecision(in: state).isAllowed
     }
 
+    public static func shouldShowTerminalCreationAffordance(
+        in state: FocusWorkspaceSessionState?
+    ) -> Bool {
+        guard let state else { return true }
+        return terminalCreationDecision(in: state).isAllowed
+    }
+
     public static func fileOpenDecision(
         in state: FocusWorkspaceSessionState,
         openingSameFile: Bool
@@ -92,6 +99,15 @@ public enum FocusWorkspacePolicy {
         openingSameFile: Bool
     ) -> Bool {
         fileOpenDecision(in: state, openingSameFile: openingSameFile).isAllowed
+    }
+
+    public static func shouldShowTabRow(in state: FocusWorkspaceSessionState) -> Bool {
+        !state.enabled || state.visibleTabCount != 1
+    }
+
+    public static func shouldShowTabRow(in state: FocusWorkspaceSessionState?) -> Bool {
+        guard let state else { return true }
+        return shouldShowTabRow(in: state)
     }
 }
 

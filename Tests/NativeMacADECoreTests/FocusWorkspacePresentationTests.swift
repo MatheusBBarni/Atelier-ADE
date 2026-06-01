@@ -39,4 +39,40 @@ struct FocusWorkspacePresentationTests {
         #expect(FocusWorkspaceActiveCuePresentation.helpText.contains("one terminal tab plus one optional file tab"))
         #expect(FocusWorkspaceActiveCuePresentation.helpText.contains("existing multi-tab sessions are preserved"))
     }
+
+    @Test
+    func blockedTerminalCreationPresentationUsesCalmFeatureSpecificCopy() {
+        let presentation = FocusWorkspaceBlockedActionPresentation(
+            violation: .additionalTerminalTabBlocked
+        )
+        let errorPresentation = FocusWorkspaceBlockedActionPresentation(
+            error: .focusWorkspaceRejected(.additionalTerminalTabBlocked)
+        )
+
+        #expect(presentation.title == "Focus Workspace kept this session focused")
+        #expect(presentation.detail.contains("already has a terminal tab"))
+        #expect(presentation.detail.contains("turn off Focus Workspace in Settings"))
+        #expect(errorPresentation == presentation)
+    }
+
+    @Test
+    func blockedDifferentFilePresentationUsesCalmFeatureSpecificCopy() {
+        let presentation = FocusWorkspaceBlockedActionPresentation(
+            violation: .additionalFileTabBlocked
+        )
+        let errorPresentation = FocusWorkspaceBlockedActionPresentation(
+            error: .focusWorkspaceRejected(.additionalFileTabBlocked)
+        )
+
+        #expect(presentation.title == "Focus Workspace kept this file slot focused")
+        #expect(presentation.detail.contains("already has a file tab"))
+        #expect(presentation.detail.contains("Reopen that file"))
+        #expect(presentation.detail.contains("opening a different file"))
+        #expect(errorPresentation == presentation)
+    }
+
+    @Test
+    func blockedPresentationIgnoresNonFocusCommandErrors() {
+        #expect(FocusWorkspaceBlockedActionPresentation(error: .missingSession(UUID())) == nil)
+    }
 }
