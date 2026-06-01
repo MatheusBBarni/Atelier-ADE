@@ -31,8 +31,8 @@ struct TerminalExitEventSourceTests {
         var firstSubscriberEvents: [TerminalExitObservation] = []
         var secondSubscriberEvents: [TerminalExitObservation] = []
 
-        source.subscribe { firstSubscriberEvents.append($0) }
-        source.subscribe { secondSubscriberEvents.append($0) }
+        _ = source.subscribe { firstSubscriberEvents.append($0) }
+        _ = source.subscribe { secondSubscriberEvents.append($0) }
         source.publish(tabID: tabID, exitStatus: 7)
 
         let expected = [TerminalExitObservation(tabID: tabID, exitStatus: 7)]
@@ -47,7 +47,7 @@ struct TerminalExitEventSourceTests {
         var activeSubscriberEvents: [TerminalExitObservation] = []
         var removedSubscriberEvents: [TerminalExitObservation] = []
 
-        source.subscribe { activeSubscriberEvents.append($0) }
+        _ = source.subscribe { activeSubscriberEvents.append($0) }
         let unsubscribe = source.subscribe { removedSubscriberEvents.append($0) }
 
         unsubscribe()
@@ -62,7 +62,7 @@ struct TerminalExitEventSourceTests {
         let source = TerminalExitEventSource()
         let tabID = UUID()
         var subscriberEvents: [TerminalExitObservation] = []
-        source.subscribe { subscriberEvents.append($0) }
+        _ = source.subscribe { subscriberEvents.append($0) }
 
         source.publish(tabID: tabID, exitStatus: nil)
 

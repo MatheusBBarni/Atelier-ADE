@@ -24,7 +24,7 @@ struct ScaffoldIntegrationTests {
         container.workspaceStore.upsertProject(project, select: false)
         container.workspaceStore.upsertSession(session, select: false)
         container.workspaceStore.upsertTab(tab, select: false)
-        container.terminalExitEvents.subscribe { observations.append($0) }
+        _ = container.terminalExitEvents.subscribe { observations.append($0) }
 
         container.terminalHostController.onSurfaceExited?(tab.id, nil)
 
