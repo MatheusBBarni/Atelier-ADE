@@ -481,6 +481,86 @@ struct DefaultWorkspaceCommandServiceTests {
     }
 
     @Test
+    func savingFocusWorkspaceOnPreservesUnrelatedFieldsAndShowsCueCondition() async throws {
+        let now = Date(timeIntervalSince1970: 1_717_394_010)
+        let harness = makeHarness(now: { now })
+        let shortcut = SessionShortcut(
+            label: "Focused Claude",
+            launchCommand: "claude",
+            launchArgumentsJSON: "[\"--continue\"]",
+            isBuiltIn: true
+        )
+        let override = KeybindingOverride(
+            commandID: .openSettings,
+            keyEquivalent: ",",
+            modifiers: [.command, .shift]
+        )
+        try await harness.persistence.save(shortcut: shortcut)
+        try await harness.service.saveAppPreferences(AppPreferences(
+            themeID: "catppuccin",
+            defaultSessionShortcutID: shortcut.id,
+            terminalFontSize: 17,
+            focusWorkspaceEnabled: false,
+            keybindings: [.openSettings: override]
+        ))
+
+        var preferences = try await harness.service.loadAppPreferences()
+        preferences.focusWorkspaceEnabled = true
+        try await harness.service.saveAppPreferences(preferences)
+
+        let persistedPreferences = try await harness.persistence.loadAppPreferences()
+        #expect(persistedPreferences.themeID == "catppuccin")
+        #expect(persistedPreferences.defaultSessionShortcutID == shortcut.id)
+        #expect(persistedPreferences.terminalFontSize == 17)
+        #expect(persistedPreferences.focusWorkspaceEnabled)
+        #expect(persistedPreferences.keybindings == [.openSettings: override])
+        #expect(persistedPreferences.updatedAt == now)
+        #expect(harness.store.appPreferences == persistedPreferences)
+        #expect(FocusWorkspaceActiveCuePresentation(preferences: harness.store.appPreferences).isVisible)
+        #expect(FocusWorkspaceSettingsPresentation(preferences: harness.store.appPreferences).isEnabled)
+    }
+
+    @Test
+    func savingFocusWorkspaceOffPreservesUnrelatedFieldsAndRemovesCueCondition() async throws {
+        let now = Date(timeIntervalSince1970: 1_717_394_020)
+        let harness = makeHarness(now: { now })
+        let shortcut = SessionShortcut(
+            label: "Focused Review",
+            launchCommand: "codex",
+            launchArgumentsJSON: "[\"review\"]",
+            isBuiltIn: true
+        )
+        let override = KeybindingOverride(
+            commandID: .searchSessions,
+            keyEquivalent: "k",
+            modifiers: [.command, .shift]
+        )
+        try await harness.persistence.save(shortcut: shortcut)
+        try await harness.service.saveAppPreferences(AppPreferences(
+            themeID: "dracula",
+            defaultSessionShortcutID: shortcut.id,
+            terminalFontSize: 18,
+            focusWorkspaceEnabled: true,
+            keybindings: [.searchSessions: override]
+        ))
+
+        var preferences = try await harness.service.loadAppPreferences()
+        preferences.focusWorkspaceEnabled = false
+        try await harness.service.saveAppPreferences(preferences)
+
+        let persistedPreferences = try await harness.persistence.loadAppPreferences()
+        #expect(persistedPreferences.themeID == "dracula")
+        #expect(persistedPreferences.defaultSessionShortcutID == shortcut.id)
+        #expect(persistedPreferences.terminalFontSize == 18)
+        #expect(persistedPreferences.focusWorkspaceEnabled == false)
+        #expect(persistedPreferences.keybindings == [.searchSessions: override])
+        #expect(persistedPreferences.updatedAt == now)
+        #expect(harness.store.appPreferences == persistedPreferences)
+        #expect(FocusWorkspaceActiveCuePresentation(preferences: harness.store.appPreferences).isVisible == false)
+        #expect(FocusWorkspaceSettingsPresentation(preferences: harness.store.appPreferences).isEnabled == false)
+    }
+
+    @Test
     func savingFocusWorkspacePreferenceTransitionsRecordsLocalObservability() async throws {
         let harness = makeHarness()
         let project = try await harness.service.openProject(path: makeTemporaryProjectDirectory())

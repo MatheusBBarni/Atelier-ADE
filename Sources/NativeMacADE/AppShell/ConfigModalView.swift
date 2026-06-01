@@ -34,6 +34,13 @@ struct ConfigModalView: View {
 
                     Divider().overlay(theme.border.color)
 
+                    ConfigModalFocusWorkspaceSection(
+                        store: store,
+                        commandService: commandService
+                    )
+
+                    Divider().overlay(theme.border.color)
+
                     ConfigModalAppearanceAndShortcutsSection(
                         store: store,
                         commandService: commandService

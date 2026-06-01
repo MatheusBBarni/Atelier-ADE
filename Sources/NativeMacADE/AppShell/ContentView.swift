@@ -2197,6 +2197,7 @@ struct WorkspaceDetailView: View {
             ActiveContextBanner(
                 project: store.selectedProject,
                 session: store.selectedSession,
+                focusWorkspaceCue: FocusWorkspaceActiveCuePresentation(preferences: store.appPreferences),
                 onShowSessionCommands: showSessionCommandPalette,
                 onOpenSettings: onOpenSettings,
                 isSidebarCollapsed: isSidebarCollapsed
@@ -2251,6 +2252,7 @@ struct WorkspaceDetailView: View {
 struct ActiveContextBanner: View {
     let project: WorkspaceProject?
     let session: WorkspaceSession?
+    let focusWorkspaceCue: FocusWorkspaceActiveCuePresentation
     let onShowSessionCommands: () -> Void
     let onOpenSettings: () -> Void
     let isSidebarCollapsed: Bool
@@ -2266,6 +2268,9 @@ struct ActiveContextBanner: View {
             Label(session?.title ?? "No session selected", systemImage: session == nil ? "rectangle.stack" : "rectangle.stack.fill")
                 .font(.system(size: uiFontSize, weight: .semibold))
             Spacer()
+            if focusWorkspaceCue.isVisible {
+                FocusWorkspaceActiveCueView()
+            }
             Button(action: onShowSessionCommands) {
                 Image(systemName: "plus")
                     .font(.system(size: 13, weight: .semibold))
@@ -2291,6 +2296,31 @@ struct ActiveContextBanner: View {
         .padding(.vertical, 12)
         .foregroundStyle(theme.primaryText.color)
         .background(theme.elevatedBackground.color)
+    }
+}
+
+private struct FocusWorkspaceActiveCueView: View {
+    @Environment(\.shellThemePalette) private var theme
+    @Environment(\.shellUIFontSize) private var uiFontSize
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "viewfinder.circle.fill")
+                .font(.system(size: uiFontSize - 1, weight: .semibold))
+            Text(FocusWorkspaceActiveCuePresentation.label)
+                .font(.system(size: max(uiFontSize - 2, 11.0), weight: .semibold))
+                .lineLimit(1)
+        }
+        .foregroundStyle(theme.accent.color)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 5)
+        .background(theme.accent.color.opacity(0.12), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .stroke(theme.accent.color.opacity(0.32), lineWidth: 1)
+        }
+        .accessibilityLabel(FocusWorkspaceActiveCuePresentation.accessibilityLabel)
+        .help(FocusWorkspaceActiveCuePresentation.helpText)
     }
 }
 

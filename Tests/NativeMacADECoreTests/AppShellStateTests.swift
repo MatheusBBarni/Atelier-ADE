@@ -72,6 +72,7 @@ struct AppShellStateTests {
         #expect(result.preferenceLoadErrorDescription == nil)
         #expect(result.restoreErrorDescription == nil)
         #expect(store.appPreferences.focusWorkspaceEnabled == true)
+        #expect(FocusWorkspaceActiveCuePresentation(preferences: store.appPreferences).isVisible)
         #expect(service.events == ["load", "after-preferences:true", "restore:true"])
     }
 }

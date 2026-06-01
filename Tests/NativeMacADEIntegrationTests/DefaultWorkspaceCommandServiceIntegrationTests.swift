@@ -646,6 +646,59 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
     }
 
     @Test
+    func focusWorkspacePreferenceUpdatesCuePresentationWithoutRelaunch() async throws {
+        let harness = try makeHarness()
+
+        #expect(FocusWorkspaceActiveCuePresentation(preferences: harness.store.appPreferences).isVisible == false)
+
+        var preferences = try await harness.service.loadAppPreferences()
+        preferences.focusWorkspaceEnabled = true
+        try await harness.service.saveAppPreferences(preferences)
+
+        #expect(harness.store.appPreferences.focusWorkspaceEnabled)
+        #expect(FocusWorkspaceSettingsPresentation(preferences: harness.store.appPreferences).isEnabled)
+        #expect(FocusWorkspaceActiveCuePresentation(preferences: harness.store.appPreferences).isVisible)
+
+        preferences = try await harness.service.loadAppPreferences()
+        preferences.focusWorkspaceEnabled = false
+        try await harness.service.saveAppPreferences(preferences)
+
+        #expect(harness.store.appPreferences.focusWorkspaceEnabled == false)
+        #expect(FocusWorkspaceSettingsPresentation(preferences: harness.store.appPreferences).isEnabled == false)
+        #expect(FocusWorkspaceActiveCuePresentation(preferences: harness.store.appPreferences).isVisible == false)
+    }
+
+    @Test
+    func focusWorkspacePreferencePersistsCuePresentationAcrossRelaunch() async throws {
+        let harness = try makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+        let project = try await harness.service.openProject(path: projectPath)
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        try await harness.service.saveAppPreferences(AppPreferences(focusWorkspaceEnabled: true))
+
+        let reloadedStore = WorkspaceStore()
+        let reloadedPersistence = try SQLiteWorkspaceMetadataStore(path: harness.databasePath)
+        let reloadedTerminal = FakeIntegrationTerminalSurfaceManager()
+        let reloadedService = DefaultWorkspaceCommandService(
+            store: reloadedStore,
+            persistenceStore: reloadedPersistence,
+            restoreCoordinator: RestoreCoordinator(persistenceStore: reloadedPersistence),
+            terminalSurfaceManager: reloadedTerminal,
+            fileAccess: LocalWorkspaceFileAccess(),
+            fileBufferManager: WorkspaceFileBufferController(fileAccess: LocalWorkspaceFileAccess())
+        )
+
+        _ = try await reloadedService.loadAppPreferences()
+        try await reloadedService.restoreWorkspace()
+
+        #expect(session.id == reloadedStore.selectedSessionID)
+        #expect(reloadedStore.appPreferences.focusWorkspaceEnabled)
+        #expect(FocusWorkspaceSettingsPresentation(preferences: reloadedStore.appPreferences).isEnabled)
+        #expect(FocusWorkspaceActiveCuePresentation(preferences: reloadedStore.appPreferences).isVisible)
+        #expect(reloadedStore.tabsForSelectedSession.count == 1)
+    }
+
+    @Test
     func restoringShortcutLinkedTabPreservesLaunchIntentForFreshSurface() async throws {
         let harness = try makeHarness()
         let projectPath = try makeTemporaryProjectDirectory()
