@@ -4,7 +4,7 @@
 
 | # | Title | Status | Complexity | Dependencies |
 |---|-------|--------|------------|--------------|
-| 01 | Scaffold Astro site foundation in `web/` | pending | high | — |
+| 01 | Scaffold Astro site foundation in `web/` | completed | high | — |
 | 02 | Prepare MVP site assets and fixed public metadata | pending | medium | task_01 |
 | 03 | Implement the trust-first landing page content and layout | pending | medium | task_01, task_02 |
 | 04 | Add the GitHub repo star CTA as progressive enhancement | pending | medium | task_03 |
