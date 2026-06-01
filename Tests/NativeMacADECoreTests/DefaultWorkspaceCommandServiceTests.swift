@@ -481,6 +481,29 @@ struct DefaultWorkspaceCommandServiceTests {
     }
 
     @Test
+    func savingFocusWorkspacePreferenceTransitionsRecordsLocalObservability() async throws {
+        let harness = makeHarness()
+        let project = try await harness.service.openProject(path: makeTemporaryProjectDirectory())
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        harness.service.logger.clear()
+
+        try await harness.service.saveAppPreferences(AppPreferences(focusWorkspaceEnabled: true))
+        try await harness.service.saveAppPreferences(AppPreferences(focusWorkspaceEnabled: true))
+        try await harness.service.saveAppPreferences(AppPreferences(focusWorkspaceEnabled: false))
+
+        let enableEvent = try #require(harness.service.logger.events.first { $0.name == "focus_workspace_enabled" })
+        let disableEvent = try #require(harness.service.logger.events.first { $0.name == "focus_workspace_disabled" })
+        #expect(session.id == harness.store.selectedSessionID)
+        #expect(harness.service.metrics.focusWorkspaceEnableCount == 1)
+        #expect(harness.service.metrics.focusWorkspaceDisableCount == 1)
+        #expect(enableEvent.fields["source"] == "settings_save")
+        #expect(enableEvent.fields["selected_session_id_present"] == "true")
+        #expect(disableEvent.fields["source"] == "settings_save")
+        #expect(disableEvent.fields["selected_session_id_present"] == "true")
+        #expect(harness.service.logger.events.filter { $0.name == "focus_workspace_enabled" }.count == 1)
+    }
+
+    @Test
     func savingManagedKeybindingsRecordsChangedCountsAndResetClearsOnlyOneOverride() async throws {
         let harness = makeHarness()
         let overrides = managedKeybindingOverrides()
@@ -1040,6 +1063,57 @@ struct DefaultWorkspaceCommandServiceTests {
     }
 
     @Test
+    func focusWorkspaceRejectsTerminalCreationFlowsWithoutMutation() async throws {
+        let harness = makeHarness()
+        let project = try await harness.service.openProject(path: makeTemporaryProjectDirectory())
+        let shortcut = SessionShortcut(
+            label: "Focus Agent",
+            launchCommand: "codex",
+            launchArgumentsJSON: "[\"exec\"]"
+        )
+        try await harness.persistence.save(shortcut: shortcut)
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let firstTab = try #require(harness.store.tabs.first)
+        try await harness.service.saveAppPreferences(AppPreferences(focusWorkspaceEnabled: true))
+        harness.service.logger.clear()
+
+        let tabsBefore = harness.store.tabs
+        let persistedTabsBefore = try await harness.persistence.loadTabs()
+        let snapshotBefore = try await harness.persistence.loadRestoreSnapshot()
+        let createdTabsBefore = harness.terminal.createdTabs
+
+        let operations: [() async throws -> WorkspaceTab] = [
+            { try await harness.service.createTab(sessionID: session.id) },
+            { try await harness.service.createPlainTab(sessionID: session.id) },
+            { try await harness.service.createDefaultAgentTab(sessionID: session.id) },
+            { try await harness.service.createAgentTab(sessionID: session.id, shortcutID: shortcut.id) }
+        ]
+
+        for operation in operations {
+            await #expect(throws: WorkspaceCommandError.focusWorkspaceRejected(.additionalTerminalTabBlocked)) {
+                _ = try await operation()
+            }
+            #expect(harness.store.tabs == tabsBefore)
+            #expect(harness.store.selectedTabID == firstTab.id)
+            #expect(harness.terminal.createdTabs == createdTabsBefore)
+            #expect(try await harness.persistence.loadTabs() == persistedTabsBefore)
+            #expect(try await harness.persistence.loadRestoreSnapshot() == snapshotBefore)
+        }
+
+        let blockedEvents = harness.service.logger.events.filter { $0.name == "focus_workspace_blocked" }
+        #expect(harness.service.metrics.focusWorkspaceBlockedTerminalTabCount == 4)
+        #expect(harness.service.metrics.focusWorkspaceBlockedFileTabCount == 0)
+        #expect(blockedEvents.count == 4)
+        #expect(blockedEvents.allSatisfy { event in
+            event.fields["session_id"] == session.id.uuidString &&
+                event.fields["reason"] == "additional_terminal_tab_blocked" &&
+                event.fields["terminal_tab_count"] == "1" &&
+                event.fields["file_tab_count"] == "0" &&
+                event.fields["selected_tab_kind"] == "terminal"
+        })
+    }
+
+    @Test
     func openingFileTabCreatesMetadataAndLoadsInitialBufferWithoutLaunchingTerminalSurface() async throws {
         let harness = makeHarness()
         let projectPath = try makeTemporaryProjectDirectory()
@@ -1058,6 +1132,79 @@ struct DefaultWorkspaceCommandServiceTests {
         #expect(harness.fileBuffers.bufferText(for: fileTab.id) == "let value = 1\n")
         #expect(harness.fileBuffers.isDirty(tabID: fileTab.id) == false)
         #expect(harness.terminal.createdTabs.map(\.id) == [terminalTab.id])
+    }
+
+    @Test
+    func focusWorkspaceAllowsFirstFileTabAndSameFileReuse() async throws {
+        let harness = makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+        let fileURL = try makeTemporaryProjectFile(in: projectPath, relativePath: "Sources/File.swift")
+        let project = try await harness.service.openProject(path: projectPath)
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let terminalTab = try #require(harness.store.tabs.first)
+        try await harness.service.saveAppPreferences(AppPreferences(focusWorkspaceEnabled: true))
+        harness.service.logger.clear()
+
+        let fileTab = try await harness.service.openFileTab(sessionID: session.id, path: fileURL.path)
+        try await harness.service.selectTab(id: terminalTab.id)
+        let persistedTabIDsBeforeReuse = try await harness.persistence.loadTabs().map(\.id)
+
+        let reusedTab = try await harness.service.openFileTab(sessionID: session.id, path: fileURL.path)
+
+        #expect(fileTab.id == reusedTab.id)
+        #expect(harness.store.tabsForSelectedSession.map(\.id) == [terminalTab.id, fileTab.id])
+        #expect(harness.store.selectedTabID == fileTab.id)
+        #expect(try await harness.persistence.loadTabs().map(\.id) == persistedTabIDsBeforeReuse)
+        #expect(harness.terminal.createdTabs.map(\.id) == [terminalTab.id])
+        #expect(harness.service.metrics.focusWorkspaceBlockedFileTabCount == 0)
+        #expect(harness.service.logger.events.contains { event in
+            event.name == "file_tab_opened" &&
+                event.fields["tab_id"] == fileTab.id.uuidString &&
+                event.fields["reused_tab"] == "false"
+        })
+        #expect(harness.service.logger.events.contains { event in
+            event.name == "file_tab_opened" &&
+                event.fields["tab_id"] == fileTab.id.uuidString &&
+                event.fields["reused_tab"] == "true"
+        })
+    }
+
+    @Test
+    func focusWorkspaceRejectsSecondDifferentFileTabWithoutMutation() async throws {
+        let harness = makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+        let firstFileURL = try makeTemporaryProjectFile(in: projectPath, relativePath: "Sources/File.swift")
+        let secondFileURL = try makeTemporaryProjectFile(in: projectPath, relativePath: "Sources/Other.swift")
+        let project = try await harness.service.openProject(path: projectPath)
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let terminalTab = try #require(harness.store.tabs.first)
+        try await harness.service.saveAppPreferences(AppPreferences(focusWorkspaceEnabled: true))
+        let firstFileTab = try await harness.service.openFileTab(sessionID: session.id, path: firstFileURL.path)
+        harness.service.logger.clear()
+
+        let tabsBefore = harness.store.tabs
+        let persistedTabsBefore = try await harness.persistence.loadTabs()
+        let snapshotBefore = try await harness.persistence.loadRestoreSnapshot()
+        let fileOpenDurationsBefore = harness.service.metrics.fileOpenDurations
+
+        await #expect(throws: WorkspaceCommandError.focusWorkspaceRejected(.additionalFileTabBlocked)) {
+            _ = try await harness.service.openFileTab(sessionID: session.id, path: secondFileURL.path)
+        }
+
+        let event = try #require(harness.service.logger.events.first { $0.name == "focus_workspace_blocked" })
+        #expect(harness.store.tabs == tabsBefore)
+        #expect(harness.store.tabsForSelectedSession.map(\.id) == [terminalTab.id, firstFileTab.id])
+        #expect(harness.store.selectedTabID == firstFileTab.id)
+        #expect(try await harness.persistence.loadTabs() == persistedTabsBefore)
+        #expect(try await harness.persistence.loadRestoreSnapshot() == snapshotBefore)
+        #expect(harness.service.metrics.fileOpenDurations == fileOpenDurationsBefore)
+        #expect(harness.service.metrics.focusWorkspaceBlockedFileTabCount == 1)
+        #expect(harness.service.metrics.focusWorkspaceBlockedTerminalTabCount == 0)
+        #expect(event.fields["session_id"] == session.id.uuidString)
+        #expect(event.fields["reason"] == "additional_file_tab_blocked")
+        #expect(event.fields["terminal_tab_count"] == "1")
+        #expect(event.fields["file_tab_count"] == "1")
+        #expect(event.fields["selected_tab_kind"] == "file")
     }
 
     @Test

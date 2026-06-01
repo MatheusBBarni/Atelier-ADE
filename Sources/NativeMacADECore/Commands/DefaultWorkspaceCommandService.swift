@@ -326,6 +326,12 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
                     "command_ids": changedKeybindingIDs.map(\.rawValue).joined(separator: ",")
                 ])
             }
+
+            recordFocusWorkspacePreferenceChange(
+                from: previousPreferences,
+                to: updatedPreferences,
+                source: "settings_save"
+            )
         } catch {
             recordSettingsSaveFailure(error)
             throw error
@@ -496,38 +502,42 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
 
     public func createTab(sessionID: UUID) async throws -> WorkspaceTab {
         let session = try requireSession(id: sessionID)
-        let launchIntent = try await resolveStoredLaunchIntent(for: session)
-        return try await createTerminalTab(session: session, launchIntent: launchIntent)
+        return try await createTerminalTab(session: session) {
+            try await self.resolveStoredLaunchIntent(for: session)
+        }
     }
 
     public func createPlainTab(sessionID: UUID) async throws -> WorkspaceTab {
         let session = try requireSession(id: sessionID)
-        return try await createTerminalTab(
-            session: session,
-            launchIntent: ResolvedLaunchIntent(source: .plain, shortcut: nil)
-        )
+        return try await createTerminalTab(session: session) {
+            ResolvedLaunchIntent(source: .plain, shortcut: nil)
+        }
     }
 
     public func createDefaultAgentTab(sessionID: UUID) async throws -> WorkspaceTab {
         let session = try requireSession(id: sessionID)
-        let launchIntent = try await resolveLaunchIntent(explicitShortcutID: nil)
-        return try await createTerminalTab(session: session, launchIntent: launchIntent)
+        return try await createTerminalTab(session: session) {
+            try await self.resolveLaunchIntent(explicitShortcutID: nil)
+        }
     }
 
     public func createAgentTab(sessionID: UUID, shortcutID: UUID) async throws -> WorkspaceTab {
         let session = try requireSession(id: sessionID)
-        let launchIntent = try await resolveLaunchIntent(explicitShortcutID: shortcutID)
-        return try await createTerminalTab(session: session, launchIntent: launchIntent)
+        return try await createTerminalTab(session: session) {
+            try await self.resolveLaunchIntent(explicitShortcutID: shortcutID)
+        }
     }
 
     private func createTerminalTab(
         session: WorkspaceSession,
-        launchIntent: ResolvedLaunchIntent
+        launchIntent: @MainActor () async throws -> ResolvedLaunchIntent
     ) async throws -> WorkspaceTab {
         let startedAt = now()
         guard let project = store.projects.first(where: { $0.id == session.projectID }) else {
             throw WorkspaceCommandError.missingProject(session.projectID)
         }
+        try rejectTerminalCreationIfFocusWorkspaceBlocked(sessionID: session.id)
+        let launchIntent = try await launchIntent()
 
         let timestamp = now()
         let ordinal = try await persist { try await persistenceStore.nextTabOrdinal(for: session.id) }
@@ -607,6 +617,8 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
             )
             return selectedTab
         }
+
+        try rejectFileOpenIfFocusWorkspaceBlocked(sessionID: session.id)
 
         let timestamp = now()
         let ordinal = try await persist { try await persistenceStore.nextTabOrdinal(for: session.id) }
@@ -1185,6 +1197,75 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
         return fields
     }
 
+    private func recordFocusWorkspacePreferenceChange(
+        from previousPreferences: AppPreferences,
+        to updatedPreferences: AppPreferences,
+        source: String
+    ) {
+        guard previousPreferences.focusWorkspaceEnabled != updatedPreferences.focusWorkspaceEnabled else {
+            return
+        }
+
+        let eventName: String
+        if updatedPreferences.focusWorkspaceEnabled {
+            metrics.recordFocusWorkspaceEnabled()
+            eventName = "focus_workspace_enabled"
+        } else {
+            metrics.recordFocusWorkspaceDisabled()
+            eventName = "focus_workspace_disabled"
+        }
+
+        logger.emit(eventName, fields: [
+            "source": source,
+            "selected_session_id_present": String(store.selectedSessionID != nil)
+        ])
+    }
+
+    private func rejectTerminalCreationIfFocusWorkspaceBlocked(sessionID: UUID) throws {
+        let state = store.focusWorkspaceSessionState(in: sessionID)
+        guard let violation = FocusWorkspacePolicy.terminalCreationDecision(in: state).violation else {
+            return
+        }
+        recordFocusWorkspaceBlocked(violation, sessionID: sessionID, state: state)
+        throw WorkspaceCommandError.focusWorkspaceRejected(violation)
+    }
+
+    private func rejectFileOpenIfFocusWorkspaceBlocked(sessionID: UUID) throws {
+        let state = store.focusWorkspaceSessionState(in: sessionID)
+        guard let violation = FocusWorkspacePolicy.fileOpenDecision(
+            in: state,
+            openingSameFile: false
+        ).violation else {
+            return
+        }
+        recordFocusWorkspaceBlocked(violation, sessionID: sessionID, state: state)
+        throw WorkspaceCommandError.focusWorkspaceRejected(violation)
+    }
+
+    private func recordFocusWorkspaceBlocked(
+        _ violation: FocusWorkspaceViolation,
+        sessionID: UUID,
+        state: FocusWorkspaceSessionState
+    ) {
+        metrics.recordFocusWorkspaceBlocked(violation)
+        logger.emit("focus_workspace_blocked", fields: [
+            "session_id": sessionID.uuidString,
+            "reason": focusWorkspaceReason(for: violation),
+            "terminal_tab_count": String(state.terminalTabCount),
+            "file_tab_count": String(state.fileTabCount),
+            "selected_tab_kind": store.selectedTab?.kind.rawValue ?? "none"
+        ])
+    }
+
+    private func focusWorkspaceReason(for violation: FocusWorkspaceViolation) -> String {
+        switch violation {
+        case .additionalTerminalTabBlocked:
+            return "additional_terminal_tab_blocked"
+        case .additionalFileTabBlocked:
+            return "additional_file_tab_blocked"
+        }
+    }
+
     private func directoryExists(at path: String) -> Bool {
         var isDirectory: ObjCBool = false
         return fileManager.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue
@@ -1599,6 +1680,8 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
             return "missing_shortcut"
         case .settingsValidationFailed:
             return "settings_validation_failed"
+        case .focusWorkspaceRejected(let violation):
+            return "focus_workspace_\(focusWorkspaceReason(for: violation))"
         case .builtInShortcutDeletionRejected:
             return "built_in_shortcut_deletion_rejected"
         case .customShortcutResetRejected:

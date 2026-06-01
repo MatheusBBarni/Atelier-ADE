@@ -15,6 +15,10 @@ public struct PilotDiagnostics: Equatable, Sendable {
     public var reorderValidationRejectionCount: Int = 0
     public var reorderPersistenceFailureCount: Int = 0
     public var restoreOrderMismatchCount: Int = 0
+    public var focusWorkspaceEnableCount: Int = 0
+    public var focusWorkspaceDisableCount: Int = 0
+    public var focusWorkspaceBlockedTerminalTabCount: Int = 0
+    public var focusWorkspaceBlockedFileTabCount: Int = 0
     public var releaseBlockingReasons: [String]
 }
 
@@ -55,6 +59,10 @@ public final class PerformanceMetrics {
     public private(set) var themeRepairCount = 0
     public private(set) var keybindingChangedCount = 0
     public private(set) var lastSavedChangedKeybindingCount = 0
+    public private(set) var focusWorkspaceEnableCount = 0
+    public private(set) var focusWorkspaceDisableCount = 0
+    public private(set) var focusWorkspaceBlockedTerminalTabCount = 0
+    public private(set) var focusWorkspaceBlockedFileTabCount = 0
 
     public init() {}
 
@@ -186,6 +194,23 @@ public final class PerformanceMetrics {
         keybindingChangedCount += changedCommandCount
     }
 
+    public func recordFocusWorkspaceEnabled() {
+        focusWorkspaceEnableCount += 1
+    }
+
+    public func recordFocusWorkspaceDisabled() {
+        focusWorkspaceDisableCount += 1
+    }
+
+    public func recordFocusWorkspaceBlocked(_ violation: FocusWorkspaceViolation) {
+        switch violation {
+        case .additionalTerminalTabBlocked:
+            focusWorkspaceBlockedTerminalTabCount += 1
+        case .additionalFileTabBlocked:
+            focusWorkspaceBlockedFileTabCount += 1
+        }
+    }
+
     public func diagnostics(
         launchToReadyBudget: TimeInterval = 10,
         fileOpenBudget: TimeInterval = 5
@@ -226,6 +251,10 @@ public final class PerformanceMetrics {
             reorderValidationRejectionCount: reorderValidationRejectionCount,
             reorderPersistenceFailureCount: reorderPersistenceFailureCount,
             restoreOrderMismatchCount: restoreOrderMismatchCount,
+            focusWorkspaceEnableCount: focusWorkspaceEnableCount,
+            focusWorkspaceDisableCount: focusWorkspaceDisableCount,
+            focusWorkspaceBlockedTerminalTabCount: focusWorkspaceBlockedTerminalTabCount,
+            focusWorkspaceBlockedFileTabCount: focusWorkspaceBlockedFileTabCount,
             releaseBlockingReasons: reasons
         )
     }
