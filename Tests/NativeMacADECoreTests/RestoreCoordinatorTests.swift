@@ -136,6 +136,8 @@ struct RestoreCoordinatorTests {
         #expect(result.store.tabsForSelectedSession.map(\.id) == [secondTabID, firstTabID, thirdTabID])
         #expect(result.store.tabsForSelectedSession.map(\.ordinal) == [0, 1, 2])
         #expect(result.store.selectedTabID == secondTabID)
+        #expect(result.diagnostics.contains { $0.telemetryReason == "restore_order_duplicate_tab_ids" })
+        #expect(result.diagnostics.contains { $0.telemetryReason == "restore_order_omits_restored_tabs" })
     }
 
     @Test

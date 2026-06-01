@@ -186,67 +186,90 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
     }
 
     public func reorderProjects(_ orderedProjectIDs: [UUID]) async throws {
-        let visibleProjectIDs = store.projects.map(\.id)
-        try validateProjectReorderPayload(orderedProjectIDs, visibleProjectIDs: visibleProjectIDs)
+        do {
+            let visibleProjectIDs = store.projects.map(\.id)
+            try validateProjectReorderPayload(orderedProjectIDs, visibleProjectIDs: visibleProjectIDs)
 
-        let persistedProjects = try await persist { try await persistenceStore.loadProjects() }
-        let persistedProjectIDs = persistedProjects.map(\.id)
-        let persistedProjectIDSet = Set(persistedProjectIDs)
-        guard Set(visibleProjectIDs).isSubset(of: persistedProjectIDSet) else {
-            throw WorkspaceCommandError.invalidProjectOrder("Project order cannot be persisted because a visible project is missing from persistence")
+            let persistedProjects = try await persist { try await persistenceStore.loadProjects() }
+            let persistedProjectIDs = persistedProjects.map(\.id)
+            let persistedProjectIDSet = Set(persistedProjectIDs)
+            guard Set(visibleProjectIDs).isSubset(of: persistedProjectIDSet) else {
+                throw WorkspaceCommandError.invalidProjectOrder("Project order cannot be persisted because a visible project is missing from persistence")
+            }
+
+            let visibleProjectIDSet = Set(visibleProjectIDs)
+            let hiddenPersistedProjectIDs = persistedProjectIDs.filter { !visibleProjectIDSet.contains($0) }
+            let persistedProjectOrder = orderedProjectIDs + hiddenPersistedProjectIDs
+
+            try await persist { try await persistenceStore.saveProjectOrder(persistedProjectOrder) }
+            try await validatePersistedProjectOrderAlignment(expectedOrderedProjectIDs: persistedProjectOrder)
+            store.applyProjectOrder(orderedProjectIDs)
+            try await persistSnapshot()
+            metrics.recordProjectReorder()
+            logger.emit("project_reordered", fields: [
+                "project_count": String(orderedProjectIDs.count),
+                "hidden_persisted_project_count": String(hiddenPersistedProjectIDs.count)
+            ])
+        } catch {
+            recordReorderFailure(surface: "project", error: error)
+            throw error
         }
-
-        let visibleProjectIDSet = Set(visibleProjectIDs)
-        let hiddenPersistedProjectIDs = persistedProjectIDs.filter { !visibleProjectIDSet.contains($0) }
-        let persistedProjectOrder = orderedProjectIDs + hiddenPersistedProjectIDs
-
-        try await persist { try await persistenceStore.saveProjectOrder(persistedProjectOrder) }
-        store.applyProjectOrder(orderedProjectIDs)
-        try await persistSnapshot()
     }
 
     public func reorderTabs(sessionID: UUID, orderedVisibleTabIDs: [UUID]) async throws {
-        guard store.sessions.contains(where: { $0.id == sessionID }) else {
-            throw WorkspaceCommandError.missingSession(sessionID)
-        }
-        guard store.selectedSessionID == sessionID else {
-            throw WorkspaceCommandError.invalidTabOrder("Tab order can only be changed for the selected session")
-        }
-
-        let visibleTabIDs = store.tabs(for: sessionID).map(\.id)
-        try validateTabReorderPayload(orderedVisibleTabIDs, visibleTabIDs: visibleTabIDs)
-
-        let persistedTabs = try await persist { try await persistenceStore.loadTabs() }
-        let persistedSessionTabs = persistedTabs
-            .filter { $0.sessionID == sessionID }
-            .sorted {
-                if $0.ordinal == $1.ordinal { return $0.id.uuidString < $1.id.uuidString }
-                return $0.ordinal < $1.ordinal
+        do {
+            guard store.sessions.contains(where: { $0.id == sessionID }) else {
+                throw WorkspaceCommandError.missingSession(sessionID)
             }
-        let persistedSessionTabIDs = Set(persistedSessionTabs.map(\.id))
-        guard Set(visibleTabIDs).isSubset(of: persistedSessionTabIDs) else {
-            throw WorkspaceCommandError.invalidTabOrder("Tab order cannot be persisted because a visible tab is missing from persistence")
+            guard store.selectedSessionID == sessionID else {
+                throw WorkspaceCommandError.invalidTabOrder("Tab order can only be changed for the selected session")
+            }
+
+            let visibleTabIDs = store.tabs(for: sessionID).map(\.id)
+            try validateTabReorderPayload(orderedVisibleTabIDs, visibleTabIDs: visibleTabIDs)
+
+            let persistedTabs = try await persist { try await persistenceStore.loadTabs() }
+            let persistedSessionTabs = persistedTabs
+                .filter { $0.sessionID == sessionID }
+                .sorted {
+                    if $0.ordinal == $1.ordinal { return $0.id.uuidString < $1.id.uuidString }
+                    return $0.ordinal < $1.ordinal
+                }
+            let persistedSessionTabIDs = Set(persistedSessionTabs.map(\.id))
+            guard Set(visibleTabIDs).isSubset(of: persistedSessionTabIDs) else {
+                throw WorkspaceCommandError.invalidTabOrder("Tab order cannot be persisted because a visible tab is missing from persistence")
+            }
+
+            let visibleTabIDSet = Set(visibleTabIDs)
+            let hiddenPersistedTabIDs = persistedSessionTabs
+                .map(\.id)
+                .filter { !visibleTabIDSet.contains($0) }
+            let plan = SessionTabReorderPlan(
+                sessionID: sessionID,
+                visibleTabIDs: orderedVisibleTabIDs,
+                hiddenPersistedTabIDs: hiddenPersistedTabIDs
+            )
+            let snapshot = RestoreSnapshot(
+                selectedProjectID: store.selectedProjectID,
+                selectedSessionID: store.selectedSessionID,
+                selectedTabID: store.selectedTabID,
+                tabOrder: canonicalTabOrder(afterReordering: plan, persistedTabs: persistedTabs),
+                updatedAt: now()
+            )
+
+            try await persist { try await persistenceStore.saveTabOrder(plan, snapshot: snapshot) }
+            try await validatePersistedTabOrderAlignment(plan: plan, snapshot: snapshot)
+            store.applyTabOrder(sessionID: sessionID, orderedTabIDs: orderedVisibleTabIDs)
+            metrics.recordTabReorder()
+            logger.emit("tab_reordered", fields: [
+                "session_id": sessionID.uuidString,
+                "visible_tab_count": String(orderedVisibleTabIDs.count),
+                "hidden_persisted_tab_count": String(hiddenPersistedTabIDs.count)
+            ])
+        } catch {
+            recordReorderFailure(surface: "tab", error: error)
+            throw error
         }
-
-        let visibleTabIDSet = Set(visibleTabIDs)
-        let hiddenPersistedTabIDs = persistedSessionTabs
-            .map(\.id)
-            .filter { !visibleTabIDSet.contains($0) }
-        let plan = SessionTabReorderPlan(
-            sessionID: sessionID,
-            visibleTabIDs: orderedVisibleTabIDs,
-            hiddenPersistedTabIDs: hiddenPersistedTabIDs
-        )
-        let snapshot = RestoreSnapshot(
-            selectedProjectID: store.selectedProjectID,
-            selectedSessionID: store.selectedSessionID,
-            selectedTabID: store.selectedTabID,
-            tabOrder: canonicalTabOrder(afterReordering: plan, persistedTabs: persistedTabs),
-            updatedAt: now()
-        )
-
-        try await persist { try await persistenceStore.saveTabOrder(plan, snapshot: snapshot) }
-        store.applyTabOrder(sessionID: sessionID, orderedTabIDs: orderedVisibleTabIDs)
     }
 
     public func recordSettingsOpened(surface: String) {
@@ -759,7 +782,7 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
             throw error
         }
         var restoreResult = restoreResultFromCoordinator
-        recordCoordinatorFileRestoreDiagnostics(restoreResult.diagnostics)
+        recordCoordinatorRestoreDiagnostics(restoreResult.diagnostics)
         let restoredStore = restoreResult.store
         store.restore(
             projects: restoredStore.projects,
@@ -1242,6 +1265,65 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
             .map(\.id)
     }
 
+    private func validatePersistedProjectOrderAlignment(expectedOrderedProjectIDs: [UUID]) async throws {
+        let persistedProjectIDs = try await persist { try await persistenceStore.loadProjects() }.map(\.id)
+        guard persistedProjectIDs == expectedOrderedProjectIDs else {
+            throw WorkspaceCommandError.reorderRestoreAlignmentFailed("Persisted project order did not match the canonical reorder payload")
+        }
+    }
+
+    private func validatePersistedTabOrderAlignment(
+        plan: SessionTabReorderPlan,
+        snapshot: RestoreSnapshot
+    ) async throws {
+        let persistedTabs = try await persist { try await persistenceStore.loadTabs() }
+        let persistedSessionTabIDs = persistedTabs
+            .filter { $0.sessionID == plan.sessionID }
+            .sorted {
+                if $0.ordinal == $1.ordinal { return $0.id.uuidString < $1.id.uuidString }
+                return $0.ordinal < $1.ordinal
+            }
+            .map(\.id)
+        guard persistedSessionTabIDs == plan.orderedTabIDs else {
+            throw WorkspaceCommandError.reorderRestoreAlignmentFailed("Persisted tab order did not match the canonical reorder payload")
+        }
+
+        let persistedSnapshot = try await persist { try await persistenceStore.loadRestoreSnapshot() }
+        guard persistedSnapshot?.tabOrder == snapshot.tabOrder else {
+            throw WorkspaceCommandError.reorderRestoreAlignmentFailed("Restore snapshot tab order did not match the canonical persisted tab order")
+        }
+    }
+
+    private func recordReorderFailure(surface: String, error: Error) {
+        switch error {
+        case WorkspaceCommandError.reorderRestoreAlignmentFailed:
+            metrics.recordRestoreOrderMismatch()
+            logger.emit("reorder_restore_alignment_failed", fields: [
+                "surface": surface,
+                "reason": privacySafeReason(for: error),
+                "source": "command_service"
+            ])
+        case WorkspaceCommandError.persistenceFailed:
+            metrics.recordReorderPersistenceFailure()
+            logger.emit("reorder_persistence_failed", fields: [
+                "surface": surface,
+                "reason": privacySafeReason(for: error)
+            ])
+        case WorkspaceCommandError.invalidProjectOrder,
+             WorkspaceCommandError.invalidTabOrder,
+             WorkspaceCommandError.missingProject,
+             WorkspaceCommandError.missingSession,
+             WorkspaceCommandError.missingTab:
+            metrics.recordReorderValidationRejection()
+            logger.emit("reorder_validation_failed", fields: [
+                "surface": surface,
+                "reason": privacySafeReason(for: error)
+            ])
+        default:
+            break
+        }
+    }
+
     private func persistedProject(matchingPath path: String) async throws -> WorkspaceProject? {
         let standardizedPath = URL(fileURLWithPath: path).standardizedFileURL.path
         let persistedProjects = try await persist { try await persistenceStore.loadProjects() }
@@ -1367,19 +1449,32 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
         ])
     }
 
-    private func recordCoordinatorFileRestoreDiagnostics(_ diagnostics: [RestoreDiagnostic]) {
+    private func recordCoordinatorRestoreDiagnostics(_ diagnostics: [RestoreDiagnostic]) {
         for diagnostic in diagnostics {
-            guard let fileTabID = diagnostic.fileTabID else { continue }
-            metrics.recordFileRestoreFailure()
-            var fields = [
-                "tab_id": fileTabID.uuidString,
-                "reason": diagnostic.telemetryReason ?? "restore_validation_failed",
-                "source": "metadata_validation"
-            ]
-            if let hashedPath = diagnostic.hashedPath {
-                fields["hashed_path"] = hashedPath
+            if let fileTabID = diagnostic.fileTabID {
+                metrics.recordFileRestoreFailure()
+                var fields = [
+                    "tab_id": fileTabID.uuidString,
+                    "reason": diagnostic.telemetryReason ?? "restore_validation_failed",
+                    "source": "metadata_validation"
+                ]
+                if let hashedPath = diagnostic.hashedPath {
+                    fields["hashed_path"] = hashedPath
+                }
+                logger.emit("file_tab_restore_failed", fields: fields)
             }
-            logger.emit("file_tab_restore_failed", fields: fields)
+
+            guard let telemetryReason = diagnostic.telemetryReason,
+                  telemetryReason.hasPrefix("restore_order_")
+            else {
+                continue
+            }
+            metrics.recordRestoreOrderMismatch()
+            logger.emit("reorder_restore_alignment_failed", fields: [
+                "surface": "restore",
+                "reason": telemetryReason,
+                "source": "restore_coordinator"
+            ])
         }
     }
 
@@ -1516,6 +1611,8 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
             return "invalid_project_order"
         case .invalidTabOrder:
             return "invalid_tab_order"
+        case .reorderRestoreAlignmentFailed:
+            return "reorder_restore_alignment_failed"
         case .terminalUnavailable:
             return "terminal_unavailable"
         case .persistenceFailed:

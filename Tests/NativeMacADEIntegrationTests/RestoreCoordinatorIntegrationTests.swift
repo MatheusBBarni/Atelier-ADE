@@ -257,6 +257,49 @@ struct RestoreCoordinatorIntegrationTests {
     }
 
     @Test
+    func restoreOrderMismatchEmitsDiagnosticsAndReleaseGateSignals() async throws {
+        let harness = try makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+        let projectID = UUID()
+        let sessionID = UUID()
+        let firstTabID = UUID()
+        let secondTabID = UUID()
+        let thirdTabID = UUID()
+        try await harness.persistence.save(project: WorkspaceProject(id: projectID, path: projectPath, displayName: "mismatch"))
+        try await harness.persistence.save(session: WorkspaceSession(id: sessionID, projectID: projectID, title: "Mismatch"))
+        try await harness.persistence.save(tab: WorkspaceTab(id: firstTabID, sessionID: sessionID, workingDirectory: projectPath, ordinal: 0))
+        try await harness.persistence.save(tab: WorkspaceTab(id: secondTabID, sessionID: sessionID, workingDirectory: projectPath, ordinal: 1))
+        try await harness.persistence.save(tab: WorkspaceTab(id: thirdTabID, sessionID: sessionID, workingDirectory: projectPath, ordinal: 2))
+        try await harness.persistence.save(snapshot: RestoreSnapshot(
+            selectedProjectID: projectID,
+            selectedSessionID: sessionID,
+            selectedTabID: secondTabID,
+            tabOrder: [secondTabID, secondTabID]
+        ))
+
+        let result = try await harness.service.restoreWorkspace()
+        let diagnostics = harness.service.metrics.diagnostics()
+
+        #expect(harness.store.tabsForSelectedSession.map(\.id) == [secondTabID, firstTabID, thirdTabID])
+        #expect(result.diagnostics.contains { $0.telemetryReason == "restore_order_duplicate_tab_ids" })
+        #expect(result.diagnostics.contains { $0.telemetryReason == "restore_order_omits_restored_tabs" })
+        #expect(result.hasRecoveryItems)
+        #expect(harness.service.metrics.restoreOrderMismatchCount == 2)
+        #expect(diagnostics.restoreOrderMismatchCount == 2)
+        #expect(diagnostics.releaseBlockingReasons.contains("restore-order mismatches detected"))
+        #expect(harness.service.logger.events.contains { event in
+            event.name == "reorder_restore_alignment_failed" &&
+                event.fields["surface"] == "restore" &&
+                event.fields["reason"] == "restore_order_duplicate_tab_ids"
+        })
+        #expect(harness.service.logger.events.contains { event in
+            event.name == "reorder_restore_alignment_failed" &&
+                event.fields["surface"] == "restore" &&
+                event.fields["reason"] == "restore_order_omits_restored_tabs"
+        })
+    }
+
+    @Test
     func reopeningPreviouslySkippedProjectReusesPersistedProjectRecord() async throws {
         let harness = try makeHarness()
         let missingPath = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)

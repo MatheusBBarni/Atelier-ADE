@@ -20,6 +20,7 @@ public enum WorkspaceCommandError: Error, Equatable, Sendable {
     case dirtyFileTabCloseRejected(UUID)
     case invalidProjectOrder(String)
     case invalidTabOrder(String)
+    case reorderRestoreAlignmentFailed(String)
     case terminalUnavailable(String)
     case persistenceFailed(String)
 }

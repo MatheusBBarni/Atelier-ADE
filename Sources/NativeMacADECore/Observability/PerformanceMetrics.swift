@@ -10,6 +10,11 @@ public struct PilotDiagnostics: Equatable, Sendable {
     public var dirtyFileCloseConfirmationAcceptCount: Int
     public var dirtyFileCloseConfirmationRejectCount: Int
     public var externalEditorEscalationCount: Int
+    public var projectReorderCount: Int = 0
+    public var tabReorderCount: Int = 0
+    public var reorderValidationRejectionCount: Int = 0
+    public var reorderPersistenceFailureCount: Int = 0
+    public var restoreOrderMismatchCount: Int = 0
     public var releaseBlockingReasons: [String]
 }
 
@@ -36,6 +41,11 @@ public final class PerformanceMetrics {
     public private(set) var dirtyFileCloseConfirmationAcceptCount = 0
     public private(set) var dirtyFileCloseConfirmationRejectCount = 0
     public private(set) var externalEditorEscalationCount = 0
+    public private(set) var projectReorderCount = 0
+    public private(set) var tabReorderCount = 0
+    public private(set) var reorderValidationRejectionCount = 0
+    public private(set) var reorderPersistenceFailureCount = 0
+    public private(set) var restoreOrderMismatchCount = 0
     public private(set) var inaccessibleRestoredProjectCount = 0
     public private(set) var settingsOpenedCount = 0
     public private(set) var settingsSavedCount = 0
@@ -123,6 +133,26 @@ public final class PerformanceMetrics {
         externalEditorEscalationCount += 1
     }
 
+    public func recordProjectReorder() {
+        projectReorderCount += 1
+    }
+
+    public func recordTabReorder() {
+        tabReorderCount += 1
+    }
+
+    public func recordReorderValidationRejection() {
+        reorderValidationRejectionCount += 1
+    }
+
+    public func recordReorderPersistenceFailure() {
+        reorderPersistenceFailureCount += 1
+    }
+
+    public func recordRestoreOrderMismatch() {
+        restoreOrderMismatchCount += 1
+    }
+
     public func recordTerminalProcessExit() {
         terminalProcessExitCount += 1
     }
@@ -173,6 +203,8 @@ public final class PerformanceMetrics {
         if terminalFailureRate > 0.01 { reasons.append("terminal surface failure rate above 1%") }
         if fileSaveFailureRate > 0.01 { reasons.append("file-save failure rate above 1%") }
         if fileRestoreFailureCount > 0 { reasons.append("file-tab restore failures detected") }
+        if reorderPersistenceFailureCount > 0 { reasons.append("reorder persistence failures detected") }
+        if restoreOrderMismatchCount > 0 { reasons.append("restore-order mismatches detected") }
         if let medianLaunchToReady, medianLaunchToReady > launchToReadyBudget {
             reasons.append("median launch-to-ready time above budget")
         }
@@ -189,6 +221,11 @@ public final class PerformanceMetrics {
             dirtyFileCloseConfirmationAcceptCount: dirtyFileCloseConfirmationAcceptCount,
             dirtyFileCloseConfirmationRejectCount: dirtyFileCloseConfirmationRejectCount,
             externalEditorEscalationCount: externalEditorEscalationCount,
+            projectReorderCount: projectReorderCount,
+            tabReorderCount: tabReorderCount,
+            reorderValidationRejectionCount: reorderValidationRejectionCount,
+            reorderPersistenceFailureCount: reorderPersistenceFailureCount,
+            restoreOrderMismatchCount: restoreOrderMismatchCount,
             releaseBlockingReasons: reasons
         )
     }

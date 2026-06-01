@@ -1646,6 +1646,12 @@ struct DefaultWorkspaceCommandServiceTests {
         #expect(harness.store.selectedProjectID == thirdProject.id)
         #expect(try await harness.persistence.loadProjects() == persistedProjectsBefore)
         #expect(try await harness.persistence.loadRestoreSnapshot() == snapshotBefore)
+        #expect(harness.service.metrics.reorderValidationRejectionCount == 2)
+        #expect(harness.service.logger.events.filter { event in
+            event.name == "reorder_validation_failed" &&
+                event.fields["surface"] == "project" &&
+                event.fields["reason"] == "invalid_project_order"
+        }.count == 2)
     }
 
     @Test
@@ -1701,6 +1707,12 @@ struct DefaultWorkspaceCommandServiceTests {
         #expect(harness.store.selectedSessionID == session.id)
         #expect(try await harness.persistence.loadTabs() == persistedTabsBefore)
         #expect(try await harness.persistence.loadRestoreSnapshot() == snapshotBefore)
+        #expect(harness.service.metrics.reorderValidationRejectionCount == 3)
+        #expect(harness.service.logger.events.filter { event in
+            event.name == "reorder_validation_failed" &&
+                event.fields["surface"] == "tab" &&
+                event.fields["reason"] == "invalid_tab_order"
+        }.count == 3)
     }
 
     @Test
@@ -1784,13 +1796,14 @@ struct DefaultWorkspaceCommandServiceTests {
     }
 
     @Test
-    func reorderTabsAfterDegradedRestoreAppendsHiddenPersistedTabs() async throws {
+    func reorderTabsAfterDegradedRestoreKeepsHiddenPersistedTabsInStableTail() async throws {
         let projectPath = try makeTemporaryProjectDirectory()
         let project = WorkspaceProject(path: projectPath, displayName: "degraded")
         let session = WorkspaceSession(projectID: project.id, title: "Degraded")
         let visibleFirst = WorkspaceTab(sessionID: session.id, workingDirectory: project.path, ordinal: 0)
         let visibleSecond = WorkspaceTab(sessionID: session.id, workingDirectory: project.path, ordinal: 1)
-        let hiddenPersisted = WorkspaceTab(sessionID: session.id, workingDirectory: project.path, ordinal: 2)
+        let hiddenPersistedFirst = WorkspaceTab(sessionID: session.id, workingDirectory: project.path, ordinal: 2)
+        let hiddenPersistedSecond = WorkspaceTab(sessionID: session.id, workingDirectory: project.path, ordinal: 3)
         let store = WorkspaceStore(
             projects: [project],
             sessions: [session],
@@ -1802,12 +1815,12 @@ struct DefaultWorkspaceCommandServiceTests {
         let persistence = InMemoryWorkspacePersistenceStore(
             projects: [project],
             sessions: [session],
-            tabs: [hiddenPersisted, visibleFirst, visibleSecond],
+            tabs: [hiddenPersistedSecond, visibleFirst, hiddenPersistedFirst, visibleSecond],
             restoreSnapshot: RestoreSnapshot(
                 selectedProjectID: project.id,
                 selectedSessionID: session.id,
                 selectedTabID: visibleFirst.id,
-                tabOrder: [visibleFirst.id, visibleSecond.id, hiddenPersisted.id]
+                tabOrder: [visibleFirst.id, visibleSecond.id, hiddenPersistedFirst.id, hiddenPersistedSecond.id]
             )
         )
         let terminal = FakeTerminalSurfaceManager()
@@ -1827,9 +1840,118 @@ struct DefaultWorkspaceCommandServiceTests {
         let snapshot = try #require(try await persistence.loadRestoreSnapshot())
         #expect(store.tabsForSelectedSession.map(\.id) == [visibleSecond.id, visibleFirst.id])
         #expect(store.selectedTabID == visibleFirst.id)
-        #expect(persistedSessionTabs.map(\.id) == [visibleSecond.id, visibleFirst.id, hiddenPersisted.id])
-        #expect(persistedSessionTabs.map(\.ordinal) == [0, 1, 2])
-        #expect(snapshot.tabOrder == [visibleSecond.id, visibleFirst.id, hiddenPersisted.id])
+        #expect(persistedSessionTabs.map(\.id) == [
+            visibleSecond.id,
+            visibleFirst.id,
+            hiddenPersistedFirst.id,
+            hiddenPersistedSecond.id
+        ])
+        #expect(persistedSessionTabs.map(\.ordinal) == [0, 1, 2, 3])
+        #expect(snapshot.tabOrder == [
+            visibleSecond.id,
+            visibleFirst.id,
+            hiddenPersistedFirst.id,
+            hiddenPersistedSecond.id
+        ])
+        #expect(service.metrics.tabReorderCount == 1)
+        #expect(service.logger.events.contains { event in
+            event.name == "tab_reordered" &&
+                event.fields["session_id"] == session.id.uuidString &&
+                event.fields["visible_tab_count"] == "2" &&
+                event.fields["hidden_persisted_tab_count"] == "2"
+        })
+    }
+
+    @Test
+    func reorderTabsRestoreAlignmentFailureEmitsPilotDiagnostics() async throws {
+        let projectPath = try makeTemporaryProjectDirectory()
+        let project = WorkspaceProject(path: projectPath, displayName: "alignment")
+        let session = WorkspaceSession(projectID: project.id, title: "Alignment")
+        let firstTab = WorkspaceTab(sessionID: session.id, workingDirectory: project.path, ordinal: 0)
+        let secondTab = WorkspaceTab(sessionID: session.id, workingDirectory: project.path, ordinal: 1)
+        let store = WorkspaceStore(
+            projects: [project],
+            sessions: [session],
+            tabs: [firstTab, secondTab],
+            selectedProjectID: project.id,
+            selectedSessionID: session.id,
+            selectedTabID: firstTab.id
+        )
+        let persistence = SnapshotMisaligningTabOrderPersistenceStore(
+            project: project,
+            session: session,
+            tabs: [firstTab, secondTab]
+        )
+        let service = DefaultWorkspaceCommandService(
+            store: store,
+            persistenceStore: persistence,
+            restoreCoordinator: RestoreCoordinator(persistenceStore: persistence),
+            terminalSurfaceManager: FakeTerminalSurfaceManager()
+        )
+
+        await #expect(throws: WorkspaceCommandError.reorderRestoreAlignmentFailed("Restore snapshot tab order did not match the canonical persisted tab order")) {
+            try await service.reorderTabs(
+                sessionID: session.id,
+                orderedVisibleTabIDs: [secondTab.id, firstTab.id]
+            )
+        }
+
+        let diagnostics = service.metrics.diagnostics()
+        #expect(store.tabsForSelectedSession.map(\.id) == [firstTab.id, secondTab.id])
+        #expect(service.metrics.restoreOrderMismatchCount == 1)
+        #expect(diagnostics.restoreOrderMismatchCount == 1)
+        #expect(diagnostics.releaseBlockingReasons.contains("restore-order mismatches detected"))
+        #expect(service.logger.events.contains { event in
+            event.name == "reorder_restore_alignment_failed" &&
+                event.fields["surface"] == "tab" &&
+                event.fields["reason"] == "reorder_restore_alignment_failed" &&
+                event.fields["source"] == "command_service"
+        })
+    }
+
+    @Test
+    func reorderTabsPersistenceFailureEmitsPilotDiagnostics() async throws {
+        let projectPath = try makeTemporaryProjectDirectory()
+        let project = WorkspaceProject(path: projectPath, displayName: "persistence")
+        let session = WorkspaceSession(projectID: project.id, title: "Persistence")
+        let firstTab = WorkspaceTab(sessionID: session.id, workingDirectory: project.path, ordinal: 0)
+        let secondTab = WorkspaceTab(sessionID: session.id, workingDirectory: project.path, ordinal: 1)
+        let store = WorkspaceStore(
+            projects: [project],
+            sessions: [session],
+            tabs: [firstTab, secondTab],
+            selectedProjectID: project.id,
+            selectedSessionID: session.id,
+            selectedTabID: firstTab.id
+        )
+        let persistence = TabOrderSaveFailingPersistenceStore(
+            project: project,
+            session: session,
+            tabs: [firstTab, secondTab]
+        )
+        let service = DefaultWorkspaceCommandService(
+            store: store,
+            persistenceStore: persistence,
+            restoreCoordinator: RestoreCoordinator(persistenceStore: persistence),
+            terminalSurfaceManager: FakeTerminalSurfaceManager()
+        )
+
+        await #expect(throws: WorkspaceCommandError.persistenceFailed("tab order save failed")) {
+            try await service.reorderTabs(
+                sessionID: session.id,
+                orderedVisibleTabIDs: [secondTab.id, firstTab.id]
+            )
+        }
+
+        let diagnostics = service.metrics.diagnostics()
+        #expect(service.metrics.reorderPersistenceFailureCount == 1)
+        #expect(diagnostics.reorderPersistenceFailureCount == 1)
+        #expect(diagnostics.releaseBlockingReasons.contains("reorder persistence failures detected"))
+        #expect(service.logger.events.contains { event in
+            event.name == "reorder_persistence_failed" &&
+                event.fields["surface"] == "tab" &&
+                event.fields["reason"] == "persistence_failed"
+        })
     }
 
     @Test
@@ -2096,6 +2218,109 @@ private final class DateSequence {
         guard dates.isEmpty else { return dates.removeFirst() }
         fallbackTimeInterval += 1
         return Date(timeIntervalSince1970: fallbackTimeInterval)
+    }
+}
+
+private actor SnapshotMisaligningTabOrderPersistenceStore: WorkspacePersistenceStore {
+    private var project: WorkspaceProject
+    private var session: WorkspaceSession
+    private var tabs: [WorkspaceTab]
+    private var restoreSnapshot: RestoreSnapshot?
+
+    init(project: WorkspaceProject, session: WorkspaceSession, tabs: [WorkspaceTab]) {
+        self.project = project
+        self.session = session
+        self.tabs = tabs
+    }
+
+    func loadProjects() async throws -> [WorkspaceProject] { [project] }
+    func loadSessions() async throws -> [WorkspaceSession] { [session] }
+    func loadTabs() async throws -> [WorkspaceTab] {
+        tabs.sorted {
+            if $0.sessionID == $1.sessionID { return $0.ordinal < $1.ordinal }
+            return $0.sessionID.uuidString < $1.sessionID.uuidString
+        }
+    }
+    func loadSessionShortcuts() async throws -> [SessionShortcut] { [] }
+    func loadAppPreferences() async throws -> AppPreferences { .defaults }
+    func loadRestoreSnapshot() async throws -> RestoreSnapshot? { restoreSnapshot }
+    func save(project: WorkspaceProject) async throws { self.project = project }
+    func save(session: WorkspaceSession) async throws { self.session = session }
+    func save(tab: WorkspaceTab) async throws {
+        tabs.removeAll { $0.id == tab.id }
+        tabs.append(tab)
+    }
+    func save(session: WorkspaceSession, firstTab: WorkspaceTab) async throws {
+        self.session = session
+        try await save(tab: firstTab)
+    }
+    func saveProjectOrder(_ orderedProjectIDs: [UUID]) async throws {}
+    func saveTabOrder(_ plan: SessionTabReorderPlan, snapshot: RestoreSnapshot) async throws {
+        let ordinalByID = Dictionary(uniqueKeysWithValues: plan.orderedTabIDs.enumerated().map { index, id in
+            (id, index)
+        })
+        for index in tabs.indices where tabs[index].sessionID == plan.sessionID {
+            tabs[index].ordinal = ordinalByID[tabs[index].id] ?? tabs[index].ordinal
+        }
+        var mismatchedSnapshot = snapshot
+        mismatchedSnapshot.tabOrder = Array(snapshot.tabOrder.reversed())
+        restoreSnapshot = mismatchedSnapshot
+    }
+    func saveActivation(project: WorkspaceProject?, session: WorkspaceSession?, tab: WorkspaceTab?, snapshot: RestoreSnapshot) async throws {
+        restoreSnapshot = snapshot
+    }
+    func save(shortcut: SessionShortcut) async throws {}
+    func save(appPreferences: AppPreferences) async throws {}
+    func save(snapshot: RestoreSnapshot) async throws { restoreSnapshot = snapshot }
+    func deleteProject(id: UUID) async throws {}
+    func deleteSession(id: UUID) async throws {}
+    func deleteTab(id: UUID) async throws {}
+    func deleteShortcut(id: UUID) async throws {}
+}
+
+private actor TabOrderSaveFailingPersistenceStore: WorkspacePersistenceStore {
+    let project: WorkspaceProject
+    let session: WorkspaceSession
+    let tabs: [WorkspaceTab]
+
+    init(project: WorkspaceProject, session: WorkspaceSession, tabs: [WorkspaceTab]) {
+        self.project = project
+        self.session = session
+        self.tabs = tabs
+    }
+
+    func loadProjects() async throws -> [WorkspaceProject] { [project] }
+    func loadSessions() async throws -> [WorkspaceSession] { [session] }
+    func loadTabs() async throws -> [WorkspaceTab] {
+        tabs.sorted {
+            if $0.sessionID == $1.sessionID { return $0.ordinal < $1.ordinal }
+            return $0.sessionID.uuidString < $1.sessionID.uuidString
+        }
+    }
+    func loadSessionShortcuts() async throws -> [SessionShortcut] { [] }
+    func loadAppPreferences() async throws -> AppPreferences { .defaults }
+    func loadRestoreSnapshot() async throws -> RestoreSnapshot? { nil }
+    func save(project: WorkspaceProject) async throws {}
+    func save(session: WorkspaceSession) async throws {}
+    func save(tab: WorkspaceTab) async throws {}
+    func save(session: WorkspaceSession, firstTab: WorkspaceTab) async throws {}
+    func saveProjectOrder(_ orderedProjectIDs: [UUID]) async throws {}
+    func saveTabOrder(_ plan: SessionTabReorderPlan, snapshot: RestoreSnapshot) async throws {
+        throw Failure.tabOrderSave
+    }
+    func saveActivation(project: WorkspaceProject?, session: WorkspaceSession?, tab: WorkspaceTab?, snapshot: RestoreSnapshot) async throws {}
+    func save(shortcut: SessionShortcut) async throws {}
+    func save(appPreferences: AppPreferences) async throws {}
+    func save(snapshot: RestoreSnapshot) async throws {}
+    func deleteProject(id: UUID) async throws {}
+    func deleteSession(id: UUID) async throws {}
+    func deleteTab(id: UUID) async throws {}
+    func deleteShortcut(id: UUID) async throws {}
+
+    enum Failure: Error, CustomStringConvertible {
+        case tabOrderSave
+
+        var description: String { "tab order save failed" }
     }
 }
 

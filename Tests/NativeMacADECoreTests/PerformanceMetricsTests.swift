@@ -70,4 +70,25 @@ struct PerformanceMetricsTests {
         #expect(diagnostics.releaseBlockingReasons.contains("file-tab restore failures detected"))
         #expect(diagnostics.releaseBlockingReasons.contains("median file-open time above budget"))
     }
+
+    @Test
+    func reorderCountersRollIntoPilotDiagnosticsAndReleaseGates() {
+        let metrics = PerformanceMetrics()
+
+        metrics.recordProjectReorder()
+        metrics.recordTabReorder()
+        metrics.recordReorderValidationRejection()
+        metrics.recordReorderPersistenceFailure()
+        metrics.recordRestoreOrderMismatch()
+
+        let diagnostics = metrics.diagnostics()
+
+        #expect(diagnostics.projectReorderCount == 1)
+        #expect(diagnostics.tabReorderCount == 1)
+        #expect(diagnostics.reorderValidationRejectionCount == 1)
+        #expect(diagnostics.reorderPersistenceFailureCount == 1)
+        #expect(diagnostics.restoreOrderMismatchCount == 1)
+        #expect(diagnostics.releaseBlockingReasons.contains("reorder persistence failures detected"))
+        #expect(diagnostics.releaseBlockingReasons.contains("restore-order mismatches detected"))
+    }
 }

@@ -901,6 +901,12 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
 
         #expect(try await harness.persistence.loadProjects().map(\.id) == [thirdProject.id, secondProject.id, firstProject.id])
         #expect(try await harness.persistence.loadProjects().map(\.sortIndex) == [0, 1, 2])
+        #expect(harness.service.metrics.projectReorderCount == 1)
+        #expect(harness.service.logger.events.contains { event in
+            event.name == "project_reordered" &&
+                event.fields["project_count"] == "3" &&
+                event.fields["hidden_persisted_project_count"] == "0"
+        })
 
         let reloadedStore = WorkspaceStore()
         let reloadedService = DefaultWorkspaceCommandService(
@@ -965,6 +971,14 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
         #expect(persistedSessionTabs.map(\.id) == [readableFileTab.id, terminalTab.id, missingFileTab.id])
         #expect(persistedSessionTabs.map(\.ordinal) == [0, 1, 2])
         #expect(snapshot.tabOrder == [readableFileTab.id, terminalTab.id, missingFileTab.id])
+        #expect(harness.service.metrics.fileRestoreFailureCount == 1)
+        #expect(harness.service.metrics.tabReorderCount == 1)
+        #expect(harness.service.logger.events.contains { event in
+            event.name == "tab_reordered" &&
+                event.fields["session_id"] == session.id.uuidString &&
+                event.fields["visible_tab_count"] == "2" &&
+                event.fields["hidden_persisted_tab_count"] == "1"
+        })
 
         let reloadedStore = WorkspaceStore()
         let reloadedTerminal = FakeIntegrationTerminalSurfaceManager()
