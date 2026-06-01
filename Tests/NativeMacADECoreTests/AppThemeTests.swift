@@ -8,6 +8,8 @@ struct AppThemeTests {
         #expect(AppTheme.resolve(id: "dracula") == .dracula)
         #expect(AppTheme.resolve(id: "onedark") == .oneDark)
         #expect(AppTheme.resolve(id: "catppuccin") == .catppuccin)
+        #expect(AppTheme.resolve(id: "github-light") == .githubLight)
+        #expect(AppTheme.resolve(id: "solarized-light") == .solarizedLight)
         #expect(AppTheme.resolve(id: "catppuccin-frappe") == .catppuccinFrappe)
         #expect(AppTheme.resolve(id: "catppuccin-macchiato") == .catppuccinMacchiato)
         #expect(AppTheme.resolve(id: "catppuccin-mocha") == .catppuccinMocha)
@@ -16,12 +18,52 @@ struct AppThemeTests {
     }
 
     @Test
-    func unknownThemeIDsFallBackToCursorDefault() {
+    func concreteThemeLookupFallsBackToCursorDefault() {
         #expect(AppTheme.resolve(id: nil) == .cursor)
         #expect(AppTheme.resolve(id: "missing-theme") == .cursor)
-        #expect(AppPreferences.defaultThemeID == "cursor")
-        #expect(AppPreferences.supportedThemeIDs == [
+        #expect(AppTheme.resolve(id: AppTheme.systemSelectionID) == .cursor)
+        #expect(AppTheme.defaultTheme == .cursor)
+    }
+
+    @Test
+    func effectiveThemeResolverKeepsConcreteSelectionsIndependentOfSystemScheme() {
+        #expect(AppTheme.resolveEffective(selectionID: "catppuccin", systemScheme: .dark) == .catppuccin)
+        #expect(AppTheme.resolveEffective(selectionID: "catppuccin", systemScheme: .light) == .catppuccin)
+        #expect(AppTheme.resolveEffective(selectionID: "github-light", systemScheme: .dark) == .githubLight)
+        #expect(AppTheme.resolveEffective(selectionID: "dracula", systemScheme: .light) == .dracula)
+        #expect(AppTheme.resolveEffective(selectionID: "dracula", systemScheme: .dark) == .dracula)
+    }
+
+    @Test
+    func systemSelectionResolvesToFirstPresetForRuntimeScheme() {
+        #expect(AppTheme.resolveEffective(selectionID: AppTheme.systemSelectionID, systemScheme: .light) == AppTheme.firstLightPreset)
+        #expect(AppTheme.resolveEffective(selectionID: AppTheme.systemSelectionID, systemScheme: .dark) == AppTheme.firstDarkPreset)
+        #expect(AppTheme.resolveEffective(selectionID: nil, systemScheme: .light) == AppTheme.firstLightPreset)
+        #expect(AppTheme.resolveEffective(selectionID: "missing-theme", systemScheme: .dark) == AppTheme.firstDarkPreset)
+    }
+
+    @Test
+    func supportedSelectionIDsIncludeSystemAndConcreteCatalogWithoutDuplicates() {
+        let concreteIDs = AppTheme.catalog.map(\.id)
+        let expectedSelectionIDs = [AppTheme.systemSelectionID] + concreteIDs
+
+        #expect(Set(concreteIDs).count == concreteIDs.count)
+        #expect(Set(expectedSelectionIDs).count == expectedSelectionIDs.count)
+        #expect(AppTheme.orderedSelectionIDs == expectedSelectionIDs)
+        #expect(AppTheme.supportedIDs == Set(concreteIDs))
+        #expect(AppTheme.supportedSelectionIDs == Set(expectedSelectionIDs))
+        #expect(AppTheme.supportedSelectionIDs.count == AppTheme.catalog.count + 1)
+        #expect(AppTheme.isSupportedSelectionID(AppTheme.systemSelectionID))
+        #expect(AppTheme.isSupportedSelectionID("catppuccin"))
+        #expect(!AppTheme.isSupportedSelectionID("missing-theme"))
+    }
+
+    @Test
+    func curatedCatalogOrderDefinesSystemFallbackPresets() {
+        #expect(AppTheme.catalog.map(\.id) == [
             "catppuccin",
+            "github-light",
+            "solarized-light",
             "dracula",
             "onedark",
             "catppuccin-frappe",
@@ -30,6 +72,10 @@ struct AppThemeTests {
             "nord",
             "cursor"
         ])
+        #expect(AppTheme.firstLightPreset == .catppuccin)
+        #expect(AppTheme.firstDarkPreset == .dracula)
+        #expect(AppTheme.firstLightPreset.colorScheme == .light)
+        #expect(AppTheme.firstDarkPreset.colorScheme == .dark)
     }
 
     @Test
