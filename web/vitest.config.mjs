@@ -8,7 +8,7 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       reporter: ["text", "json-summary"],
-      include: ["src/config/siteConfig.mjs"],
+      include: ["src/config/siteConfig.mjs", "src/siteContent.ts"],
       thresholds: {
         branches: 80,
         functions: 80,

@@ -1,0 +1,17 @@
+{
+  "name": "Atelier",
+  "short_name": "Atelier",
+  "description": "Native, local-first macOS agentic development workflows.",
+  "start_url": "/Atelier-ADE/",
+  "scope": "/Atelier-ADE/",
+  "display": "standalone",
+  "background_color": "#f7f4ef",
+  "theme_color": "#201f1c",
+  "icons": [
+    {
+      "src": "/Atelier-ADE/favicon.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

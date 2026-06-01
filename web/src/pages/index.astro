@@ -1,5 +1,17 @@
 ---
-const title = "Atelier";
+import appScreenshot from "../assets/atelier-app-screenshot.png";
+import logo from "../assets/atelier-logo.png";
+import { getAstroSiteConfig } from "../config/siteConfig.mjs";
+import {
+  getLandingPageAssetUrl,
+  landingPageAssets,
+  siteContent
+} from "../siteContent";
+
+const title = siteContent.productName;
+const { base } = getAstroSiteConfig();
+const faviconUrl = getLandingPageAssetUrl("favicon", base);
+const manifestUrl = getLandingPageAssetUrl("manifest", base);
 ---
 
 <!doctype html>
@@ -8,12 +20,26 @@ const title = "Atelier";
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="generator" content={Astro.generator} />
+    <meta name="application-name" content={title} />
+    <meta name="theme-color" content="#201f1c" />
+    <link rel="icon" type="image/png" href={faviconUrl} />
+    <link rel="manifest" href={manifestUrl} />
     <title>{title}</title>
   </head>
   <body>
     <main>
+      <img class="logo" src={logo.src} width="72" height="72" alt={landingPageAssets.logo.alt} />
       <h1>{title}</h1>
       <p>Landing page foundation.</p>
+      <img
+        class="screenshot"
+        src={appScreenshot.src}
+        width={appScreenshot.width}
+        height={appScreenshot.height}
+        alt={landingPageAssets.screenshot.alt}
+        loading="eager"
+        decoding="async"
+      />
     </main>
   </body>
 </html>
@@ -32,11 +58,18 @@ const title = "Atelier";
   }
 
   main {
-    min-height: 100vh;
+    min-height: calc(100vh - 4rem);
     display: grid;
-    place-content: center;
+    justify-items: center;
+    align-content: center;
     padding: 2rem;
     text-align: center;
+  }
+
+  .logo {
+    display: block;
+    margin: 0 0 1rem;
+    border-radius: 1rem;
   }
 
   h1 {
@@ -49,5 +82,15 @@ const title = "Atelier";
     margin: 1rem 0 0;
     color: #5b554a;
     font-size: 1rem;
+  }
+
+  .screenshot {
+    display: block;
+    width: min(100%, 56rem);
+    height: auto;
+    margin-top: 2rem;
+    border: 1px solid rgb(32 31 28 / 14%);
+    border-radius: 0.5rem;
+    box-shadow: 0 1rem 3rem rgb(32 31 28 / 14%);
   }
 </style>
