@@ -255,6 +255,62 @@ public actor SQLiteWorkspaceMetadataStore: WorkspacePersistenceStore {
         }
     }
 
+    public func saveProjectOrder(_ orderedProjectIDs: [UUID]) async throws {
+        do {
+            try executeRaw("BEGIN IMMEDIATE TRANSACTION")
+            try validateProjectOrder(orderedProjectIDs)
+            for (sortIndex, projectID) in orderedProjectIDs.enumerated() {
+                try executeRequiredUpdate(
+                    "UPDATE projects SET sort_index = ? WHERE id = ?",
+                    missingMessage: "Project \(projectID.uuidString) is missing for order update"
+                ) { statement in
+                    bind(statement, sortIndex, 1)
+                    bind(statement, projectID, 2)
+                }
+            }
+            try executeRaw("COMMIT")
+        } catch {
+            try? executeRaw("ROLLBACK")
+            throw error
+        }
+    }
+
+    public func saveTabOrder(_ plan: SessionTabReorderPlan, snapshot: RestoreSnapshot) async throws {
+        do {
+            try executeRaw("BEGIN IMMEDIATE TRANSACTION")
+            let sessionTabs = try validateTabOrder(plan)
+            if !sessionTabs.isEmpty {
+                let ordinals = sessionTabs.map(\.ordinal)
+                let temporaryOffset = try temporaryOrdinalOffset(
+                    minOrdinal: ordinals.min() ?? 0,
+                    maxOrdinal: ordinals.max() ?? -1,
+                    tabCount: sessionTabs.count
+                )
+                try execute(
+                    "UPDATE tabs SET ordinal = ordinal + ? WHERE session_id = ?"
+                ) { statement in
+                    bind(statement, temporaryOffset, 1)
+                    bind(statement, plan.sessionID, 2)
+                }
+            }
+            for (ordinal, tabID) in plan.orderedTabIDs.enumerated() {
+                try executeRequiredUpdate(
+                    "UPDATE tabs SET ordinal = ? WHERE id = ? AND session_id = ?",
+                    missingMessage: "Tab \(tabID.uuidString) is missing for order update"
+                ) { statement in
+                    bind(statement, ordinal, 1)
+                    bind(statement, tabID, 2)
+                    bind(statement, plan.sessionID, 3)
+                }
+            }
+            try saveSnapshot(snapshot)
+            try executeRaw("COMMIT")
+        } catch {
+            try? executeRaw("ROLLBACK")
+            throw error
+        }
+    }
+
     public func saveActivation(
         project: WorkspaceProject?,
         session: WorkspaceSession?,
@@ -431,6 +487,63 @@ public actor SQLiteWorkspaceMetadataStore: WorkspacePersistenceStore {
         }
     }
 
+    private func validateProjectOrder(_ orderedProjectIDs: [UUID]) throws {
+        try validateUniqueIDs(orderedProjectIDs, label: "project order")
+        let existingProjectIDs = try query("SELECT id FROM projects ORDER BY sort_index ASC, last_opened_at DESC") { statement in
+            try uuid(statement, 0)
+        }
+        guard Set(orderedProjectIDs) == Set(existingProjectIDs) else {
+            throw SQLiteWorkspaceMetadataStoreError.invalidStoredValue("Project order must include every persisted project exactly once")
+        }
+    }
+
+    private struct PersistedTabOrderRow {
+        var id: UUID
+        var ordinal: Int
+    }
+
+    private func validateTabOrder(_ plan: SessionTabReorderPlan) throws -> [PersistedTabOrderRow] {
+        let orderedTabIDs = plan.orderedTabIDs
+        try validateUniqueIDs(orderedTabIDs, label: "tab order")
+        let sessionTabs = try query(
+            "SELECT id, ordinal FROM tabs WHERE session_id = ? ORDER BY ordinal ASC",
+            bindValues: { statement in
+                bind(statement, plan.sessionID, 1)
+            }
+        ) { statement in
+            try PersistedTabOrderRow(
+                id: uuid(statement, 0),
+                ordinal: int(statement, 1)
+            )
+        }
+        guard Set(orderedTabIDs) == Set(sessionTabs.map(\.id)) else {
+            throw SQLiteWorkspaceMetadataStoreError.invalidStoredValue("Tab order must include every persisted tab for session \(plan.sessionID.uuidString) exactly once")
+        }
+        return sessionTabs
+    }
+
+    private func validateUniqueIDs(_ ids: [UUID], label: String) throws {
+        var seen: Set<UUID> = []
+        for id in ids where !seen.insert(id).inserted {
+            throw SQLiteWorkspaceMetadataStoreError.invalidStoredValue("Duplicate UUID \(id.uuidString) in \(label)")
+        }
+    }
+
+    private func temporaryOrdinalOffset(minOrdinal: Int, maxOrdinal: Int, tabCount: Int) throws -> Int {
+        let (range, rangeOverflow) = maxOrdinal.subtractingReportingOverflow(minOrdinal)
+        let (rangeWithCount, countOverflow) = range.addingReportingOverflow(tabCount)
+        let (offset, offsetOverflow) = rangeWithCount.addingReportingOverflow(1)
+        guard !rangeOverflow,
+              !countOverflow,
+              !offsetOverflow,
+              offset > 0,
+              maxOrdinal <= Int.max - offset
+        else {
+            throw SQLiteWorkspaceMetadataStoreError.invalidStoredValue("Cannot reserve temporary tab ordinal range")
+        }
+        return offset
+    }
+
     private func executeRaw(_ sql: String) throws {
         var error: UnsafeMutablePointer<CChar>?
         guard sqlite3_exec(database, sql, nil, nil, &error) == SQLITE_OK else {
@@ -441,11 +554,20 @@ public actor SQLiteWorkspaceMetadataStore: WorkspacePersistenceStore {
     }
 
     private func query<T>(_ sql: String, map: (OpaquePointer?) throws -> T) throws -> [T] {
+        try query(sql, bindValues: { _ in }, map: map)
+    }
+
+    private func query<T>(
+        _ sql: String,
+        bindValues: (OpaquePointer?) throws -> Void,
+        map: (OpaquePointer?) throws -> T
+    ) throws -> [T] {
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK else {
             throw SQLiteWorkspaceMetadataStoreError.prepareFailed(lastErrorMessage())
         }
         defer { sqlite3_finalize(statement) }
+        try bindValues(statement)
         var values: [T] = []
         while true {
             let result = sqlite3_step(statement)

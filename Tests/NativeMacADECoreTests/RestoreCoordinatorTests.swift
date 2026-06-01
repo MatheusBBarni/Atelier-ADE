@@ -267,6 +267,8 @@ private actor SnapshotFailingPersistenceStore: WorkspacePersistenceStore {
     func save(session: WorkspaceSession) async throws {}
     func save(tab: WorkspaceTab) async throws {}
     func save(session: WorkspaceSession, firstTab: WorkspaceTab) async throws {}
+    func saveProjectOrder(_ orderedProjectIDs: [UUID]) async throws {}
+    func saveTabOrder(_ plan: SessionTabReorderPlan, snapshot: RestoreSnapshot) async throws {}
     func saveActivation(project: WorkspaceProject?, session: WorkspaceSession?, tab: WorkspaceTab?, snapshot: RestoreSnapshot) async throws {}
     func save(shortcut: SessionShortcut) async throws {}
     func save(appPreferences: AppPreferences) async throws {}

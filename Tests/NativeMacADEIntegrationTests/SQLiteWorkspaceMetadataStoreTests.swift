@@ -591,6 +591,186 @@ struct SQLiteWorkspaceMetadataStoreTests {
         #expect(try await store.loadRestoreSnapshot() == nil)
     }
 
+    @Test
+    func projectOrderSavePersistsDenseSortIndexesAcrossReload() async throws {
+        let path = temporaryDatabasePath()
+        let store = try SQLiteWorkspaceMetadataStore(path: path)
+        let firstProject = WorkspaceProject(
+            path: "/Users/example/project-order-first",
+            displayName: "first",
+            lastOpenedAt: Date(timeIntervalSince1970: 300),
+            sortIndex: 30
+        )
+        let secondProject = WorkspaceProject(
+            path: "/Users/example/project-order-second",
+            displayName: "second",
+            lastOpenedAt: Date(timeIntervalSince1970: 200),
+            sortIndex: 20
+        )
+        let thirdProject = WorkspaceProject(
+            path: "/Users/example/project-order-third",
+            displayName: "third",
+            lastOpenedAt: Date(timeIntervalSince1970: 100),
+            sortIndex: 10
+        )
+        try await store.save(project: firstProject)
+        try await store.save(project: secondProject)
+        try await store.save(project: thirdProject)
+
+        try await store.saveProjectOrder([secondProject.id, thirdProject.id, firstProject.id])
+
+        let reloadedStore = try SQLiteWorkspaceMetadataStore(path: path)
+        let loadedProjects = try await reloadedStore.loadProjects()
+
+        #expect(loadedProjects.map(\.id) == [secondProject.id, thirdProject.id, firstProject.id])
+        #expect(loadedProjects.map(\.sortIndex) == [0, 1, 2])
+    }
+
+    @Test
+    func adjacentTabSwapPersistsWithoutUniqueOrdinalFailure() async throws {
+        let path = temporaryDatabasePath()
+        let store = try SQLiteWorkspaceMetadataStore(path: path)
+        let project = WorkspaceProject(path: "/Users/example/adjacent-swap", displayName: "adjacent-swap")
+        let session = WorkspaceSession(projectID: project.id, title: "Adjacent Swap")
+        let firstTab = WorkspaceTab(sessionID: session.id, workingDirectory: project.path, ordinal: 0)
+        let secondTab = WorkspaceTab(sessionID: session.id, workingDirectory: project.path, ordinal: 1)
+        let thirdTab = WorkspaceTab(sessionID: session.id, workingDirectory: project.path, ordinal: 2)
+        try await store.save(project: project)
+        try await store.save(session: session)
+        try await store.save(tab: firstTab)
+        try await store.save(tab: secondTab)
+        try await store.save(tab: thirdTab)
+
+        try await store.saveTabOrder(
+            SessionTabReorderPlan(
+                sessionID: session.id,
+                visibleTabIDs: [secondTab.id, firstTab.id, thirdTab.id]
+            ),
+            snapshot: RestoreSnapshot(
+                selectedProjectID: project.id,
+                selectedSessionID: session.id,
+                selectedTabID: secondTab.id,
+                tabOrder: [secondTab.id, firstTab.id, thirdTab.id],
+                updatedAt: Date(timeIntervalSince1970: 800)
+            )
+        )
+
+        let loadedTabs = try await store.loadTabs()
+        #expect(loadedTabs.map(\.id) == [secondTab.id, firstTab.id, thirdTab.id])
+        #expect(loadedTabs.map(\.ordinal) == [0, 1, 2])
+        #expect(try await store.loadRestoreSnapshot()?.tabOrder == [secondTab.id, firstTab.id, thirdTab.id])
+    }
+
+    @Test
+    func firstToEndAndLastToBeginningTabMovesPersistAcrossReload() async throws {
+        let path = temporaryDatabasePath()
+        let store = try SQLiteWorkspaceMetadataStore(path: path)
+        let project = WorkspaceProject(path: "/Users/example/end-moves", displayName: "end-moves")
+        let session = WorkspaceSession(projectID: project.id, title: "End Moves")
+        let firstTab = WorkspaceTab(sessionID: session.id, workingDirectory: project.path, ordinal: 0)
+        let secondTab = WorkspaceTab(sessionID: session.id, workingDirectory: project.path, ordinal: 1)
+        let thirdTab = WorkspaceTab(sessionID: session.id, workingDirectory: project.path, ordinal: 2)
+        let fourthTab = WorkspaceTab(sessionID: session.id, workingDirectory: project.path, ordinal: 3)
+        try await store.save(project: project)
+        try await store.save(session: session)
+        try await store.save(tab: firstTab)
+        try await store.save(tab: secondTab)
+        try await store.save(tab: thirdTab)
+        try await store.save(tab: fourthTab)
+
+        try await store.saveTabOrder(
+            SessionTabReorderPlan(
+                sessionID: session.id,
+                visibleTabIDs: [secondTab.id, thirdTab.id, fourthTab.id, firstTab.id]
+            ),
+            snapshot: RestoreSnapshot(
+                selectedProjectID: project.id,
+                selectedSessionID: session.id,
+                selectedTabID: firstTab.id,
+                tabOrder: [secondTab.id, thirdTab.id, fourthTab.id, firstTab.id],
+                updatedAt: Date(timeIntervalSince1970: 900)
+            )
+        )
+
+        let afterFirstMoveReload = try SQLiteWorkspaceMetadataStore(path: path)
+        #expect(try await afterFirstMoveReload.loadTabs().map(\.id) == [
+            secondTab.id,
+            thirdTab.id,
+            fourthTab.id,
+            firstTab.id
+        ])
+
+        try await afterFirstMoveReload.saveTabOrder(
+            SessionTabReorderPlan(
+                sessionID: session.id,
+                visibleTabIDs: [firstTab.id, secondTab.id, thirdTab.id, fourthTab.id]
+            ),
+            snapshot: RestoreSnapshot(
+                selectedProjectID: project.id,
+                selectedSessionID: session.id,
+                selectedTabID: firstTab.id,
+                tabOrder: [firstTab.id, secondTab.id, thirdTab.id, fourthTab.id],
+                updatedAt: Date(timeIntervalSince1970: 950)
+            )
+        )
+
+        let afterSecondMoveReload = try SQLiteWorkspaceMetadataStore(path: path)
+        let reloadedTabs = try await afterSecondMoveReload.loadTabs()
+        #expect(reloadedTabs.map(\.id) == [firstTab.id, secondTab.id, thirdTab.id, fourthTab.id])
+        #expect(reloadedTabs.map(\.ordinal) == [0, 1, 2, 3])
+        #expect(try await afterSecondMoveReload.loadRestoreSnapshot()?.tabOrder == [
+            firstTab.id,
+            secondTab.id,
+            thirdTab.id,
+            fourthTab.id
+        ])
+    }
+
+    @Test
+    func failedTabOrderSaveRollsBackOrdinalsAndRestoreSnapshot() async throws {
+        let path = temporaryDatabasePath()
+        let store = try SQLiteWorkspaceMetadataStore(path: path)
+        let project = WorkspaceProject(path: "/Users/example/reorder-rollback", displayName: "reorder-rollback")
+        let session = WorkspaceSession(projectID: project.id, title: "Rollback")
+        let firstTab = WorkspaceTab(sessionID: session.id, workingDirectory: project.path, ordinal: 0)
+        let secondTab = WorkspaceTab(sessionID: session.id, workingDirectory: project.path, ordinal: 1)
+        let thirdTab = WorkspaceTab(sessionID: session.id, workingDirectory: project.path, ordinal: 2)
+        let originalSnapshot = RestoreSnapshot(
+            selectedProjectID: project.id,
+            selectedSessionID: session.id,
+            selectedTabID: firstTab.id,
+            tabOrder: [firstTab.id, secondTab.id, thirdTab.id],
+            updatedAt: Date(timeIntervalSince1970: 1_000)
+        )
+        try await store.save(project: project)
+        try await store.save(session: session)
+        try await store.save(tab: firstTab)
+        try await store.save(tab: secondTab)
+        try await store.save(tab: thirdTab)
+        try await store.save(snapshot: originalSnapshot)
+
+        await #expect(throws: SQLiteWorkspaceMetadataStoreError.self) {
+            try await store.saveTabOrder(
+                SessionTabReorderPlan(
+                    sessionID: session.id,
+                    visibleTabIDs: [thirdTab.id, secondTab.id, firstTab.id]
+                ),
+                snapshot: RestoreSnapshot(
+                    selectedProjectID: project.id,
+                    selectedSessionID: session.id,
+                    selectedTabID: UUID(),
+                    tabOrder: [thirdTab.id, secondTab.id, firstTab.id],
+                    updatedAt: Date(timeIntervalSince1970: 1_100)
+                )
+            )
+        }
+
+        let loadedTabs = try await store.loadTabs()
+        #expect(loadedTabs.map(\.id) == [firstTab.id, secondTab.id, thirdTab.id])
+        #expect(loadedTabs.map(\.ordinal) == [0, 1, 2])
+        #expect(try await store.loadRestoreSnapshot() == originalSnapshot)
+    }
+
     private func temporaryDatabasePath() -> String {
         URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("native-mac-ade-\(UUID().uuidString).sqlite")

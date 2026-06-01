@@ -210,6 +210,135 @@ struct WorkspaceModelsTests {
     }
 
     @Test
+    func inMemoryProjectOrderSaveRewritesDenseSortIndexes() async throws {
+        let firstProject = WorkspaceProject(
+            path: "/Users/example/first",
+            displayName: "first",
+            lastOpenedAt: Date(timeIntervalSince1970: 300),
+            sortIndex: 10
+        )
+        let secondProject = WorkspaceProject(
+            path: "/Users/example/second",
+            displayName: "second",
+            lastOpenedAt: Date(timeIntervalSince1970: 200),
+            sortIndex: 20
+        )
+        let thirdProject = WorkspaceProject(
+            path: "/Users/example/third",
+            displayName: "third",
+            lastOpenedAt: Date(timeIntervalSince1970: 100),
+            sortIndex: 30
+        )
+        let store = InMemoryWorkspacePersistenceStore(projects: [firstProject, secondProject, thirdProject])
+
+        try await store.saveProjectOrder([thirdProject.id, firstProject.id, secondProject.id])
+
+        let loadedProjects = try await store.loadProjects()
+        #expect(loadedProjects.map(\.id) == [thirdProject.id, firstProject.id, secondProject.id])
+        #expect(loadedProjects.map(\.sortIndex) == [0, 1, 2])
+    }
+
+    @Test
+    func inMemoryTabOrderSaveRewritesVisibleTabsAndStableHiddenTail() async throws {
+        let sessionID = UUID()
+        let otherSessionID = UUID()
+        let visibleFirst = WorkspaceTab(
+            sessionID: sessionID,
+            workingDirectory: "/Users/example/project",
+            ordinal: 10
+        )
+        let visibleSecond = WorkspaceTab(
+            sessionID: sessionID,
+            workingDirectory: "/Users/example/project",
+            ordinal: 20
+        )
+        let hiddenPersisted = WorkspaceTab(
+            sessionID: sessionID,
+            workingDirectory: "/Users/example/project",
+            ordinal: 30
+        )
+        let otherSessionTab = WorkspaceTab(
+            sessionID: otherSessionID,
+            workingDirectory: "/Users/example/other",
+            ordinal: 0
+        )
+        let store = InMemoryWorkspacePersistenceStore(tabs: [
+            hiddenPersisted,
+            visibleFirst,
+            visibleSecond,
+            otherSessionTab
+        ])
+
+        try await store.saveTabOrder(
+            SessionTabReorderPlan(
+                sessionID: sessionID,
+                visibleTabIDs: [visibleSecond.id, visibleFirst.id],
+                hiddenPersistedTabIDs: [hiddenPersisted.id]
+            ),
+            snapshot: RestoreSnapshot(
+                selectedProjectID: nil,
+                selectedSessionID: sessionID,
+                selectedTabID: visibleSecond.id,
+                tabOrder: [visibleSecond.id, visibleFirst.id, hiddenPersisted.id],
+                updatedAt: Date(timeIntervalSince1970: 500)
+            )
+        )
+
+        let loadedTabs = try await store.loadTabs()
+        let sessionTabs = loadedTabs.filter { $0.sessionID == sessionID }
+        let otherSessionTabs = loadedTabs.filter { $0.sessionID == otherSessionID }
+
+        #expect(sessionTabs.map(\.id) == [visibleSecond.id, visibleFirst.id, hiddenPersisted.id])
+        #expect(sessionTabs.map(\.ordinal) == [0, 1, 2])
+        #expect(otherSessionTabs.map(\.id) == [otherSessionTab.id])
+        #expect(otherSessionTabs.map(\.ordinal) == [0])
+    }
+
+    @Test
+    func inMemoryTabOrderSaveUpdatesRestoreSnapshotOrder() async throws {
+        let sessionID = UUID()
+        let firstTab = WorkspaceTab(
+            sessionID: sessionID,
+            workingDirectory: "/Users/example/project",
+            ordinal: 0
+        )
+        let secondTab = WorkspaceTab(
+            sessionID: sessionID,
+            workingDirectory: "/Users/example/project",
+            ordinal: 1
+        )
+        let originalSnapshot = RestoreSnapshot(
+            selectedProjectID: nil,
+            selectedSessionID: sessionID,
+            selectedTabID: firstTab.id,
+            tabOrder: [firstTab.id, secondTab.id],
+            updatedAt: Date(timeIntervalSince1970: 100)
+        )
+        let updatedSnapshot = RestoreSnapshot(
+            selectedProjectID: nil,
+            selectedSessionID: sessionID,
+            selectedTabID: secondTab.id,
+            tabOrder: [secondTab.id, firstTab.id],
+            updatedAt: Date(timeIntervalSince1970: 200)
+        )
+        let store = InMemoryWorkspacePersistenceStore(
+            tabs: [firstTab, secondTab],
+            restoreSnapshot: originalSnapshot
+        )
+
+        try await store.saveTabOrder(
+            SessionTabReorderPlan(
+                sessionID: sessionID,
+                visibleTabIDs: [secondTab.id, firstTab.id]
+            ),
+            snapshot: updatedSnapshot
+        )
+
+        #expect(try await store.loadRestoreSnapshot() == updatedSnapshot)
+        #expect(try await store.loadRestoreSnapshot()?.tabOrder == [secondTab.id, firstTab.id])
+    }
+
+    @Test
     func defaultSessionNamingUsesMonthDayHourMinuteUntilRename() {
         let date = Date(timeIntervalSince1970: 1_717_393_500) // 2024-06-03 05:45 UTC
         let projectID = UUID()
