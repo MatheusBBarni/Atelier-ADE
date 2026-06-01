@@ -16,6 +16,11 @@ type AssetOwner = "web/src/assets" | "web/public" | "web/src/pages";
 type CapabilityPriority = "critical" | "high" | "medium";
 type CtaKind = "repo" | "docs" | "quickstart";
 type CtaPriority = "primary" | "secondary";
+type ProductSurfaceAssetKey =
+  | "focusAndAppearance"
+  | "focusWorkspace"
+  | "settingsAgentProfiles"
+  | "settingsKeyboardShortcuts";
 
 type AstroManagedAsset = {
   kind: "astro-managed";
@@ -49,6 +54,20 @@ type TrustNote = {
   description: string;
 };
 
+type ProductSurfaceItem = {
+  assetKey: ProductSurfaceAssetKey;
+  eyebrow: string;
+  title: string;
+  description: string;
+};
+
+type ProductSurfaceContent = {
+  eyebrow: string;
+  title: string;
+  description: string;
+  items: readonly ProductSurfaceItem[];
+};
+
 type LandingPageLink = {
   kind: CtaKind;
   label: string;
@@ -80,6 +99,7 @@ type SiteContent = {
     description: string;
     caption: string;
   };
+  productSurfaces: ProductSurfaceContent;
   capabilities: readonly CapabilityItem[];
   trustNotes: readonly TrustNote[];
   ctas: readonly LandingPageLink[];
@@ -95,6 +115,42 @@ export const landingPageAssets = {
     sourcePath: "docs/images/app-image.png",
     alt: `${CANONICAL_PRODUCT_NAME} macOS app screenshot`,
     expectedPublicPathPrefix: `${ASTRO_ASSET_PREFIX}/atelier-app-screenshot`
+  },
+  focusAndAppearance: {
+    kind: "astro-managed",
+    owner: "web/src/assets",
+    fileName: "atelier-app-focus-and-appearance.png",
+    importPath: "src/assets/atelier-app-focus-and-appearance.png",
+    sourcePath: "docs/images/app-focus-and-appearance.png",
+    alt: `${CANONICAL_PRODUCT_NAME} focus and appearance screenshot`,
+    expectedPublicPathPrefix: `${ASTRO_ASSET_PREFIX}/atelier-app-focus-and-appearance`
+  },
+  focusWorkspace: {
+    kind: "astro-managed",
+    owner: "web/src/assets",
+    fileName: "atelier-app-focus-workspace.png",
+    importPath: "src/assets/atelier-app-focus-workspace.png",
+    sourcePath: "docs/images/app-focus-workspace.png",
+    alt: `${CANONICAL_PRODUCT_NAME} focus workspace screenshot`,
+    expectedPublicPathPrefix: `${ASTRO_ASSET_PREFIX}/atelier-app-focus-workspace`
+  },
+  settingsAgentProfiles: {
+    kind: "astro-managed",
+    owner: "web/src/assets",
+    fileName: "atelier-app-settings-agent-profiles.png",
+    importPath: "src/assets/atelier-app-settings-agent-profiles.png",
+    sourcePath: "docs/images/app-settings-agent-profiles.png",
+    alt: `${CANONICAL_PRODUCT_NAME} agent profiles settings screenshot`,
+    expectedPublicPathPrefix: `${ASTRO_ASSET_PREFIX}/atelier-app-settings-agent-profiles`
+  },
+  settingsKeyboardShortcuts: {
+    kind: "astro-managed",
+    owner: "web/src/assets",
+    fileName: "atelier-app-settings-keyboard-shortcuts.png",
+    importPath: "src/assets/atelier-app-settings-keyboard-shortcuts.png",
+    sourcePath: "docs/images/app-settings-keyboard-shortcuts.png",
+    alt: `${CANONICAL_PRODUCT_NAME} keyboard shortcuts settings screenshot`,
+    expectedPublicPathPrefix: `${ASTRO_ASSET_PREFIX}/atelier-app-settings-keyboard-shortcuts`
   },
   logo: {
     kind: "astro-managed",
@@ -196,6 +252,38 @@ export const siteContent = {
       "The current app keeps persistent projects in a sidebar, groups related work into sessions, opens terminal tabs in a native window, and restores the workspace when you relaunch.",
     caption:
       "Current Atelier macOS workspace with project navigation, session context, terminal tabs, and restore-oriented state."
+  },
+  productSurfaces: {
+    eyebrow: "Additional app surfaces",
+    title: "Focus and settings views are part of the product surface.",
+    description:
+      "These current screenshots expand the landing-page proof beyond the main workspace: focus presentation, active workspace context, agent profile settings, and keyboard shortcut references.",
+    items: [
+      {
+        assetKey: "focusAndAppearance",
+        eyebrow: "Focus",
+        title: "Focus and appearance",
+        description: "Current surface for focus presentation and app appearance preferences."
+      },
+      {
+        assetKey: "focusWorkspace",
+        eyebrow: "Workspace",
+        title: "Focus workspace",
+        description: "Focused workspace view showing the active project and session context."
+      },
+      {
+        assetKey: "settingsAgentProfiles",
+        eyebrow: "Settings",
+        title: "Agent profiles",
+        description: "Settings surface for reviewing agent profile entries used by the app."
+      },
+      {
+        assetKey: "settingsKeyboardShortcuts",
+        eyebrow: "Settings",
+        title: "Keyboard shortcuts",
+        description: "Settings surface for reviewing keyboard shortcuts in the app."
+      }
+    ]
   },
   capabilities: [
     {
