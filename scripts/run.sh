@@ -9,7 +9,7 @@ APP_BUNDLE_NAME="Atelier"
 BUNDLE_ID="com.matheusbbarni.Atelier"
 MIN_MACOS_VERSION="15.0"
 ICON_SOURCE="$ROOT_DIR/Sources/NativeMacADE/Resources/AppIcon.png"
-APP_VERSION="${APP_VERSION:-0.1.0}"
+APP_VERSION="${APP_VERSION:-0.1.1}"
 APP_BUILD="${APP_BUILD:-1}"
 MODE="${1:-run}"
 

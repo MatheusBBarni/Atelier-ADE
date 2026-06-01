@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: App version for bundle metadata (for example 0.1.0)
+        description: App version for bundle metadata (for example 0.1.1)
         required: false
         type: string
       build_number:
@@ -42,7 +42,7 @@ jobs:
           elif [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
             APP_VERSION="${GITHUB_REF_NAME#v}"
           else
-            APP_VERSION="0.1.0"
+            APP_VERSION="0.1.1"
           fi
 
           if [[ -n "$INPUT_BUILD_NUMBER" ]]; then
