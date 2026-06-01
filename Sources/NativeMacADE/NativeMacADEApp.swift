@@ -9,6 +9,7 @@ struct AtelierApp: App {
     @State private var appShellState: AppShellState
     private let commandService: any WorkspaceCommandService
     private let terminalHostController: TerminalHostController
+    private let terminalExitEvents: TerminalExitEventSource
     private let fileAccessService: any WorkspaceFileAccessing
     private let fileBufferController: any WorkspaceFileBufferManaging
 
@@ -21,6 +22,7 @@ struct AtelierApp: App {
         _appShellState = State(initialValue: AppShellState())
         commandService = container.workspaceCommandService
         terminalHostController = container.terminalHostController
+        terminalExitEvents = container.terminalExitEvents
         fileAccessService = container.fileAccessService
         fileBufferController = container.fileBufferController
     }
@@ -32,6 +34,7 @@ struct AtelierApp: App {
                 store: workspaceStore,
                 commandService: commandService,
                 terminalHostController: terminalHostController,
+                terminalExitEvents: terminalExitEvents,
                 fileAccessService: fileAccessService,
                 fileBufferController: fileBufferController
             )
@@ -270,6 +273,7 @@ extension Notification.Name {
     static let renameSelectedTab = Notification.Name("Atelier.renameSelectedTab")
     static let deleteSelectedSession = Notification.Name("Atelier.deleteSelectedSession")
     static let performSelectedFileCommand = Notification.Name("Atelier.performSelectedFileCommand")
+    static let sessionShortcutCatalogDidChange = Notification.Name("Atelier.sessionShortcutCatalogDidChange")
 }
 
 private extension View {

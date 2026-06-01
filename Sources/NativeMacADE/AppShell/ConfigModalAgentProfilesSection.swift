@@ -278,6 +278,7 @@ struct ConfigModalAgentProfilesSection: View {
 
         do {
             let savedProfile = try await commandService.saveSessionShortcut(draft.sessionShortcut)
+            postShortcutCatalogDidChange()
             var preferences = try await commandService.loadAppPreferences()
             let shouldUpdateDefault = draft.makeDefault || preferences.defaultSessionShortcutID == savedProfile.id
 
@@ -303,6 +304,7 @@ struct ConfigModalAgentProfilesSection: View {
 
         do {
             let resetProfile = try await commandService.resetBuiltInSessionShortcut(id: profile.id)
+            postShortcutCatalogDidChange()
             feedback = AgentProfileFeedback(kind: .success, message: "\(resetProfile.label) reset to the built-in profile.")
             await refreshProfiles(showLoading: false)
         } catch {
@@ -319,6 +321,7 @@ struct ConfigModalAgentProfilesSection: View {
 
         do {
             try await commandService.deleteSessionShortcut(id: profile.id)
+            postShortcutCatalogDidChange()
             feedback = AgentProfileFeedback(kind: .success, message: "\(profile.label) deleted.")
             if editorDraft?.id == profile.id {
                 editorDraft = nil
@@ -337,6 +340,10 @@ struct ConfigModalAgentProfilesSection: View {
             editorDraft = AgentProfileEditorDraft(profile: row.profile, isDefault: row.isDefault)
         }
         feedback = nil
+    }
+
+    private func postShortcutCatalogDidChange() {
+        NotificationCenter.default.post(name: .sessionShortcutCatalogDidChange, object: nil)
     }
 
     private func friendlyMessage(for error: Error) -> String {
