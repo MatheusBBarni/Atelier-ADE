@@ -40,6 +40,27 @@ struct PerformanceMetricsTests {
     }
 
     @Test
+    func focusWorkspaceCountersRollIntoPilotDiagnostics() {
+        let metrics = PerformanceMetrics()
+
+        metrics.recordFocusWorkspaceEnabled()
+        metrics.recordFocusWorkspaceDisabled()
+        metrics.recordFocusWorkspaceBlocked(.additionalTerminalTabBlocked)
+        metrics.recordFocusWorkspaceBlocked(.additionalFileTabBlocked)
+
+        let diagnostics = metrics.diagnostics()
+
+        #expect(metrics.focusWorkspaceEnableCount == 1)
+        #expect(metrics.focusWorkspaceDisableCount == 1)
+        #expect(metrics.focusWorkspaceBlockedTerminalTabCount == 1)
+        #expect(metrics.focusWorkspaceBlockedFileTabCount == 1)
+        #expect(diagnostics.focusWorkspaceEnableCount == 1)
+        #expect(diagnostics.focusWorkspaceDisableCount == 1)
+        #expect(diagnostics.focusWorkspaceBlockedTerminalTabCount == 1)
+        #expect(diagnostics.focusWorkspaceBlockedFileTabCount == 1)
+    }
+
+    @Test
     func fileWorkflowCountersRollIntoPilotDiagnostics() {
         let metrics = PerformanceMetrics()
 

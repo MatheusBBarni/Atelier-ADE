@@ -14,6 +14,7 @@ public enum WorkspaceCommandError: Error, Equatable, Sendable {
     case missingTab(UUID)
     case missingShortcut(UUID)
     case settingsValidationFailed(WorkspaceSettingsValidationFailure)
+    case focusWorkspaceRejected(FocusWorkspaceViolation)
     case builtInShortcutDeletionRejected(UUID)
     case customShortcutResetRejected(UUID)
     case closeRejected(UUID)
