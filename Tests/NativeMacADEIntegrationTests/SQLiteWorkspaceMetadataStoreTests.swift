@@ -16,12 +16,14 @@ struct SQLiteWorkspaceMetadataStoreTests {
         #expect(tables == WorkspaceMigrations.metadataTables)
         #expect(try inspectColumnNames(path: path, tableName: "session_shortcuts").contains("has_user_override"))
         #expect(try inspectColumnNames(path: path, tableName: "tabs").isSuperset(of: ["kind", "file_path", "title", "shortcut_id"]))
-        #expect(try inspectColumnNames(path: path, tableName: "app_preferences").contains("terminal_font_size"))
-        #expect(WorkspaceMigrations.currentUserVersion == 5)
+        #expect(try inspectColumnNames(path: path, tableName: "app_preferences").isSuperset(of: ["terminal_font_size", "focus_workspace_enabled"]))
+        #expect(WorkspaceMigrations.currentUserVersion == 6)
         #expect(try inspectUserVersion(path: path) == WorkspaceMigrations.currentUserVersion)
         #expect(try inspectAppPreferencesRowCount(path: path) == 1)
+        #expect(try inspectAppPreferencesFocusFlag(path: path) == false)
         #expect(preferences == .defaults)
         #expect(preferences.themeID == AppTheme.systemSelectionID)
+        #expect(preferences.focusWorkspaceEnabled == false)
     }
 
     @Test
@@ -256,8 +258,9 @@ struct SQLiteWorkspaceMetadataStoreTests {
         #expect(try inspectUserTableNames(path: path) == WorkspaceMigrations.metadataTables)
         #expect(try inspectColumnNames(path: path, tableName: "session_shortcuts").contains("has_user_override"))
         #expect(try inspectColumnNames(path: path, tableName: "tabs").isSuperset(of: ["kind", "file_path", "title", "shortcut_id"]))
-        #expect(try inspectColumnNames(path: path, tableName: "app_preferences").contains("terminal_font_size"))
+        #expect(try inspectColumnNames(path: path, tableName: "app_preferences").isSuperset(of: ["terminal_font_size", "focus_workspace_enabled"]))
         #expect(try inspectAppPreferencesRowCount(path: path) == 1)
+        #expect(try inspectAppPreferencesFocusFlag(path: path) == false)
         #expect(try await store.loadProjects() == [fixture.project])
         #expect(try await store.loadSessions() == [fixture.session])
         #expect(try await store.loadTabs() == [fixture.tab])
@@ -288,10 +291,78 @@ struct SQLiteWorkspaceMetadataStoreTests {
 
         #expect(try inspectUserVersion(path: path) == WorkspaceMigrations.currentUserVersion)
         #expect(try inspectColumnNames(path: path, tableName: "tabs").isSuperset(of: ["kind", "file_path", "title", "shortcut_id"]))
-        #expect(try inspectColumnNames(path: path, tableName: "app_preferences").contains("terminal_font_size"))
+        #expect(try inspectColumnNames(path: path, tableName: "app_preferences").isSuperset(of: ["terminal_font_size", "focus_workspace_enabled"]))
         #expect(try await store.loadTabs() == [fixture.tab])
         #expect(try await store.loadRestoreSnapshot() == fixture.restoreSnapshot)
         #expect(try await store.loadAppPreferences().terminalFontSize == AppPreferences.defaultTerminalFontSize)
+        #expect(try await store.loadAppPreferences().focusWorkspaceEnabled == false)
+    }
+
+    @Test
+    func versionFiveDatabaseUpgradesToVersionSixPreservingMetadataAndAddingFocusDefault() async throws {
+        let path = temporaryDatabasePath()
+        let fixture = try createVersionFiveDatabase(path: path)
+
+        let store = try SQLiteWorkspaceMetadataStore(path: path)
+        let preferences = try await store.loadAppPreferences()
+
+        #expect(try inspectUserVersion(path: path) == WorkspaceMigrations.currentUserVersion)
+        #expect(try inspectColumnNames(path: path, tableName: "app_preferences").contains("focus_workspace_enabled"))
+        #expect(try inspectAppPreferencesFocusFlag(path: path) == false)
+        #expect(try await store.loadProjects() == [fixture.project])
+        #expect(try await store.loadSessions() == [fixture.session])
+        #expect(try await store.loadTabs() == [fixture.tab])
+        #expect(try await store.loadSessionShortcuts() == [fixture.shortcut])
+        #expect(try await store.loadRestoreSnapshot() == fixture.restoreSnapshot)
+        #expect(preferences.themeID == "dracula")
+        #expect(preferences.defaultSessionShortcutID == fixture.shortcut.id)
+        #expect(preferences.terminalFontSize == 16)
+        #expect(preferences.keybindings == [.openSettings: fixture.openSettingsOverride])
+        #expect(preferences.focusWorkspaceEnabled == false)
+        #expect(preferences.updatedAt == Date(timeIntervalSince1970: 80))
+    }
+
+    @Test
+    func currentVersionDatabaseMissingFocusWorkspaceColumnRepairsWithoutLosingPreferences() async throws {
+        let path = temporaryDatabasePath()
+        let override = KeybindingOverride(
+            commandID: .openSettings,
+            keyEquivalent: ",",
+            modifiers: [.command, .shift]
+        )
+        do {
+            var database: OpaquePointer?
+            guard sqlite3_open_v2(path, &database, SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK else {
+                throw SQLiteWorkspaceMetadataStoreError.openFailed("Unable to create missing-focus-column fixture database")
+            }
+            defer { sqlite3_close(database) }
+            try execute(database, """
+            CREATE TABLE app_preferences (
+                id INTEGER PRIMARY KEY NOT NULL CHECK (id = 1),
+                theme_id TEXT NOT NULL,
+                default_session_shortcut_id TEXT REFERENCES session_shortcuts(id) ON DELETE SET NULL,
+                terminal_font_size REAL NOT NULL DEFAULT \(AppPreferences.defaultTerminalFontSize),
+                keybindings_json TEXT NOT NULL,
+                updated_at REAL NOT NULL
+            );
+            INSERT INTO app_preferences (id, theme_id, default_session_shortcut_id, terminal_font_size, keybindings_json, updated_at)
+            VALUES (1, 'catppuccin', NULL, 19, '[{"commandID":"openSettings","keyEquivalent":",","modifiers":["command","shift"]}]', 90);
+            PRAGMA user_version = \(WorkspaceMigrations.currentUserVersion);
+            """)
+        }
+
+        let store = try SQLiteWorkspaceMetadataStore(path: path)
+        let preferences = try await store.loadAppPreferences()
+
+        #expect(try inspectUserVersion(path: path) == WorkspaceMigrations.currentUserVersion)
+        #expect(try inspectColumnNames(path: path, tableName: "app_preferences").contains("focus_workspace_enabled"))
+        #expect(try inspectAppPreferencesFocusFlag(path: path) == false)
+        #expect(preferences.themeID == "catppuccin")
+        #expect(preferences.defaultSessionShortcutID == nil)
+        #expect(preferences.terminalFontSize == 19)
+        #expect(preferences.keybindings == [.openSettings: override])
+        #expect(preferences.focusWorkspaceEnabled == false)
+        #expect(preferences.updatedAt == Date(timeIntervalSince1970: 90))
     }
 
     @Test
@@ -328,6 +399,7 @@ struct SQLiteWorkspaceMetadataStoreTests {
             themeID: "dracula",
             defaultSessionShortcutID: nil,
             terminalFontSize: 15,
+            focusWorkspaceEnabled: false,
             keybindings: [
                 .previousTab: KeybindingOverride(commandID: .previousTab, keyEquivalent: "leftArrow", modifiers: [.command, .option])
             ],
@@ -348,6 +420,7 @@ struct SQLiteWorkspaceMetadataStoreTests {
             themeID: "onedark",
             defaultSessionShortcutID: shortcut.id,
             terminalFontSize: 17,
+            focusWorkspaceEnabled: true,
             keybindings: [
                 .openSettings: KeybindingOverride(commandID: .openSettings, keyEquivalent: ",", modifiers: [.command, .shift]),
                 .zoomOutTerminal: KeybindingOverride(commandID: .zoomOutTerminal, keyEquivalent: "-", modifiers: [.command])
@@ -367,6 +440,7 @@ struct SQLiteWorkspaceMetadataStoreTests {
         let preferences = AppPreferences(
             themeID: AppTheme.systemSelectionID,
             terminalFontSize: 14,
+            focusWorkspaceEnabled: true,
             updatedAt: Date(timeIntervalSince1970: 700)
         )
 
@@ -380,6 +454,7 @@ struct SQLiteWorkspaceMetadataStoreTests {
             "default_session_shortcut_id",
             "terminal_font_size",
             "keybindings_json",
+            "focus_workspace_enabled",
             "updated_at"
         ])
     }
@@ -796,6 +871,12 @@ struct SQLiteWorkspaceMetadataStoreTests {
         }.first ?? 0
     }
 
+    private func inspectAppPreferencesFocusFlag(path: String) throws -> Bool {
+        try inspect(path: path, sql: "SELECT focus_workspace_enabled FROM app_preferences WHERE id = 1") { statement in
+            sqlite3_column_int(statement, 0) != 0
+        }.first ?? false
+    }
+
     private func inspectUserVersion(path: String) throws -> Int32 {
         var database: OpaquePointer?
         guard sqlite3_open_v2(path, &database, SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK else {
@@ -893,6 +974,92 @@ struct SQLiteWorkspaceMetadataStoreTests {
         return fixture
     }
 
+    private func createVersionFiveDatabase(path: String) throws -> VersionFiveFixture {
+        let fixture = VersionFiveFixture()
+        var database: OpaquePointer?
+        guard sqlite3_open_v2(path, &database, SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK else {
+            throw SQLiteWorkspaceMetadataStoreError.openFailed("Unable to create v5 fixture database")
+        }
+        defer { sqlite3_close(database) }
+
+        try execute(database, """
+        PRAGMA foreign_keys = ON;
+        CREATE TABLE projects (
+            id TEXT PRIMARY KEY NOT NULL,
+            path TEXT NOT NULL UNIQUE,
+            bookmark_data BLOB,
+            display_name TEXT NOT NULL,
+            created_at REAL NOT NULL,
+            last_opened_at REAL NOT NULL,
+            sort_index INTEGER NOT NULL
+        );
+        CREATE TABLE session_shortcuts (
+            id TEXT PRIMARY KEY NOT NULL,
+            label TEXT NOT NULL,
+            launch_command TEXT NOT NULL,
+            launch_arguments_json TEXT,
+            secret_ref TEXT,
+            is_built_in INTEGER NOT NULL CHECK (is_built_in IN (0, 1)),
+            has_user_override INTEGER NOT NULL DEFAULT 0 CHECK (has_user_override IN (0, 1))
+        );
+        CREATE TABLE sessions (
+            id TEXT PRIMARY KEY NOT NULL,
+            project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            title TEXT NOT NULL,
+            is_user_named INTEGER NOT NULL CHECK (is_user_named IN (0, 1)),
+            shortcut_id TEXT REFERENCES session_shortcuts(id) ON DELETE SET NULL,
+            created_at REAL NOT NULL,
+            last_activated_at REAL NOT NULL
+        );
+        CREATE TABLE tabs (
+            id TEXT PRIMARY KEY NOT NULL,
+            session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+            working_directory TEXT NOT NULL,
+            title TEXT,
+            shortcut_id TEXT REFERENCES session_shortcuts(id) ON DELETE SET NULL,
+            launch_command TEXT,
+            launch_arguments_json TEXT,
+            kind TEXT NOT NULL DEFAULT 'terminal' CHECK (kind IN ('terminal', 'file')),
+            file_path TEXT,
+            ordinal INTEGER NOT NULL,
+            created_at REAL NOT NULL,
+            last_activated_at REAL NOT NULL,
+            UNIQUE(session_id, ordinal)
+        );
+        CREATE TABLE app_preferences (
+            id INTEGER PRIMARY KEY NOT NULL CHECK (id = 1),
+            theme_id TEXT NOT NULL,
+            default_session_shortcut_id TEXT REFERENCES session_shortcuts(id) ON DELETE SET NULL,
+            terminal_font_size REAL NOT NULL DEFAULT \(AppPreferences.defaultTerminalFontSize),
+            keybindings_json TEXT NOT NULL,
+            updated_at REAL NOT NULL
+        );
+        CREATE TABLE restore_snapshot (
+            id INTEGER PRIMARY KEY NOT NULL CHECK (id = 1),
+            selected_project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
+            selected_session_id TEXT REFERENCES sessions(id) ON DELETE SET NULL,
+            selected_tab_id TEXT REFERENCES tabs(id) ON DELETE SET NULL,
+            tab_order_json TEXT NOT NULL,
+            updated_at REAL NOT NULL
+        );
+        INSERT INTO projects (id, path, bookmark_data, display_name, created_at, last_opened_at, sort_index)
+        VALUES ('\(fixture.project.id.uuidString)', '\(fixture.project.path)', NULL, '\(fixture.project.displayName)', 10, 20, \(fixture.project.sortIndex));
+        INSERT INTO session_shortcuts (id, label, launch_command, launch_arguments_json, secret_ref, is_built_in, has_user_override)
+        VALUES ('\(fixture.shortcut.id.uuidString)', '\(fixture.shortcut.label)', '\(fixture.shortcut.launchCommand)', '\(fixture.shortcut.launchArgumentsJSON!)', '\(fixture.shortcut.secretRef!)', 1, 1);
+        INSERT INTO sessions (id, project_id, title, is_user_named, shortcut_id, created_at, last_activated_at)
+        VALUES ('\(fixture.session.id.uuidString)', '\(fixture.project.id.uuidString)', '\(fixture.session.title)', 1, '\(fixture.shortcut.id.uuidString)', 30, 40);
+        INSERT INTO tabs (id, session_id, working_directory, title, shortcut_id, launch_command, launch_arguments_json, kind, file_path, ordinal, created_at, last_activated_at)
+        VALUES ('\(fixture.tab.id.uuidString)', '\(fixture.session.id.uuidString)', '\(fixture.tab.workingDirectory)', '\(fixture.tab.title!)', '\(fixture.shortcut.id.uuidString)', '\(fixture.tab.launchCommand!)', '\(fixture.tab.launchArgumentsJSON!)', 'terminal', NULL, \(fixture.tab.ordinal), 50, 60);
+        INSERT INTO app_preferences (id, theme_id, default_session_shortcut_id, terminal_font_size, keybindings_json, updated_at)
+        VALUES (1, 'dracula', '\(fixture.shortcut.id.uuidString)', 16, '[{"commandID":"openSettings","keyEquivalent":",","modifiers":["command","shift"]}]', 80);
+        INSERT INTO restore_snapshot (id, selected_project_id, selected_session_id, selected_tab_id, tab_order_json, updated_at)
+        VALUES (1, '\(fixture.project.id.uuidString)', '\(fixture.session.id.uuidString)', '\(fixture.tab.id.uuidString)', '[\"\(fixture.tab.id.uuidString)\"]', 70);
+        PRAGMA user_version = 5;
+        """)
+
+        return fixture
+    }
+
     private func execute(_ database: OpaquePointer?, _ sql: String) throws {
         var error: UnsafeMutablePointer<CChar>?
         guard sqlite3_exec(database, sql, nil, nil, &error) == SQLITE_OK else {
@@ -969,6 +1136,62 @@ private struct VersionOneFixture {
         ordinal: 0,
         createdAt: Date(timeIntervalSince1970: 50),
         lastActivatedAt: Date(timeIntervalSince1970: 60)
+    )
+
+    var restoreSnapshot: RestoreSnapshot {
+        RestoreSnapshot(
+            selectedProjectID: project.id,
+            selectedSessionID: session.id,
+            selectedTabID: tab.id,
+            tabOrder: [tab.id],
+            updatedAt: Date(timeIntervalSince1970: 70)
+        )
+    }
+}
+
+private struct VersionFiveFixture {
+    let project = WorkspaceProject(
+        id: UUID(uuidString: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee")!,
+        path: "/Users/example/v5-project",
+        displayName: "v5-project",
+        createdAt: Date(timeIntervalSince1970: 10),
+        lastOpenedAt: Date(timeIntervalSince1970: 20),
+        sortIndex: 4
+    )
+    let shortcut = SessionShortcut(
+        id: UUID(uuidString: "ffffffff-ffff-4fff-8fff-ffffffffffff")!,
+        label: "Focused Codex",
+        launchCommand: "codex",
+        launchArgumentsJSON: "[]",
+        secretRef: "keychain://native-mac-ade/focused-codex",
+        isBuiltIn: true,
+        hasUserOverride: true
+    )
+    let session = WorkspaceSession(
+        id: UUID(uuidString: "99999999-9999-4999-8999-999999999999")!,
+        projectID: UUID(uuidString: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee")!,
+        title: "Restored v5",
+        isUserNamed: true,
+        shortcutID: UUID(uuidString: "ffffffff-ffff-4fff-8fff-ffffffffffff")!,
+        createdAt: Date(timeIntervalSince1970: 30),
+        lastActivatedAt: Date(timeIntervalSince1970: 40)
+    )
+    let tab = WorkspaceTab(
+        id: UUID(uuidString: "88888888-8888-4888-8888-888888888888")!,
+        sessionID: UUID(uuidString: "99999999-9999-4999-8999-999999999999")!,
+        workingDirectory: "/Users/example/v5-project",
+        title: "Focused Tab",
+        shortcutID: UUID(uuidString: "ffffffff-ffff-4fff-8fff-ffffffffffff")!,
+        launchCommand: "codex",
+        launchArgumentsJSON: "[]",
+        ordinal: 0,
+        createdAt: Date(timeIntervalSince1970: 50),
+        lastActivatedAt: Date(timeIntervalSince1970: 60)
+    )
+    let openSettingsOverride = KeybindingOverride(
+        commandID: .openSettings,
+        keyEquivalent: ",",
+        modifiers: [.command, .shift]
     )
 
     var restoreSnapshot: RestoreSnapshot {

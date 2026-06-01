@@ -11,6 +11,7 @@ public struct AppPreferences: Equatable, Sendable {
     public var themeID: String
     public var defaultSessionShortcutID: UUID?
     public var terminalFontSize: Double
+    public var focusWorkspaceEnabled: Bool
     public var keybindings: [AppCommandID: KeybindingOverride]
     public var updatedAt: Date
 
@@ -19,6 +20,7 @@ public struct AppPreferences: Equatable, Sendable {
         themeID: String = Self.defaultThemeID,
         defaultSessionShortcutID: UUID? = nil,
         terminalFontSize: Double = Self.defaultTerminalFontSize,
+        focusWorkspaceEnabled: Bool = false,
         keybindings: [AppCommandID: KeybindingOverride] = [:],
         updatedAt: Date = Date(timeIntervalSince1970: 0)
     ) {
@@ -26,6 +28,7 @@ public struct AppPreferences: Equatable, Sendable {
         self.themeID = themeID
         self.defaultSessionShortcutID = defaultSessionShortcutID
         self.terminalFontSize = terminalFontSize
+        self.focusWorkspaceEnabled = focusWorkspaceEnabled
         self.keybindings = keybindings
         self.updatedAt = updatedAt
     }

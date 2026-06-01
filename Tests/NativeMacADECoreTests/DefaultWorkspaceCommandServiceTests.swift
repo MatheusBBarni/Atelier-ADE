@@ -219,10 +219,13 @@ struct DefaultWorkspaceCommandServiceTests {
         let loadedPreferences = try await harness.service.loadAppPreferences()
 
         #expect(AppPreferences.defaults.themeID == AppTheme.systemSelectionID)
+        #expect(AppPreferences.defaults.focusWorkspaceEnabled == false)
         #expect(AppPreferences.defaultThemeID == AppTheme.systemSelectionID)
         #expect(AppPreferences.isSupportedThemeSelectionID(AppTheme.systemSelectionID))
         #expect(loadedPreferences.themeID == AppTheme.systemSelectionID)
+        #expect(loadedPreferences.focusWorkspaceEnabled == false)
         #expect(harness.store.appPreferences.themeID == AppTheme.systemSelectionID)
+        #expect(harness.store.appPreferences.focusWorkspaceEnabled == false)
     }
 
     @Test
@@ -232,6 +235,7 @@ struct DefaultWorkspaceCommandServiceTests {
         let preferences = AppPreferences(
             themeID: AppTheme.systemSelectionID,
             terminalFontSize: 16,
+            focusWorkspaceEnabled: true,
             updatedAt: Date(timeIntervalSince1970: 200)
         )
 
@@ -240,6 +244,7 @@ struct DefaultWorkspaceCommandServiceTests {
         let persistedPreferences = try await harness.persistence.loadAppPreferences()
         #expect(persistedPreferences.themeID == AppTheme.systemSelectionID)
         #expect(persistedPreferences.terminalFontSize == 16)
+        #expect(persistedPreferences.focusWorkspaceEnabled == true)
         #expect(persistedPreferences.updatedAt == now)
         #expect(harness.store.appPreferences == persistedPreferences)
         #expect(harness.service.metrics.settingsSavedCount == 1)
@@ -303,6 +308,7 @@ struct DefaultWorkspaceCommandServiceTests {
         let stalePreferences = AppPreferences(
             themeID: "removed-theme",
             terminalFontSize: 18,
+            focusWorkspaceEnabled: true,
             keybindings: [.openSettings: originalOverride],
             updatedAt: Date(timeIntervalSince1970: 300)
         )
@@ -313,6 +319,7 @@ struct DefaultWorkspaceCommandServiceTests {
 
         #expect(loadedPreferences.themeID == AppTheme.systemSelectionID)
         #expect(loadedPreferences.terminalFontSize == 18)
+        #expect(loadedPreferences.focusWorkspaceEnabled == true)
         #expect(loadedPreferences.keybindings == [.openSettings: originalOverride])
         #expect(loadedPreferences.updatedAt == now)
         #expect(persistedPreferences == loadedPreferences)
@@ -346,6 +353,38 @@ struct DefaultWorkspaceCommandServiceTests {
         }
 
         #expect(try await harness.persistence.loadAppPreferences() == originalPreferences)
+    }
+
+    @Test
+    func loadingStaleDefaultProfileRepairsWithoutClobberingFocusWorkspacePreference() async throws {
+        let now = Date(timeIntervalSince1970: 1_717_393_999)
+        let harness = makeHarness(now: { now })
+        let staleShortcutID = UUID()
+        let override = KeybindingOverride(
+            commandID: .openSettings,
+            keyEquivalent: ",",
+            modifiers: [.command, .shift]
+        )
+        try await harness.persistence.save(appPreferences: AppPreferences(
+            themeID: "dracula",
+            defaultSessionShortcutID: staleShortcutID,
+            terminalFontSize: 18,
+            focusWorkspaceEnabled: true,
+            keybindings: [.openSettings: override],
+            updatedAt: Date(timeIntervalSince1970: 300)
+        ))
+
+        let loadedPreferences = try await harness.service.loadAppPreferences()
+        let persistedPreferences = try await harness.persistence.loadAppPreferences()
+
+        #expect(loadedPreferences.themeID == "dracula")
+        #expect(loadedPreferences.defaultSessionShortcutID == nil)
+        #expect(loadedPreferences.terminalFontSize == 18)
+        #expect(loadedPreferences.focusWorkspaceEnabled == true)
+        #expect(loadedPreferences.keybindings == [.openSettings: override])
+        #expect(loadedPreferences.updatedAt == now)
+        #expect(persistedPreferences == loadedPreferences)
+        #expect(harness.store.appPreferences == loadedPreferences)
     }
 
     @Test
@@ -401,6 +440,44 @@ struct DefaultWorkspaceCommandServiceTests {
 
         #expect(try await harness.persistence.loadAppPreferences().terminalFontSize == 16)
         #expect(harness.store.appPreferences.terminalFontSize == 16)
+    }
+
+    @Test
+    func savingAndReloadingPreferencesPreservesFocusWorkspaceAndUnrelatedFields() async throws {
+        let now = Date(timeIntervalSince1970: 1_717_394_000)
+        let harness = makeHarness(now: { now })
+        let shortcut = SessionShortcut(
+            label: "Focused Codex",
+            launchCommand: "codex",
+            launchArgumentsJSON: "[\"exec\"]",
+            isBuiltIn: true
+        )
+        let override = KeybindingOverride(
+            commandID: .openSettings,
+            keyEquivalent: ",",
+            modifiers: [.command, .shift]
+        )
+        try await harness.persistence.save(shortcut: shortcut)
+
+        try await harness.service.saveAppPreferences(AppPreferences(
+            themeID: "catppuccin",
+            defaultSessionShortcutID: shortcut.id,
+            terminalFontSize: 17,
+            focusWorkspaceEnabled: true,
+            keybindings: [.openSettings: override],
+            updatedAt: Date(timeIntervalSince1970: 10)
+        ))
+        harness.store.updateAppPreferences(.defaults)
+
+        let loadedPreferences = try await harness.service.loadAppPreferences()
+
+        #expect(loadedPreferences.themeID == "catppuccin")
+        #expect(loadedPreferences.defaultSessionShortcutID == shortcut.id)
+        #expect(loadedPreferences.terminalFontSize == 17)
+        #expect(loadedPreferences.focusWorkspaceEnabled == true)
+        #expect(loadedPreferences.keybindings == [.openSettings: override])
+        #expect(loadedPreferences.updatedAt == now)
+        #expect(harness.store.appPreferences == loadedPreferences)
     }
 
     @Test
