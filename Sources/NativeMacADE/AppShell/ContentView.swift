@@ -3,6 +3,7 @@ import AppKit
 import LanguageSupport
 import NativeMacADECore
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ShellThemePaletteKey: EnvironmentKey {
     static let defaultValue = AppTheme.defaultTheme.shellPalette
@@ -35,6 +36,120 @@ private extension ThemeColorScheme {
     }
 }
 
+private extension ColorScheme {
+    var themeColorScheme: ThemeColorScheme {
+        switch self {
+        case .dark:
+            return .dark
+        case .light:
+            return .light
+        @unknown default:
+            return .light
+        }
+    }
+}
+
+private final class ReorderDragLifecycleMonitor: NSObject, ObservableObject {
+    private var localEventMonitor: Any?
+    private var globalEventMonitor: Any?
+    private var onEnd: (() -> Void)?
+    private var shouldFinishOnLocalMouseUp: (() -> Bool)?
+
+    func begin(
+        onEnd: @escaping () -> Void,
+        shouldFinishOnLocalMouseUp: @escaping () -> Bool = { true }
+    ) {
+        finish()
+        self.onEnd = onEnd
+        self.shouldFinishOnLocalMouseUp = shouldFinishOnLocalMouseUp
+
+        let mouseUpEvents: NSEvent.EventTypeMask = [.leftMouseUp, .rightMouseUp, .otherMouseUp]
+        let localEvents: NSEvent.EventTypeMask = [mouseUpEvents, .keyDown]
+
+        localEventMonitor = NSEvent.addLocalMonitorForEvents(matching: localEvents) { [weak self] event in
+            if Self.shouldEndDrag(after: event, shouldFinishOnLocalMouseUp: self?.shouldFinishOnLocalMouseUp) {
+                Self.requestFinish(for: self)
+            }
+            return event
+        }
+        globalEventMonitor = NSEvent.addGlobalMonitorForEvents(matching: mouseUpEvents) { [weak self] _ in
+            Self.requestFinish(for: self)
+        }
+    }
+
+    func finish() {
+        removeEventMonitors()
+        let endHandler = onEnd
+        onEnd = nil
+        shouldFinishOnLocalMouseUp = nil
+        endHandler?()
+    }
+
+    @objc private func finishAfterCurrentEvent() {
+        finish()
+    }
+
+    deinit {
+        if let localEventMonitor {
+            NSEvent.removeMonitor(localEventMonitor)
+        }
+        if let globalEventMonitor {
+            NSEvent.removeMonitor(globalEventMonitor)
+        }
+    }
+
+    private func removeEventMonitors() {
+        if let localEventMonitor {
+            NSEvent.removeMonitor(localEventMonitor)
+            self.localEventMonitor = nil
+        }
+        if let globalEventMonitor {
+            NSEvent.removeMonitor(globalEventMonitor)
+            self.globalEventMonitor = nil
+        }
+    }
+
+    nonisolated private static func shouldEndDrag(
+        after event: NSEvent,
+        shouldFinishOnLocalMouseUp: (() -> Bool)?
+    ) -> Bool {
+        switch event.type {
+        case .leftMouseUp, .rightMouseUp, .otherMouseUp:
+            return shouldFinishOnLocalMouseUp?() ?? true
+        case .keyDown:
+            return event.charactersIgnoringModifiers == "\u{1B}"
+        default:
+            return false
+        }
+    }
+
+    nonisolated private static func requestFinish(for monitor: ReorderDragLifecycleMonitor?) {
+        monitor?.performSelector(
+            onMainThread: #selector(finishAfterCurrentEvent),
+            with: nil,
+            waitUntilDone: false
+        )
+    }
+}
+
+private final class MainThreadUUIDDelivery: NSObject, @unchecked Sendable {
+    private let completion: (UUID?) -> Void
+    private var value: UUID?
+
+    init(completion: @escaping (UUID?) -> Void) {
+        self.completion = completion
+    }
+
+    @objc func deliver() {
+        completion(value)
+    }
+
+    nonisolated func schedule(_ value: UUID?) {
+        self.value = value
+        self.performSelector(onMainThread: #selector(deliver), with: nil, waitUntilDone: false)
+    }
+}
+
 struct ContentView: View {
     let shellState: AppShellState
     let store: WorkspaceStore
@@ -42,6 +157,7 @@ struct ContentView: View {
     let terminalHostController: TerminalHostController
     let fileAccessService: any WorkspaceFileAccessing
     let fileBufferController: any WorkspaceFileBufferManaging
+    @Environment(\.colorScheme) private var runtimeColorScheme
     @State private var didRequestRestore = false
     @State private var isRestoring = true
     @State private var restoreResult: RestoreWorkspaceResult?
@@ -134,12 +250,12 @@ struct ContentView: View {
         }
         .frame(minWidth: 1_040, minHeight: 680)
         .background(theme.shellBackground.color)
-        .preferredColorScheme(activeTheme.colorScheme.swiftUIColorScheme)
+        .preferredColorScheme(runtimeAppearance.forcedColorScheme?.swiftUIColorScheme)
         .tint(theme.accent.color)
         .environment(\.shellThemePalette, theme)
         .environment(\.shellUIFontSize, store.appPreferences.terminalFontSize)
         .onAppear(perform: applyActiveTheme)
-        .onChange(of: activeTheme) { _, _ in applyActiveTheme() }
+        .onChange(of: runtimeAppearance) { _, _ in applyActiveTheme() }
         .task {
             guard !didRequestRestore else { return }
             didRequestRestore = true
@@ -188,8 +304,12 @@ struct ContentView: View {
         }
     }
 
+    private var runtimeAppearance: AppRuntimeAppearance {
+        store.runtimeAppearance(systemScheme: runtimeColorScheme.themeColorScheme)
+    }
+
     private var activeTheme: AppTheme {
-        store.activeTheme
+        runtimeAppearance.effectiveTheme
     }
 
     private var theme: ShellThemePalette {
@@ -621,6 +741,9 @@ struct ProjectSidebarView: View {
     @State private var renameDraft: SessionRenameDraft?
     @State private var expandedProjectIDs: Set<UUID> = []
     @State private var hoveredSessionID: UUID?
+    @State private var draggedProjectID: UUID?
+    @State private var activeProjectInsertion: ProjectOrderInsertion?
+    @StateObject private var projectDragLifecycle = ReorderDragLifecycleMonitor()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -643,6 +766,7 @@ struct ProjectSidebarView: View {
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 10) {
+                        let projectIDs = store.projects.map(\.id)
                         ForEach(store.projects) { project in
                             let projectSessions = sessions(for: project.id)
                             let isExpanded = expandedProjectIDs.contains(project.id)
@@ -659,6 +783,9 @@ struct ProjectSidebarView: View {
                                     }
                                 ) {
                                     pendingRemoval = project
+                                }
+                                .onDrag {
+                                    beginDraggingProject(project.id)
                                 }
 
                                 if isExpanded {
@@ -713,6 +840,23 @@ struct ProjectSidebarView: View {
                                 RoundedRectangle(cornerRadius: 18)
                                     .stroke(project.id == store.selectedProjectID ? theme.activeBorder.color.opacity(0.85) : theme.border.color.opacity(0.65), lineWidth: 1)
                             }
+                            .modifier(ProjectSidebarDropTargetModifier(
+                                targetProjectID: project.id,
+                                currentProjectIDs: projectIDs,
+                                draggedProjectID: $draggedProjectID,
+                                activeInsertion: $activeProjectInsertion,
+                                onDragEnded: endDraggingProject,
+                                onCommit: submitProjectReorder
+                            ))
+                            .overlay(alignment: .top) {
+                                projectInsertionIndicator(for: project.id, edge: .before)
+                            }
+                            .overlay(alignment: .bottom) {
+                                projectInsertionIndicator(for: project.id, edge: .after)
+                            }
+                            .opacity(draggedProjectID == project.id ? 0.62 : 1)
+                            .animation(.easeInOut(duration: 0.12), value: draggedProjectID)
+                            .animation(.easeInOut(duration: 0.12), value: activeProjectInsertion)
                         }
                     }
                     .padding(.horizontal, 16)
@@ -758,6 +902,7 @@ struct ProjectSidebarView: View {
             guard let selectedSessionID = store.selectedSessionID else { return }
             removeSession(selectedSessionID)
         }
+        .onDisappear(perform: endDraggingProject)
     }
 
     private var removalDialogBinding: Binding<Bool> {
@@ -867,6 +1012,216 @@ struct ProjectSidebarView: View {
             expandedProjectIDs.insert(id)
         }
         selectProject(id)
+    }
+
+    private func beginDraggingProject(_ id: UUID) -> NSItemProvider {
+        let activeInsertion = $activeProjectInsertion
+        projectDragLifecycle.begin(
+            onEnd: clearProjectDragState,
+            shouldFinishOnLocalMouseUp: { activeInsertion.wrappedValue == nil }
+        )
+        draggedProjectID = id
+        activeProjectInsertion = nil
+        return ProjectSidebarDrag.itemProvider(for: id)
+    }
+
+    private func endDraggingProject() {
+        projectDragLifecycle.finish()
+        clearProjectDragState()
+    }
+
+    private func clearProjectDragState() {
+        draggedProjectID = nil
+        activeProjectInsertion = nil
+    }
+
+    private func submitProjectReorder(moving movedProjectID: UUID, to insertion: ProjectOrderInsertion) {
+        guard let orderedProjectIDs = ProjectReorderPayload.orderedProjectIDs(
+            moving: movedProjectID,
+            to: insertion,
+            in: store.projects.map(\.id)
+        ) else {
+            return
+        }
+
+        Task {
+            do {
+                try await commandService.reorderProjects(orderedProjectIDs)
+            } catch {
+                userMessage = UserMessage(title: "Project order could not be saved", detail: String(describing: error))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func projectInsertionIndicator(for projectID: UUID, edge: ProjectOrderInsertionEdge) -> some View {
+        if activeProjectInsertion == ProjectOrderInsertion(targetProjectID: projectID, edge: edge) {
+            ProjectInsertionIndicator(edge: edge)
+        }
+    }
+}
+
+private struct ProjectSidebarDropTargetModifier: ViewModifier {
+    let targetProjectID: UUID
+    let currentProjectIDs: [UUID]
+    @Binding var draggedProjectID: UUID?
+    @Binding var activeInsertion: ProjectOrderInsertion?
+    let onDragEnded: () -> Void
+    let onCommit: (UUID, ProjectOrderInsertion) -> Void
+    @State private var targetHeight: CGFloat = 1
+
+    func body(content: Content) -> some View {
+        content
+            .background {
+                GeometryReader { proxy in
+                    Color.clear.preference(
+                        key: ProjectDropTargetHeightPreferenceKey.self,
+                        value: max(proxy.size.height, 1)
+                    )
+                }
+            }
+            .onPreferenceChange(ProjectDropTargetHeightPreferenceKey.self) { height in
+                targetHeight = max(height, 1)
+            }
+            .onDrop(
+                of: [.text],
+                delegate: ProjectSidebarDropDelegate(
+                    targetProjectID: targetProjectID,
+                    targetHeight: targetHeight,
+                    currentProjectIDs: currentProjectIDs,
+                    draggedProjectID: $draggedProjectID,
+                    activeInsertion: $activeInsertion,
+                    onDragEnded: onDragEnded,
+                    onCommit: onCommit
+                )
+            )
+    }
+}
+
+private enum ProjectSidebarDrag {
+    static func itemProvider(for projectID: UUID) -> NSItemProvider {
+        NSItemProvider(object: projectID.uuidString as NSString)
+    }
+
+    static func loadProjectID(from info: DropInfo, completion: @escaping (UUID?) -> Void) -> Bool {
+        guard let provider = info.itemProviders(for: [UTType.text.identifier]).first else {
+            return false
+        }
+
+        let delivery = MainThreadUUIDDelivery(completion: completion)
+        provider.loadObject(ofClass: NSString.self) { object, _ in
+            let projectID = (object as? NSString)
+                .map(String.init)
+                .flatMap(UUID.init(uuidString:))
+
+            delivery.schedule(projectID)
+        }
+
+        return true
+    }
+}
+
+private struct ProjectDropTargetHeightPreferenceKey: PreferenceKey {
+    static let defaultValue: CGFloat = 1
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+private struct ProjectSidebarDropDelegate: DropDelegate {
+    let targetProjectID: UUID
+    let targetHeight: CGFloat
+    let currentProjectIDs: [UUID]
+    @Binding var draggedProjectID: UUID?
+    @Binding var activeInsertion: ProjectOrderInsertion?
+    let onDragEnded: () -> Void
+    let onCommit: (UUID, ProjectOrderInsertion) -> Void
+
+    func validateDrop(info: DropInfo) -> Bool {
+        proposedInsertion(for: info) != nil
+    }
+
+    func dropEntered(info: DropInfo) {
+        updateActiveInsertion(for: info)
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        guard updateActiveInsertion(for: info) else {
+            return DropProposal(operation: .cancel)
+        }
+        return DropProposal(operation: .move)
+    }
+
+    func dropExited(info: DropInfo) {
+        if activeInsertion?.targetProjectID == targetProjectID {
+            activeInsertion = nil
+        }
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        let didCommitDrop: Bool
+        defer {
+            onDragEnded()
+        }
+
+        guard let insertion = proposedInsertion(for: info) else {
+            return false
+        }
+
+        didCommitDrop = ProjectSidebarDrag.loadProjectID(from: info) { movedProjectID in
+            guard let movedProjectID else { return }
+            onCommit(movedProjectID, insertion)
+        }
+
+        return didCommitDrop
+    }
+
+    @discardableResult
+    private func updateActiveInsertion(for info: DropInfo) -> Bool {
+        guard let insertion = proposedInsertion(for: info) else {
+            if activeInsertion?.targetProjectID == targetProjectID {
+                activeInsertion = nil
+            }
+            return false
+        }
+
+        activeInsertion = insertion
+        return true
+    }
+
+    private func proposedInsertion(for info: DropInfo) -> ProjectOrderInsertion? {
+        guard let draggedProjectID,
+              draggedProjectID != targetProjectID,
+              currentProjectIDs.contains(draggedProjectID),
+              currentProjectIDs.contains(targetProjectID)
+        else {
+            return nil
+        }
+
+        let edge: ProjectOrderInsertionEdge = info.location.y < targetHeight / 2 ? .before : .after
+        return ProjectOrderInsertion(targetProjectID: targetProjectID, edge: edge)
+    }
+}
+
+private struct ProjectInsertionIndicator: View {
+    let edge: ProjectOrderInsertionEdge
+    @Environment(\.shellThemePalette) private var theme
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Circle()
+                .fill(theme.accent.color)
+                .frame(width: 7, height: 7)
+            Rectangle()
+                .fill(theme.accent.color)
+                .frame(height: 2)
+        }
+        .shadow(color: theme.accent.color.opacity(0.32), radius: 3, y: 1)
+        .padding(.horizontal, 8)
+        .offset(y: edge == .before ? -6 : 6)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
 
@@ -1948,26 +2303,53 @@ struct TabChromeView: View {
     @State private var dirtyRefreshToken = 0
     @State private var pendingCloseConfirmation: TabCloseConfirmation?
     @State private var renameDraft: TabRenameDraft?
+    @State private var draggedTabID: UUID?
+    @State private var activeTabInsertion: TabOrderInsertion?
+    @StateObject private var tabDragLifecycle = ReorderDragLifecycleMonitor()
 
     var body: some View {
         let _ = dirtyRefreshToken
+        let visibleTabs = store.tabsForSelectedSession
+        let visibleTabIDs = visibleTabs.map(\.id)
         ScrollView(.horizontal) {
             HStack(spacing: 1) {
-                if store.tabsForSelectedSession.isEmpty {
+                if visibleTabs.isEmpty {
                     Text(store.selectedSessionID == nil ? "Select a session to see tabs" : "No tabs in this session yet")
                         .font(.callout)
                         .foregroundStyle(theme.mutedText.color)
                 } else {
-                    ForEach(store.tabsForSelectedSession) { tab in
-                        TabItemView(
-                            tab: tab,
-                            legacySessionShortcutID: store.selectedSession?.shortcutID,
-                            isActive: tab.id == store.selectedTabID,
-                            isDirty: tab.kind == .file && fileBufferController.isDirty(tabID: tab.id),
-                            onSelect: { selectTab(tab.id) },
-                            onRename: { renameDraft = TabRenameDraft(tab: tab) },
-                            onClose: { closeTab(tab.id) }
-                        )
+                    ForEach(visibleTabs) { tab in
+                        ZStack {
+                            TabItemView(
+                                tab: tab,
+                                legacySessionShortcutID: store.selectedSession?.shortcutID,
+                                isActive: tab.id == store.selectedTabID,
+                                isDirty: tab.kind == .file && fileBufferController.isDirty(tabID: tab.id),
+                                isReordering: draggedTabID != nil,
+                                onSelect: { selectTab(tab.id) },
+                                onDragStarted: { beginDraggingTab(tab.id) },
+                                onRename: { renameDraft = TabRenameDraft(tab: tab) },
+                                onClose: { closeTab(tab.id) }
+                            )
+                        }
+                        .contentShape(Rectangle())
+                        .modifier(TabChromeDropTargetModifier(
+                            targetTabID: tab.id,
+                            currentTabIDs: visibleTabIDs,
+                            draggedTabID: $draggedTabID,
+                            activeInsertion: $activeTabInsertion,
+                            onDragEnded: endDraggingTab,
+                            onCommit: submitTabReorder
+                        ))
+                        .overlay(alignment: .leading) {
+                            tabInsertionIndicator(for: tab.id, edge: .before)
+                        }
+                        .overlay(alignment: .trailing) {
+                            tabInsertionIndicator(for: tab.id, edge: .after)
+                        }
+                        .opacity(draggedTabID == tab.id ? 0.62 : 1)
+                        .animation(.easeInOut(duration: 0.12), value: draggedTabID)
+                        .animation(.easeInOut(duration: 0.12), value: activeTabInsertion)
                     }
                 }
 
@@ -2023,6 +2405,15 @@ struct TabChromeView: View {
             guard let selectedTab = store.selectedTab else { return }
             renameDraft = TabRenameDraft(tab: selectedTab)
         }
+        .onChange(of: visibleTabIDs) { _, updatedTabIDs in
+            if let draggedTabID, !updatedTabIDs.contains(draggedTabID) {
+                endDraggingTab()
+            }
+            if let activeTabInsertion, !updatedTabIDs.contains(activeTabInsertion.targetTabID) {
+                self.activeTabInsertion = nil
+            }
+        }
+        .onDisappear(perform: endDraggingTab)
         .sheet(item: $renameDraft) { draft in
             TabRenameView(draft: draft) { tabID, title in
                 Task {
@@ -2110,6 +2501,57 @@ struct TabChromeView: View {
         closeTab(selectedTabID)
     }
 
+    private func beginDraggingTab(_ id: UUID) -> NSItemProvider {
+        let activeInsertion = $activeTabInsertion
+        tabDragLifecycle.begin(
+            onEnd: clearTabDragState,
+            shouldFinishOnLocalMouseUp: { activeInsertion.wrappedValue == nil }
+        )
+        draggedTabID = id
+        activeTabInsertion = nil
+        return TabChromeDrag.itemProvider(for: id)
+    }
+
+    private func endDraggingTab() {
+        tabDragLifecycle.finish()
+        clearTabDragState()
+    }
+
+    private func clearTabDragState() {
+        draggedTabID = nil
+        activeTabInsertion = nil
+    }
+
+    private func submitTabReorder(moving movedTabID: UUID, to insertion: TabOrderInsertion) {
+        guard let selectedSessionID = store.selectedSessionID,
+              let orderedVisibleTabIDs = TabReorderPayload.orderedVisibleTabIDs(
+                moving: movedTabID,
+                to: insertion,
+                in: store.tabsForSelectedSession.map(\.id)
+              )
+        else {
+            return
+        }
+
+        Task {
+            do {
+                try await commandService.reorderTabs(
+                    sessionID: selectedSessionID,
+                    orderedVisibleTabIDs: orderedVisibleTabIDs
+                )
+            } catch {
+                userMessage = UserMessage(title: "Tab order could not be saved", detail: String(describing: error))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func tabInsertionIndicator(for tabID: UUID, edge: TabOrderInsertionEdge) -> some View {
+        if activeTabInsertion == TabOrderInsertion(targetTabID: tabID, edge: edge) {
+            TabInsertionIndicator(edge: edge)
+        }
+    }
+
     private var closeConfirmationPresented: Binding<Bool> {
         Binding(
             get: { pendingCloseConfirmation != nil },
@@ -2119,6 +2561,169 @@ struct TabChromeView: View {
                 }
             }
         )
+    }
+}
+
+private struct TabChromeDropTargetModifier: ViewModifier {
+    let targetTabID: UUID
+    let currentTabIDs: [UUID]
+    @Binding var draggedTabID: UUID?
+    @Binding var activeInsertion: TabOrderInsertion?
+    let onDragEnded: () -> Void
+    let onCommit: (UUID, TabOrderInsertion) -> Void
+    @State private var targetWidth: CGFloat = 1
+
+    func body(content: Content) -> some View {
+        content
+            .background {
+                GeometryReader { proxy in
+                    Color.clear.preference(
+                        key: TabDropTargetWidthPreferenceKey.self,
+                        value: max(proxy.size.width, 1)
+                    )
+                }
+            }
+            .onPreferenceChange(TabDropTargetWidthPreferenceKey.self) { width in
+                targetWidth = max(width, 1)
+            }
+            .onDrop(
+                of: [.text],
+                delegate: TabChromeDropDelegate(
+                    targetTabID: targetTabID,
+                    targetWidth: targetWidth,
+                    currentTabIDs: currentTabIDs,
+                    draggedTabID: $draggedTabID,
+                    activeInsertion: $activeInsertion,
+                    onDragEnded: onDragEnded,
+                    onCommit: onCommit
+                )
+            )
+    }
+}
+
+private enum TabChromeDrag {
+    static func itemProvider(for tabID: UUID) -> NSItemProvider {
+        NSItemProvider(object: tabID.uuidString as NSString)
+    }
+
+    static func loadTabID(from info: DropInfo, completion: @escaping (UUID?) -> Void) -> Bool {
+        guard let provider = info.itemProviders(for: [UTType.text.identifier]).first else {
+            return false
+        }
+
+        let delivery = MainThreadUUIDDelivery(completion: completion)
+        provider.loadObject(ofClass: NSString.self) { object, _ in
+            let tabID = (object as? NSString)
+                .map(String.init)
+                .flatMap(UUID.init(uuidString:))
+
+            delivery.schedule(tabID)
+        }
+
+        return true
+    }
+}
+
+private struct TabDropTargetWidthPreferenceKey: PreferenceKey {
+    static let defaultValue: CGFloat = 1
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+private struct TabChromeDropDelegate: DropDelegate {
+    let targetTabID: UUID
+    let targetWidth: CGFloat
+    let currentTabIDs: [UUID]
+    @Binding var draggedTabID: UUID?
+    @Binding var activeInsertion: TabOrderInsertion?
+    let onDragEnded: () -> Void
+    let onCommit: (UUID, TabOrderInsertion) -> Void
+
+    func validateDrop(info: DropInfo) -> Bool {
+        proposedInsertion(for: info) != nil
+    }
+
+    func dropEntered(info: DropInfo) {
+        updateActiveInsertion(for: info)
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        guard updateActiveInsertion(for: info) else {
+            return DropProposal(operation: .cancel)
+        }
+        return DropProposal(operation: .move)
+    }
+
+    func dropExited(info: DropInfo) {
+        if activeInsertion?.targetTabID == targetTabID {
+            activeInsertion = nil
+        }
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        let didCommitDrop: Bool
+        defer {
+            onDragEnded()
+        }
+
+        guard let insertion = proposedInsertion(for: info) else {
+            return false
+        }
+
+        didCommitDrop = TabChromeDrag.loadTabID(from: info) { movedTabID in
+            guard let movedTabID else { return }
+            onCommit(movedTabID, insertion)
+        }
+
+        return didCommitDrop
+    }
+
+    @discardableResult
+    private func updateActiveInsertion(for info: DropInfo) -> Bool {
+        guard let insertion = proposedInsertion(for: info) else {
+            if activeInsertion?.targetTabID == targetTabID {
+                activeInsertion = nil
+            }
+            return false
+        }
+
+        activeInsertion = insertion
+        return true
+    }
+
+    private func proposedInsertion(for info: DropInfo) -> TabOrderInsertion? {
+        guard let draggedTabID,
+              draggedTabID != targetTabID,
+              currentTabIDs.contains(draggedTabID),
+              currentTabIDs.contains(targetTabID)
+        else {
+            return nil
+        }
+
+        let edge: TabOrderInsertionEdge = info.location.x < targetWidth / 2 ? .before : .after
+        return TabOrderInsertion(targetTabID: targetTabID, edge: edge)
+    }
+}
+
+private struct TabInsertionIndicator: View {
+    let edge: TabOrderInsertionEdge
+    @Environment(\.shellThemePalette) private var theme
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Circle()
+                .fill(theme.accent.color)
+                .frame(width: 7, height: 7)
+            Rectangle()
+                .fill(theme.accent.color)
+                .frame(width: 2, height: 30)
+        }
+        .shadow(color: theme.accent.color.opacity(0.32), radius: 3, y: 1)
+        .offset(x: edge == .before ? -5 : 5)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
 
@@ -2135,7 +2740,9 @@ struct TabItemView: View {
     let legacySessionShortcutID: UUID?
     let isActive: Bool
     let isDirty: Bool
+    let isReordering: Bool
     let onSelect: () -> Void
+    let onDragStarted: () -> NSItemProvider
     let onRename: () -> Void
     let onClose: () -> Void
     @Environment(\.shellThemePalette) private var theme
@@ -2143,26 +2750,27 @@ struct TabItemView: View {
 
     var body: some View {
         ZStack(alignment: .trailing) {
-            Button(action: onSelect) {
-                HStack(spacing: 8) {
-                    tabIcon
-                    Text(title)
-                        .lineLimit(1)
-                    if isDirty {
-                        Circle()
-                            .fill(theme.warning.color)
-                            .frame(width: 6, height: 6)
-                            .accessibilityLabel("Unsaved changes")
-                    }
-                    Spacer(minLength: 0)
+            HStack(spacing: 8) {
+                tabIcon
+                Text(title)
+                    .lineLimit(1)
+                if isDirty {
+                    Circle()
+                        .fill(theme.warning.color)
+                        .frame(width: 6, height: 6)
+                        .accessibilityLabel("Unsaved changes")
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
+                Spacer(minLength: 0)
             }
-            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
             .foregroundStyle(isActive ? theme.primaryText.color : theme.secondaryText.color)
+            .onTapGesture(perform: onSelect)
+            .onDrag {
+                onDragStarted()
+            }
 
-            if isActive || isHovered {
+            if !isReordering && (isActive || isHovered) {
                 Button("Close tab", systemImage: "xmark", action: onClose)
                     .labelStyle(.iconOnly)
                     .buttonStyle(.borderless)
@@ -2557,7 +3165,12 @@ struct FileEditorHostView: View {
     }
 
     private var codeEditorTheme: Theme {
-        colorScheme == .dark ? Theme.defaultDark : Theme.defaultLight
+        switch colorScheme.themeColorScheme.editorSyntaxThemeKind {
+        case .dark:
+            return Theme.defaultDark
+        case .light:
+            return Theme.defaultLight
+        }
     }
 
     private func loadBuffer() async {

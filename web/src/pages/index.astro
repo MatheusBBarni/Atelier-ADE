@@ -1,0 +1,742 @@
+---
+import appScreenshot from "../assets/atelier-app-screenshot.png";
+import logo from "../assets/atelier-logo.png";
+import RepoStarCTA from "../components/RepoStarCTA.astro";
+import { getAstroSiteConfig } from "../config/siteConfig.mjs";
+import {
+  getLandingPageAssetUrl,
+  getOrderedCtas,
+  getPrimaryCta,
+  getSecondaryEvaluationLinks,
+  landingPageAssets,
+  siteContent,
+  withSiteBase
+} from "../siteContent";
+
+const { base } = getAstroSiteConfig();
+const faviconUrl = getLandingPageAssetUrl("favicon", base);
+const manifestUrl = getLandingPageAssetUrl("manifest", base);
+const homeUrl = withSiteBase("/", base);
+const orderedCtas = getOrderedCtas();
+const primaryCta = getPrimaryCta();
+const secondaryCtas = getSecondaryEvaluationLinks();
+const pageTitle = `${siteContent.productName} | Native macOS agent workspace`;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content={siteContent.metaDescription} />
+    <meta name="generator" content={Astro.generator} />
+    <meta name="application-name" content={siteContent.productName} />
+    <meta name="theme-color" content="#1e2620" />
+    <link rel="icon" type="image/png" href={faviconUrl} />
+    <link rel="manifest" href={manifestUrl} />
+    <title>{pageTitle}</title>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <header class="site-header" aria-label="Site navigation">
+      <a class="brand" href={homeUrl} aria-label={`${siteContent.productName} home`}>
+        <img src={logo.src} width="36" height="36" alt="" aria-hidden="true" />
+        <span>{siteContent.productName}</span>
+      </a>
+      <nav aria-label="Landing page sections">
+        <a href="#proof">Proof</a>
+        <a href="#capabilities">Capabilities</a>
+        <a href="#evaluate">Evaluate</a>
+      </nav>
+    </header>
+
+    <main id="main">
+      <section class="hero" aria-labelledby="hero-title" style={`--hero-image: url(${appScreenshot.src});`}>
+        <div class="hero-backdrop" aria-hidden="true"></div>
+        <div class="hero-inner">
+          <p class="eyebrow">{siteContent.hero.eyebrow}</p>
+          <h1 id="hero-title">{siteContent.hero.title}</h1>
+          <p class="hero-summary">{siteContent.hero.summary}</p>
+
+          <ul class="hero-bullets" aria-label="Atelier principles">
+            {siteContent.hero.bullets.map((bullet) => <li>{bullet}</li>)}
+          </ul>
+
+          <div class="hero-actions" aria-label="Primary evaluation paths">
+            {primaryCta && <RepoStarCTA cta={primaryCta} />}
+            <div class="secondary-actions">
+              {
+                secondaryCtas.map((link) => (
+                  <a class="button button-secondary" href={link.href} aria-label={link.ariaLabel}>
+                    {link.label}
+                  </a>
+                ))
+              }
+            </div>
+          </div>
+
+          <p class="status-note">{siteContent.statusNote}</p>
+        </div>
+      </section>
+
+      <section class="proof-section" id="proof" aria-labelledby="proof-title">
+        <div class="section-inner proof-grid">
+          <div class="proof-copy">
+            <p class="eyebrow">{siteContent.proof.eyebrow}</p>
+            <h2 id="proof-title">{siteContent.proof.title}</h2>
+            <p>{siteContent.proof.description}</p>
+          </div>
+          <figure class="product-proof">
+            <img
+              src={appScreenshot.src}
+              width={appScreenshot.width}
+              height={appScreenshot.height}
+              alt={landingPageAssets.screenshot.alt}
+              loading="eager"
+              decoding="async"
+            />
+            <figcaption>{siteContent.proof.caption}</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section class="trust-section" aria-labelledby="trust-title">
+        <div class="section-inner">
+          <div class="section-heading">
+            <p class="eyebrow">Trust posture</p>
+            <h2 id="trust-title">Built for direct inspection.</h2>
+          </div>
+          <div class="trust-list">
+            {
+              siteContent.trustNotes.map((note) => (
+                <article class="trust-note">
+                  <h3>{note.title}</h3>
+                  <p>{note.description}</p>
+                </article>
+              ))
+            }
+          </div>
+        </div>
+      </section>
+
+      <section class="capabilities-section" id="capabilities" aria-labelledby="capabilities-title">
+        <div class="section-inner">
+          <div class="section-heading compact">
+            <p class="eyebrow">What it does today</p>
+            <h2 id="capabilities-title">Concrete workflow support, not broad promises.</h2>
+          </div>
+          <div class="capability-grid">
+            {
+              siteContent.capabilities.map((capability) => (
+                <article class={`capability-card priority-${capability.priority}`}>
+                  <span class="priority-label">{capability.priority}</span>
+                  <h3>{capability.title}</h3>
+                  <p>{capability.description}</p>
+                </article>
+              ))
+            }
+          </div>
+        </div>
+      </section>
+
+      <section class="evaluation-section" id="evaluate" aria-labelledby="evaluate-title">
+        <div class="section-inner evaluation-grid">
+          <div>
+            <p class="eyebrow">Next step</p>
+            <h2 id="evaluate-title">Evaluate the project where the facts are visible.</h2>
+          </div>
+          <div class="evaluation-links" aria-label="Ordered evaluation links">
+            {
+              orderedCtas.map((link) => (
+                <a
+                  class={`evaluation-link evaluation-link-${link.priority}`}
+                  href={link.href}
+                  aria-label={link.ariaLabel}
+                  data-cta-kind={link.kind}
+                >
+                  <span>{link.label}</span>
+                  <small>{link.description}</small>
+                </a>
+              ))
+            }
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <p>{siteContent.productName} is an early macOS project with public source for inspection.</p>
+      <a href={siteContent.repoUrl}>Source on GitHub</a>
+    </footer>
+  </body>
+</html>
+
+<style>
+  :global(:root) {
+    color-scheme: light;
+    --ink: #171916;
+    --deep: #1e2620;
+    --paper: #f7f8f3;
+    --surface: #fffef9;
+    --line: rgb(23 25 22 / 14%);
+    --muted: #5d625a;
+    --moss: #516b52;
+    --rust: #a4553f;
+    --blue: #335d7a;
+    --gold: #b7802f;
+    --shadow: 0 1.5rem 4rem rgb(23 25 22 / 14%);
+    font-family:
+      "Avenir Next", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+      sans-serif;
+  }
+
+  :global(html) {
+    background: var(--paper);
+    color: var(--ink);
+    scroll-behavior: smooth;
+  }
+
+  :global(body) {
+    min-height: 100vh;
+    margin: 0;
+  }
+
+  :global(*) {
+    box-sizing: border-box;
+  }
+
+  :global(a) {
+    color: inherit;
+  }
+
+  .skip-link {
+    position: fixed;
+    top: 0.75rem;
+    left: 0.75rem;
+    z-index: 20;
+    transform: translateY(-160%);
+    background: var(--deep);
+    color: white;
+    padding: 0.75rem 1rem;
+    border-radius: 0.25rem;
+  }
+
+  .skip-link:focus {
+    transform: translateY(0);
+  }
+
+  .site-header {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1.5rem;
+    min-height: 4.75rem;
+    padding: 0.875rem max(1.25rem, calc((100vw - 72rem) / 2));
+    border-bottom: 1px solid var(--line);
+    background: rgb(247 248 243 / 88%);
+    backdrop-filter: blur(18px);
+  }
+
+  .brand,
+  .site-header nav,
+  .hero-actions,
+  .secondary-actions {
+    display: flex;
+    align-items: center;
+  }
+
+  .brand {
+    gap: 0.75rem;
+    text-decoration: none;
+    font-weight: 700;
+  }
+
+  .brand img {
+    display: block;
+    border-radius: 0.5rem;
+  }
+
+  .site-header nav {
+    gap: 1rem;
+    color: var(--muted);
+    font-size: 0.95rem;
+  }
+
+  .site-header nav a {
+    min-height: 2.75rem;
+    display: inline-flex;
+    align-items: center;
+    text-decoration: none;
+  }
+
+  .site-header nav a:hover {
+    color: var(--ink);
+  }
+
+  .hero {
+    position: relative;
+    min-height: 78svh;
+    display: grid;
+    align-items: center;
+    overflow: hidden;
+    border-bottom: 1px solid var(--line);
+    background:
+      linear-gradient(90deg, rgb(247 248 243 / 96%) 0%, rgb(247 248 243 / 82%) 48%, rgb(247 248 243 / 36%) 100%),
+      var(--hero-image) right 8% center / min(70rem, 92vw) auto no-repeat,
+      var(--paper);
+  }
+
+  .hero-backdrop {
+    position: absolute;
+    inset: auto 0 0;
+    height: 34%;
+    border-top: 1px solid var(--line);
+    background:
+      linear-gradient(90deg, rgb(81 107 82 / 12%), rgb(164 85 63 / 10%), rgb(51 93 122 / 12%)),
+      repeating-linear-gradient(
+        90deg,
+        rgb(23 25 22 / 6%) 0,
+        rgb(23 25 22 / 6%) 1px,
+        transparent 1px,
+        transparent 4rem
+      );
+  }
+
+  .hero-inner,
+  .section-inner {
+    width: min(72rem, calc(100% - 2.5rem));
+    margin: 0 auto;
+  }
+
+  .hero-inner {
+    position: relative;
+    z-index: 1;
+    padding: 5rem 0;
+  }
+
+  .eyebrow,
+  .priority-label {
+    margin: 0;
+    color: var(--rust);
+    font-size: 0.78rem;
+    font-weight: 800;
+    line-height: 1.2;
+    letter-spacing: 0;
+    text-transform: uppercase;
+  }
+
+  h1,
+  h2,
+  h3,
+  p {
+    margin-top: 0;
+  }
+
+  h1,
+  h2 {
+    font-family: "Iowan Old Style", "Palatino Linotype", Palatino, ui-serif, Georgia, serif;
+    font-weight: 700;
+    letter-spacing: 0;
+  }
+
+  h1 {
+    max-width: 13ch;
+    margin-bottom: 1.15rem;
+    font-size: 5rem;
+    line-height: 0.96;
+  }
+
+  h2 {
+    margin-bottom: 1rem;
+    font-size: 2.75rem;
+    line-height: 1.05;
+  }
+
+  h3 {
+    margin-bottom: 0.65rem;
+    font-size: 1.05rem;
+    line-height: 1.25;
+  }
+
+  .hero-summary {
+    max-width: 42rem;
+    margin-bottom: 1.5rem;
+    color: #343831;
+    font-size: 1.35rem;
+    line-height: 1.5;
+  }
+
+  .hero-bullets {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.75rem;
+    max-width: 54rem;
+    margin: 0 0 2rem;
+    padding: 0;
+    list-style: none;
+  }
+
+  .hero-bullets li {
+    min-height: 5.25rem;
+    display: flex;
+    align-items: flex-end;
+    padding: 1rem;
+    border-top: 3px solid var(--moss);
+    background: rgb(255 254 249 / 78%);
+    box-shadow: 0 0.75rem 2rem rgb(23 25 22 / 8%);
+    color: #2f342f;
+    font-weight: 650;
+  }
+
+  .hero-bullets li:nth-child(2) {
+    border-color: var(--blue);
+  }
+
+  .hero-bullets li:nth-child(3) {
+    border-color: var(--rust);
+  }
+
+  .hero-actions {
+    flex-wrap: wrap;
+    gap: 1rem;
+  }
+
+  .repo-cta-slot {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.85rem;
+  }
+
+  .repo-cta-slot p {
+    max-width: 25rem;
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.95rem;
+    line-height: 1.4;
+  }
+
+  .secondary-actions {
+    flex-wrap: wrap;
+    gap: 0.65rem;
+  }
+
+  .button,
+  .evaluation-link {
+    min-height: 3rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid transparent;
+    border-radius: 0.375rem;
+    text-decoration: none;
+    font-weight: 750;
+  }
+
+  .button {
+    padding: 0.85rem 1.1rem;
+  }
+
+  .button-primary {
+    background: var(--deep);
+    color: white;
+    box-shadow: 0 0.85rem 1.75rem rgb(30 38 32 / 18%);
+  }
+
+  .button-primary:hover {
+    background: #2b382f;
+  }
+
+  .button-secondary {
+    border-color: var(--line);
+    background: rgb(255 254 249 / 82%);
+    color: #283029;
+  }
+
+  .button-secondary:hover {
+    border-color: rgb(51 93 122 / 42%);
+    color: var(--blue);
+  }
+
+  .status-note {
+    margin: 1.35rem 0 0;
+    color: var(--muted);
+    font-weight: 700;
+  }
+
+  .proof-section,
+  .trust-section,
+  .capabilities-section,
+  .evaluation-section {
+    padding: 5.5rem 0;
+  }
+
+  .proof-section {
+    background: var(--surface);
+  }
+
+  .proof-grid,
+  .evaluation-grid {
+    display: grid;
+    grid-template-columns: 0.75fr 1.25fr;
+    gap: 3rem;
+    align-items: center;
+  }
+
+  .proof-copy p:not(.eyebrow),
+  .section-heading p,
+  .site-footer p {
+    color: var(--muted);
+    line-height: 1.7;
+  }
+
+  .product-proof {
+    margin: 0;
+  }
+
+  .product-proof img {
+    display: block;
+    width: 100%;
+    height: auto;
+    border: 1px solid var(--line);
+    border-radius: 0.5rem;
+    box-shadow: var(--shadow);
+  }
+
+  .product-proof figcaption {
+    margin-top: 0.9rem;
+    color: var(--muted);
+    font-size: 0.92rem;
+    line-height: 1.5;
+  }
+
+  .trust-section {
+    background: #ebf0e7;
+  }
+
+  .section-heading {
+    max-width: 42rem;
+    margin-bottom: 2rem;
+  }
+
+  .section-heading.compact {
+    max-width: 48rem;
+  }
+
+  .trust-list,
+  .capability-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1rem;
+  }
+
+  .trust-note,
+  .capability-card {
+    min-height: 11rem;
+    border: 1px solid var(--line);
+    border-radius: 0.5rem;
+    background: var(--surface);
+  }
+
+  .trust-note {
+    padding: 1.25rem;
+  }
+
+  .trust-note p,
+  .capability-card p,
+  .evaluation-link small {
+    margin: 0;
+    color: var(--muted);
+    line-height: 1.6;
+  }
+
+  .capabilities-section {
+    background: var(--paper);
+  }
+
+  .capability-grid {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
+  .capability-card {
+    display: grid;
+    align-content: start;
+    gap: 0.5rem;
+    padding: 1rem;
+  }
+
+  .priority-critical {
+    border-top: 4px solid var(--moss);
+  }
+
+  .priority-high {
+    border-top: 4px solid var(--blue);
+  }
+
+  .priority-medium {
+    border-top: 4px solid var(--gold);
+  }
+
+  .evaluation-section {
+    background: var(--deep);
+    color: white;
+  }
+
+  .evaluation-section .eyebrow {
+    color: #f2bd81;
+  }
+
+  .evaluation-section h2 {
+    margin-bottom: 0;
+  }
+
+  .evaluation-links {
+    display: grid;
+    gap: 0.8rem;
+  }
+
+  .evaluation-link {
+    min-height: 5.75rem;
+    display: grid;
+    justify-content: stretch;
+    gap: 0.35rem;
+    padding: 1rem 1.1rem;
+    border-color: rgb(255 255 255 / 18%);
+    background: rgb(255 255 255 / 8%);
+  }
+
+  .evaluation-link-primary {
+    background: #f6f1df;
+    color: var(--ink);
+  }
+
+  .evaluation-link-secondary:hover {
+    border-color: rgb(242 189 129 / 60%);
+  }
+
+  .evaluation-link small {
+    color: inherit;
+    opacity: 0.72;
+  }
+
+  .site-footer {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    width: min(72rem, calc(100% - 2.5rem));
+    margin: 0 auto;
+    padding: 2rem 0;
+    color: var(--muted);
+    font-size: 0.95rem;
+  }
+
+  .site-footer p {
+    margin: 0;
+  }
+
+  .site-footer a {
+    font-weight: 700;
+    color: var(--blue);
+  }
+
+  @media (max-width: 980px) {
+    .site-header {
+      position: static;
+    }
+
+    .hero {
+      min-height: auto;
+      background:
+        linear-gradient(180deg, rgb(247 248 243 / 98%) 0%, rgb(247 248 243 / 92%) 58%, rgb(247 248 243 / 72%) 100%),
+        var(--hero-image) center bottom 2rem / 58rem auto no-repeat,
+        var(--paper);
+    }
+
+    .hero-inner {
+      padding: 4rem 0 12rem;
+    }
+
+    h1 {
+      font-size: 4rem;
+    }
+
+    h2 {
+      font-size: 2.25rem;
+    }
+
+    .hero-bullets,
+    .trust-list,
+    .capability-grid,
+    .proof-grid,
+    .evaluation-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .hero-bullets li,
+    .trust-note,
+    .capability-card {
+      min-height: auto;
+    }
+  }
+
+  @media (max-width: 680px) {
+    .site-header {
+      align-items: flex-start;
+      flex-direction: column;
+      padding: 1rem 1.25rem;
+    }
+
+    .site-header nav {
+      width: 100%;
+      justify-content: space-between;
+      gap: 0.5rem;
+      font-size: 0.9rem;
+    }
+
+    .hero-inner,
+    .section-inner,
+    .site-footer {
+      width: min(100% - 1.5rem, 72rem);
+    }
+
+    .hero-inner {
+      padding-top: 3rem;
+    }
+
+    h1 {
+      font-size: 3rem;
+    }
+
+    h2 {
+      font-size: 1.95rem;
+    }
+
+    .hero-summary {
+      font-size: 1.08rem;
+    }
+
+    .hero-actions,
+    .repo-cta-slot,
+    .secondary-actions,
+    .button,
+    .site-footer {
+      align-items: stretch;
+      flex-direction: column;
+    }
+
+    .button {
+      width: 100%;
+    }
+
+    .proof-section,
+    .trust-section,
+    .capabilities-section,
+    .evaluation-section {
+      padding: 4rem 0;
+    }
+  }
+</style>

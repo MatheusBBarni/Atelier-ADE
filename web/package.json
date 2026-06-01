@@ -1,0 +1,32 @@
+{
+  "name": "atelier-landing-page",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "ASTRO_TELEMETRY_DISABLED=1 astro dev",
+    "build": "ASTRO_TELEMETRY_DISABLED=1 astro build",
+    "preview": "ASTRO_TELEMETRY_DISABLED=1 astro preview",
+    "test": "npm run test:unit && npm run test:integration",
+    "test:unit": "vitest run tests/unit --coverage",
+    "test:integration": "vitest run tests/integration",
+    "validate": "npm run build && npm run validate:built",
+    "validate:built": "npm run validate:links && npm run validate:no-js-cta && npm run validate:a11y",
+    "validate:links": "node ./scripts/validate-built-site.mjs --check links",
+    "validate:no-js-cta": "node ./scripts/validate-built-site.mjs --check no-js-cta",
+    "validate:a11y": "node ./scripts/validate-built-site.mjs --check a11y",
+    "validate:ci": "npm run test:unit && npm run test:integration && npm run build && npm run validate:built"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "dependencies": {
+    "astro": "^6.4.2"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^4.1.7",
+    "jsdom": "^29.1.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.7"
+  }
+}

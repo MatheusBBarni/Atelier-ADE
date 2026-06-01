@@ -1,0 +1,47 @@
+---
+import { createFallbackRepoCTAState } from "../repoStarCta";
+
+type RepoCTA = {
+  href: string;
+  label: string;
+  description: string;
+  ariaLabel: string;
+};
+
+type Props = {
+  cta: RepoCTA;
+};
+
+const { cta } = Astro.props;
+const fallbackState = createFallbackRepoCTAState({
+  href: cta.href,
+  label: cta.label
+});
+---
+
+<div
+  class="repo-cta-slot"
+  id="repo-star-cta"
+  data-repo-star-cta
+  data-repo-url={fallbackState.href}
+  data-fallback-label={fallbackState.label}
+  data-repo-cta-state="fallback"
+>
+  <a
+    class="button button-primary"
+    href={fallbackState.href}
+    aria-label={cta.ariaLabel}
+    data-repo-cta-link
+    data-repo-cta-fallback
+    data-repo-cta-state="fallback"
+  >
+    <span data-repo-cta-label>{fallbackState.label}</span>
+  </a>
+  <p id="repo-cta-note">{cta.description}</p>
+</div>
+
+<script>
+  import { enhanceRepoStarCTA } from "../repoStarCta";
+
+  enhanceRepoStarCTA();
+</script>

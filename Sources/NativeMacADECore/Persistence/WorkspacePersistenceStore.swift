@@ -1,5 +1,25 @@
 import Foundation
 
+public struct SessionTabReorderPlan: Equatable, Sendable {
+    public var sessionID: UUID
+    public var visibleTabIDs: [UUID]
+    public var hiddenPersistedTabIDs: [UUID]
+
+    public init(
+        sessionID: UUID,
+        visibleTabIDs: [UUID],
+        hiddenPersistedTabIDs: [UUID] = []
+    ) {
+        self.sessionID = sessionID
+        self.visibleTabIDs = visibleTabIDs
+        self.hiddenPersistedTabIDs = hiddenPersistedTabIDs
+    }
+
+    public var orderedTabIDs: [UUID] {
+        visibleTabIDs + hiddenPersistedTabIDs
+    }
+}
+
 public protocol WorkspacePersistenceStore: Sendable {
     func loadProjects() async throws -> [WorkspaceProject]
     func loadSessions() async throws -> [WorkspaceSession]
@@ -12,6 +32,8 @@ public protocol WorkspacePersistenceStore: Sendable {
     func save(session: WorkspaceSession) async throws
     func save(tab: WorkspaceTab) async throws
     func save(session: WorkspaceSession, firstTab: WorkspaceTab) async throws
+    func saveProjectOrder(_ orderedProjectIDs: [UUID]) async throws
+    func saveTabOrder(_ plan: SessionTabReorderPlan, snapshot: RestoreSnapshot) async throws
     func saveActivation(project: WorkspaceProject?, session: WorkspaceSession?, tab: WorkspaceTab?, snapshot: RestoreSnapshot) async throws
     func save(shortcut: SessionShortcut) async throws
     func save(appPreferences: AppPreferences) async throws
@@ -104,6 +126,44 @@ public actor InMemoryWorkspacePersistenceStore: WorkspacePersistenceStore {
         tabs.append(firstTab)
     }
 
+    public func saveProjectOrder(_ orderedProjectIDs: [UUID]) async throws {
+        try validateUniqueProjectIDs(orderedProjectIDs)
+        let existingProjectIDs = Set(projects.map(\.id))
+        guard Set(orderedProjectIDs) == existingProjectIDs else {
+            throw InMemoryWorkspacePersistenceStoreError.invalidProjectOrder
+        }
+
+        let ordinalsByID = Dictionary(uniqueKeysWithValues: orderedProjectIDs.enumerated().map { index, id in
+            (id, index)
+        })
+        for index in projects.indices {
+            guard let sortIndex = ordinalsByID[projects[index].id] else {
+                throw InMemoryWorkspacePersistenceStoreError.invalidProjectOrder
+            }
+            projects[index].sortIndex = sortIndex
+        }
+    }
+
+    public func saveTabOrder(_ plan: SessionTabReorderPlan, snapshot: RestoreSnapshot) async throws {
+        let orderedTabIDs = plan.orderedTabIDs
+        try validateUniqueTabIDs(orderedTabIDs)
+        let existingSessionTabIDs = Set(tabs.filter { $0.sessionID == plan.sessionID }.map(\.id))
+        guard Set(orderedTabIDs) == existingSessionTabIDs else {
+            throw InMemoryWorkspacePersistenceStoreError.invalidTabOrder
+        }
+
+        let ordinalsByID = Dictionary(uniqueKeysWithValues: orderedTabIDs.enumerated().map { index, id in
+            (id, index)
+        })
+        for index in tabs.indices where tabs[index].sessionID == plan.sessionID {
+            guard let ordinal = ordinalsByID[tabs[index].id] else {
+                throw InMemoryWorkspacePersistenceStoreError.invalidTabOrder
+            }
+            tabs[index].ordinal = ordinal
+        }
+        restoreSnapshot = snapshot
+    }
+
     public func saveActivation(
         project: WorkspaceProject?,
         session: WorkspaceSession?,
@@ -172,10 +232,28 @@ public actor InMemoryWorkspacePersistenceStore: WorkspacePersistenceStore {
             appPreferences.updatedAt = Date()
         }
     }
+
+    private func validateUniqueProjectIDs(_ ids: [UUID]) throws {
+        var seen: Set<UUID> = []
+        for id in ids where !seen.insert(id).inserted {
+            throw InMemoryWorkspacePersistenceStoreError.duplicateProjectID(id)
+        }
+    }
+
+    private func validateUniqueTabIDs(_ ids: [UUID]) throws {
+        var seen: Set<UUID> = []
+        for id in ids where !seen.insert(id).inserted {
+            throw InMemoryWorkspacePersistenceStoreError.duplicateTabID(id)
+        }
+    }
 }
 
 private enum InMemoryWorkspacePersistenceStoreError: Error, Equatable, Sendable {
     case missingProject(UUID)
     case missingSession(UUID)
     case missingTab(UUID)
+    case duplicateProjectID(UUID)
+    case duplicateTabID(UUID)
+    case invalidProjectOrder
+    case invalidTabOrder
 }

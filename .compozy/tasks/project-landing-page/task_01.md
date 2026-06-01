@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Scaffold Astro site foundation in `web/`"
 type: frontend
 complexity: high
@@ -28,11 +28,11 @@ This task creates the isolated Astro workspace that the landing page will live i
 </requirements>
 
 ## Subtasks
-- [ ] 1.1 Create the `web/` project root with Astro package metadata and build scripts.
-- [ ] 1.2 Add Astro and TypeScript configuration for a static GitHub Pages deployment path.
-- [ ] 1.3 Add a minimal landing-page route stub so the site builds before feature content lands.
-- [ ] 1.4 Update repository ignore rules for `web/node_modules`, `web/dist`, and `.astro` artifacts.
-- [ ] 1.5 Keep all web tooling separate from `Package.swift`, `scripts/run.sh`, and existing release automation.
+- [x] 1.1 Create the `web/` project root with Astro package metadata and build scripts.
+- [x] 1.2 Add Astro and TypeScript configuration for a static GitHub Pages deployment path.
+- [x] 1.3 Add a minimal landing-page route stub so the site builds before feature content lands.
+- [x] 1.4 Update repository ignore rules for `web/node_modules`, `web/dist`, and `.astro` artifacts.
+- [x] 1.5 Keep all web tooling separate from `Package.swift`, `scripts/run.sh`, and existing release automation.
 
 ## Implementation Details
 Create the new web surface described in TechSpec “System Architecture” and step 1 of “Development Sequencing”. Keep this task scoped to workspace setup only; do not absorb asset normalization, page content, or GitHub API behavior.
@@ -66,13 +66,13 @@ Create the new web surface described in TechSpec “System Architecture” and s
 
 ## Tests
 - Unit tests:
-  - [ ] Validate any extracted config helper derives the expected GitHub Pages `base` or site metadata value.
-  - [ ] Validate any shared script/config utility returns stable defaults for local and CI builds.
-  - [ ] Validate any helper added for workspace path or metadata handling preserves the `web/` boundary.
+  - [x] Validate any extracted config helper derives the expected GitHub Pages `base` or site metadata value.
+  - [x] Validate any shared script/config utility returns stable defaults for local and CI builds.
+  - [x] Validate any helper added for workspace path or metadata handling preserves the `web/` boundary.
 - Integration tests:
-  - [ ] `npm run build` (or equivalent) from `web/` succeeds with the scaffold only.
-  - [ ] The generated site contains a valid `index.html` route in build output.
-  - [ ] Swift workflows (`swift build` / existing release workflow structure) remain unaffected by the new web scaffold.
+  - [x] `npm run build` (or equivalent) from `web/` succeeds with the scaffold only.
+  - [x] The generated site contains a valid `index.html` route in build output.
+  - [x] Swift workflows (`swift build` / existing release workflow structure) remain unaffected by the new web scaffold.
 - Test coverage target: >=80%
 - All tests must pass
 

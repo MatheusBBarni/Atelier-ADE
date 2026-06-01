@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Prepare MVP site assets and fixed public metadata"
 type: frontend
 complexity: medium
@@ -29,11 +29,11 @@ This task prepares the small set of public-ready assets the landing page needs a
 </requirements>
 
 ## Subtasks
-- [ ] 2.1 Audit current screenshot, logo, and icon sources already present in the repo.
-- [ ] 2.2 Copy the selected MVP visual assets into Astro-managed locations under `web/`.
-- [ ] 2.3 Add fixed-path public metadata files required for GitHub Pages hosting and site identity.
-- [ ] 2.4 Preserve the existing README screenshot source so current repo presentation does not break.
-- [ ] 2.5 Document the asset ownership boundary between app resources, docs assets, and site assets.
+- [x] 2.1 Audit current screenshot, logo, and icon sources already present in the repo.
+- [x] 2.2 Copy the selected MVP visual assets into Astro-managed locations under `web/`.
+- [x] 2.3 Add fixed-path public metadata files required for GitHub Pages hosting and site identity.
+- [x] 2.4 Preserve the existing README screenshot source so current repo presentation does not break.
+- [x] 2.5 Document the asset ownership boundary between app resources, docs assets, and site assets.
 
 ## Implementation Details
 Use the asset split defined in TechSpec “System Architecture” and step 5 of “Development Sequencing”. This task should not expand into page layout work beyond making assets available for the route to consume.
@@ -67,13 +67,13 @@ Use the asset split defined in TechSpec “System Architecture” and step 5 of 
 
 ## Tests
 - Unit tests:
-  - [ ] Validate any asset-metadata helper resolves the expected public paths for screenshot and favicon assets.
-  - [ ] Validate any asset-selection helper does not reference Swift app resource paths directly.
-  - [ ] Validate any public-name-derived asset labels use the canonical `Atelier` naming.
+  - [x] Validate any asset-metadata helper resolves the expected public paths for screenshot and favicon assets.
+  - [x] Validate any asset-selection helper does not reference Swift app resource paths directly.
+  - [x] Validate any public-name-derived asset labels use the canonical `Atelier` naming.
 - Integration tests:
-  - [ ] Built landing page resolves the screenshot from the new Astro-managed asset location.
-  - [ ] Built site serves favicon and any other fixed-path public metadata files from `web/public/`.
-  - [ ] `README.md` still renders the existing screenshot path without broken references after asset preparation.
+  - [x] Built landing page resolves the screenshot from the new Astro-managed asset location.
+  - [x] Built site serves favicon and any other fixed-path public metadata files from `web/public/`.
+  - [x] `README.md` still renders the existing screenshot path without broken references after asset preparation.
 - Test coverage target: >=80%
 - All tests must pass
 

@@ -128,13 +128,21 @@ public struct RestoreCoordinator {
 
         let restoredSessions = sessions.filter { accessibleProjectIDs.contains($0.projectID) }
         let restoredSessionIDs = Set(restoredSessions.map(\.id))
+        let candidateTabs = tabs.filter { restoredSessionIDs.contains($0.sessionID) }
+        let candidateTabIDs = Set(candidateTabs.map(\.id))
         let validatedTabs = validateRestoredTabs(
-            tabs.filter { restoredSessionIDs.contains($0.sessionID) },
+            candidateTabs,
             sessions: restoredSessions,
             projects: accessibleProjects
         )
         diagnostics.append(contentsOf: validatedTabs.diagnostics)
-        let restoredTabs = orderedTabs(validatedTabs.tabs, snapshot: snapshot)
+        let orderedTabResult = orderedTabs(
+            validatedTabs.tabs,
+            snapshot: snapshot,
+            candidateTabIDs: candidateTabIDs
+        )
+        diagnostics.append(contentsOf: orderedTabResult.diagnostics)
+        let restoredTabs = orderedTabResult.tabs
 
         let restoredStore = WorkspaceStore()
         restoredStore.restore(
@@ -254,12 +262,27 @@ public struct RestoreCoordinator {
         )
     }
 
-    private func orderedTabs(_ tabs: [WorkspaceTab], snapshot: RestoreSnapshot?) -> [WorkspaceTab] {
-        guard let snapshot else { return tabs }
+    private func orderedTabs(
+        _ tabs: [WorkspaceTab],
+        snapshot: RestoreSnapshot?,
+        candidateTabIDs: Set<UUID>
+    ) -> (tabs: [WorkspaceTab], diagnostics: [RestoreDiagnostic]) {
+        guard let snapshot else { return (tabs, []) }
         var snapshotOrder: [UUID: Int] = [:]
-        for tabID in snapshot.tabOrder where snapshotOrder[tabID] == nil {
-            snapshotOrder[tabID] = snapshotOrder.count
+        var duplicateTabIDs: [UUID] = []
+        for tabID in snapshot.tabOrder {
+            if snapshotOrder[tabID] == nil {
+                snapshotOrder[tabID] = snapshotOrder.count
+            } else {
+                duplicateTabIDs.append(tabID)
+            }
         }
+        let diagnostics = restoreOrderDiagnostics(
+            snapshotOrder: snapshotOrder,
+            duplicateTabIDs: duplicateTabIDs,
+            restoredTabIDs: Set(tabs.map(\.id)),
+            candidateTabIDs: candidateTabIDs
+        )
         let sortedTabs = tabs.sorted {
             let lhsOrder = snapshotOrder[$0.id]
             let rhsOrder = snapshotOrder[$1.id]
@@ -277,13 +300,59 @@ public struct RestoreCoordinator {
         }
 
         var nextOrdinalBySession: [UUID: Int] = [:]
-        return sortedTabs.map { tab in
+        let orderedTabs = sortedTabs.map { tab in
             var orderedTab = tab
             let nextOrdinal = nextOrdinalBySession[tab.sessionID, default: 0]
             orderedTab.ordinal = nextOrdinal
             nextOrdinalBySession[tab.sessionID] = nextOrdinal + 1
             return orderedTab
         }
+        return (orderedTabs, diagnostics)
+    }
+
+    private func restoreOrderDiagnostics(
+        snapshotOrder: [UUID: Int],
+        duplicateTabIDs: [UUID],
+        restoredTabIDs: Set<UUID>,
+        candidateTabIDs: Set<UUID>
+    ) -> [RestoreDiagnostic] {
+        var diagnostics: [RestoreDiagnostic] = []
+        if !duplicateTabIDs.isEmpty {
+            diagnostics.append(restoreOrderDiagnostic(
+                reason: "restore_order_duplicate_tab_ids",
+                tabIDs: duplicateTabIDs
+            ))
+        }
+
+        let missingPersistedTabIDs = snapshotOrder.keys
+            .filter { !candidateTabIDs.contains($0) }
+            .sorted { $0.uuidString < $1.uuidString }
+        if !missingPersistedTabIDs.isEmpty {
+            diagnostics.append(restoreOrderDiagnostic(
+                reason: "restore_order_references_missing_tabs",
+                tabIDs: missingPersistedTabIDs
+            ))
+        }
+
+        let omittedRestoredTabIDs = restoredTabIDs
+            .filter { snapshotOrder[$0] == nil }
+            .sorted { $0.uuidString < $1.uuidString }
+        if !omittedRestoredTabIDs.isEmpty {
+            diagnostics.append(restoreOrderDiagnostic(
+                reason: "restore_order_omits_restored_tabs",
+                tabIDs: omittedRestoredTabIDs
+            ))
+        }
+
+        return diagnostics
+    }
+
+    private func restoreOrderDiagnostic(reason: String, tabIDs: [UUID]) -> RestoreDiagnostic {
+        RestoreDiagnostic(
+            severity: .warning,
+            message: "Restore tab order mismatch: \(reason) affected \(tabIDs.count) tab(s).",
+            telemetryReason: reason
+        )
     }
 
     private func isPath(_ path: String, containedBy projectRoot: String) -> Bool {

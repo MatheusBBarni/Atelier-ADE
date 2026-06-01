@@ -16,8 +16,17 @@ public final class WorkspaceStore {
         WorkspaceSelection(projectID: selectedProjectID, sessionID: selectedSessionID, tabID: selectedTabID)
     }
 
+    public func runtimeAppearance(systemScheme: ThemeColorScheme) -> AppRuntimeAppearance {
+        AppTheme.resolveRuntimeAppearance(selectionID: appPreferences.themeID, systemScheme: systemScheme)
+    }
+
+    public func effectiveTheme(systemScheme: ThemeColorScheme) -> AppTheme {
+        runtimeAppearance(systemScheme: systemScheme).effectiveTheme
+    }
+
+    @available(*, deprecated, message: "Use runtimeAppearance(systemScheme:) for selection-aware runtime appearance.")
     public var activeTheme: AppTheme {
-        AppTheme.resolve(id: appPreferences.themeID)
+        effectiveTheme(systemScheme: .dark)
     }
 
     public init(
@@ -164,6 +173,32 @@ public final class WorkspaceStore {
 
     public func updateAppPreferences(_ preferences: AppPreferences) {
         appPreferences = preferences
+    }
+
+    func applyProjectOrder(_ orderedProjectIDs: [UUID]) {
+        var sortIndexByID: [UUID: Int] = [:]
+        for (index, projectID) in orderedProjectIDs.enumerated() where sortIndexByID[projectID] == nil {
+            sortIndexByID[projectID] = index
+        }
+        for index in projects.indices {
+            guard let sortIndex = sortIndexByID[projects[index].id] else { continue }
+            projects[index].sortIndex = sortIndex
+        }
+        projects.sort {
+            if $0.sortIndex == $1.sortIndex { return $0.lastOpenedAt > $1.lastOpenedAt }
+            return $0.sortIndex < $1.sortIndex
+        }
+    }
+
+    func applyTabOrder(sessionID: UUID, orderedTabIDs: [UUID]) {
+        var ordinalByID: [UUID: Int] = [:]
+        for (index, tabID) in orderedTabIDs.enumerated() where ordinalByID[tabID] == nil {
+            ordinalByID[tabID] = index
+        }
+        for index in tabs.indices where tabs[index].sessionID == sessionID {
+            guard let ordinal = ordinalByID[tabs[index].id] else { continue }
+            tabs[index].ordinal = ordinal
+        }
     }
 
     public func removeTab(id: UUID) {

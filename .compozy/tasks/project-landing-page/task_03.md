@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Implement the trust-first landing page content and layout"
 type: frontend
 complexity: medium
@@ -30,11 +30,11 @@ This task builds the actual MVP landing page experience: the trust-first hero, s
 </requirements>
 
 ## Subtasks
-- [ ] 3.1 Define the centralized public content model for hero, capabilities, trust notes, and link targets.
-- [ ] 3.2 Implement the single-page Astro route structure for the MVP sections.
-- [ ] 3.3 Render the screenshot-led proof section using the normalized assets from task 02.
-- [ ] 3.4 Add secondary docs and quickstart paths without displacing the repo-first CTA hierarchy.
-- [ ] 3.5 Keep public naming, maturity, and capability language aligned with current repo reality.
+- [x] 3.1 Define the centralized public content model for hero, capabilities, trust notes, and link targets.
+- [x] 3.2 Implement the single-page Astro route structure for the MVP sections.
+- [x] 3.3 Render the screenshot-led proof section using the normalized assets from task 02.
+- [x] 3.4 Add secondary docs and quickstart paths without displacing the repo-first CTA hierarchy.
+- [x] 3.5 Keep public naming, maturity, and capability language aligned with current repo reality.
 
 ## Implementation Details
 Follow TechSpec “System Architecture”, “Implementation Design”, and step 3 of “Development Sequencing”. This task owns page markup and centralized content, while task 04 owns the dynamic repo-CTA enhancement.
@@ -68,13 +68,13 @@ Follow TechSpec “System Architecture”, “Implementation Design”, and step
 
 ## Tests
 - Unit tests:
-  - [ ] Validate the site-content module exports the canonical product name, repo URL, docs URL, and quickstart URL expected by the page.
-  - [ ] Validate capability items and trust-note data renderable by the route include all required MVP sections.
-  - [ ] Validate any helper used for section ordering or CTA grouping preserves repo-first priority.
+  - [x] Validate the site-content module exports the canonical product name, repo URL, docs URL, and quickstart URL expected by the page.
+  - [x] Validate capability items and trust-note data renderable by the route include all required MVP sections.
+  - [x] Validate any helper used for section ordering or CTA grouping preserves repo-first priority.
 - Integration tests:
-  - [ ] Built landing page renders hero, screenshot/proof, capability summary, and secondary docs/quickstart links.
-  - [ ] Built landing page exposes a primary repo CTA placeholder or integration point before JavaScript enhancement.
-  - [ ] Public copy on the page uses `Atelier` and does not expose internal `NativeMacADE` package naming.
+  - [x] Built landing page renders hero, screenshot/proof, capability summary, and secondary docs/quickstart links.
+  - [x] Built landing page exposes a primary repo CTA placeholder or integration point before JavaScript enhancement.
+  - [x] Public copy on the page uses `Atelier` and does not expose internal `NativeMacADE` package naming.
 - Test coverage target: >=80%
 - All tests must pass
 

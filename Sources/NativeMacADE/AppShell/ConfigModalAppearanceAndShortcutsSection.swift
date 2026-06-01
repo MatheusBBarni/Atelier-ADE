@@ -6,7 +6,7 @@ struct ConfigModalAppearanceAndShortcutsSection: View {
     let commandService: any WorkspaceCommandService
 
     @Environment(\.shellThemePalette) private var theme
-    @State private var themeDraftID = AppTheme.defaultID
+    @State private var themeDraftID = AppTheme.defaultSelectionID
     @State private var terminalFontSizeDraft = AppPreferences.defaultTerminalFontSize
     @State private var shortcutDrafts: [AppCommandID: KeybindingOverride] = [:]
     @State private var feedback: SettingsSectionFeedback?
@@ -83,16 +83,8 @@ struct ConfigModalAppearanceAndShortcutsSection: View {
                         .foregroundStyle(theme.secondaryText.color)
 
                     Picker("", selection: $themeDraftID) {
-                        Section("Dark") {
-                            ForEach(darkThemes) { option in
-                                Text(option.displayName).tag(option.id)
-                            }
-                        }
-
-                        Section("Light") {
-                            ForEach(lightThemes) { option in
-                                Text(option.displayName).tag(option.id)
-                            }
+                        ForEach(AppTheme.selectionOptions) { option in
+                            Text(option.displayName).tag(option.id)
                         }
                     }
                     .pickerStyle(.menu)
@@ -167,18 +159,6 @@ struct ConfigModalAppearanceAndShortcutsSection: View {
                 .foregroundStyle(theme.secondaryText.color)
                 .fixedSize(horizontal: false, vertical: true)
         }
-    }
-
-    private var selectedTheme: AppTheme {
-        AppTheme.resolve(id: themeDraftID)
-    }
-
-    private var darkThemes: [AppTheme] {
-        AppTheme.catalog.filter { $0.colorScheme == .dark }
-    }
-
-    private var lightThemes: [AppTheme] {
-        AppTheme.catalog.filter { $0.colorScheme == .light }
     }
 
     private var hasShortcutDraftChanges: Bool {

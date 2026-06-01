@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Align README and public entry points with the new landing page"
 type: docs
 complexity: medium
@@ -30,11 +30,11 @@ This task aligns the repository’s public entry points with the new landing pag
 </requirements>
 
 ## Subtasks
-- [ ] 6.1 Audit repo-facing public entry points for name, link, and status mismatches.
-- [ ] 6.2 Update `README.md` so it aligns with the landing page’s canonical name, proof story, and CTA hierarchy.
-- [ ] 6.3 Keep quickstart and repo navigation truthful by matching current runnable surfaces such as `scripts/run.sh`.
-- [ ] 6.4 Align any public release or screenshot references that would otherwise contradict the new landing page.
-- [ ] 6.5 Confirm that public entry points remain small, trustworthy, and consistent after the update.
+- [x] 6.1 Audit repo-facing public entry points for name, link, and status mismatches.
+- [x] 6.2 Update `README.md` so it aligns with the landing page’s canonical name, proof story, and CTA hierarchy.
+- [x] 6.3 Keep quickstart and repo navigation truthful by matching current runnable surfaces such as `scripts/run.sh`.
+- [x] 6.4 Align any public release or screenshot references that would otherwise contradict the new landing page.
+- [x] 6.5 Confirm that public entry points remain small, trustworthy, and consistent after the update.
 
 ## Implementation Details
 Use TechSpec “Impact Analysis”, step 7 of “Development Sequencing”, and “Known Risks” around naming and trust drift. This task should align public surfaces, not broaden into internal package renaming or release-process redesign.
@@ -69,14 +69,14 @@ Use TechSpec “Impact Analysis”, step 7 of “Development Sequencing”, and 
 
 ## Tests
 - Unit tests:
-  - [ ] Validate any shared public-link or metadata helper returns the same repo/docs/quickstart URLs used by the landing page.
-  - [ ] Validate any copy-source helper resolves the canonical public product name as `Atelier`.
-  - [ ] Validate any README-generation or link-map helper preserves repo-first CTA priority.
+  - [x] Validate any shared public-link or metadata helper returns the same repo/docs/quickstart URLs used by the landing page.
+  - [x] Validate any copy-source helper resolves the canonical public product name as `Atelier`.
+  - [x] Validate any README-generation or link-map helper preserves repo-first CTA priority.
 - Integration tests:
-  - [ ] `README.md` links to the landing page, repository, docs, and quickstart targets all resolve to the intended public destinations.
-  - [ ] `README.md` public copy uses `Atelier` and does not expose internal `NativeMacADE` naming in the landing-page-aligned sections.
-  - [ ] README quickstart/build instructions remain consistent with the commands and naming in `scripts/run.sh`.
-  - [ ] Public screenshot and release references remain valid after README alignment changes.
+  - [x] `README.md` links to the landing page, repository, docs, and quickstart targets all resolve to the intended public destinations.
+  - [x] `README.md` public copy uses `Atelier` and does not expose internal `NativeMacADE` naming in the landing-page-aligned sections.
+  - [x] README quickstart/build instructions remain consistent with the commands and naming in `scripts/run.sh`.
+  - [x] Public screenshot and release references remain valid after README alignment changes.
 - Test coverage target: >=80%
 - All tests must pass
 

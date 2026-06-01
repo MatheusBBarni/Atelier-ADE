@@ -25,12 +25,16 @@ struct PerformanceMetricsTests {
         metrics.recordSettingsSaved(changedKeybindingCount: 3)
         metrics.recordSettingsSaveFailure()
         metrics.recordThemeChanged()
+        metrics.recordEffectiveThemeApplied()
+        metrics.recordThemeRepair()
         metrics.recordKeybindingsChanged(changedCommandCount: 3)
 
         #expect(metrics.settingsOpenedCount == 1)
         #expect(metrics.settingsSavedCount == 1)
         #expect(metrics.settingsSaveFailureCount == 1)
         #expect(metrics.themeChangedCount == 1)
+        #expect(metrics.effectiveThemeAppliedCount == 1)
+        #expect(metrics.themeRepairCount == 1)
         #expect(metrics.keybindingChangedCount == 3)
         #expect(metrics.lastSavedChangedKeybindingCount == 3)
     }
@@ -65,5 +69,26 @@ struct PerformanceMetricsTests {
         #expect(diagnostics.releaseBlockingReasons.contains("file-save failure rate above 1%"))
         #expect(diagnostics.releaseBlockingReasons.contains("file-tab restore failures detected"))
         #expect(diagnostics.releaseBlockingReasons.contains("median file-open time above budget"))
+    }
+
+    @Test
+    func reorderCountersRollIntoPilotDiagnosticsAndReleaseGates() {
+        let metrics = PerformanceMetrics()
+
+        metrics.recordProjectReorder()
+        metrics.recordTabReorder()
+        metrics.recordReorderValidationRejection()
+        metrics.recordReorderPersistenceFailure()
+        metrics.recordRestoreOrderMismatch()
+
+        let diagnostics = metrics.diagnostics()
+
+        #expect(diagnostics.projectReorderCount == 1)
+        #expect(diagnostics.tabReorderCount == 1)
+        #expect(diagnostics.reorderValidationRejectionCount == 1)
+        #expect(diagnostics.reorderPersistenceFailureCount == 1)
+        #expect(diagnostics.restoreOrderMismatchCount == 1)
+        #expect(diagnostics.releaseBlockingReasons.contains("reorder persistence failures detected"))
+        #expect(diagnostics.releaseBlockingReasons.contains("restore-order mismatches detected"))
     }
 }

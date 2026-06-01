@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Add the GitHub repo star CTA as progressive enhancement"
 type: frontend
 complexity: medium
@@ -29,11 +29,11 @@ This task implements the only planned runtime enhancement on the MVP landing pag
 </requirements>
 
 ## Subtasks
-- [ ] 4.1 Create the reusable repo CTA component boundary for the landing page.
-- [ ] 4.2 Render stable fallback CTA markup that points directly to the GitHub repository.
-- [ ] 4.3 Add client-side GitHub metadata fetch to update the CTA label with live star count.
-- [ ] 4.4 Handle rate limits, invalid responses, and network failures by falling back silently.
-- [ ] 4.5 Keep the enhancement small and isolated from unrelated page logic.
+- [x] 4.1 Create the reusable repo CTA component boundary for the landing page.
+- [x] 4.2 Render stable fallback CTA markup that points directly to the GitHub repository.
+- [x] 4.3 Add client-side GitHub metadata fetch to update the CTA label with live star count.
+- [x] 4.4 Handle rate limits, invalid responses, and network failures by falling back silently.
+- [x] 4.5 Keep the enhancement small and isolated from unrelated page logic.
 
 ## Implementation Details
 Follow TechSpec “Core Interfaces”, “API Endpoints”, “Integration Points”, and step 4 of “Development Sequencing”. This task owns the GitHub metadata enhancement only; it should not broaden into analytics or server-side data plumbing.
@@ -66,13 +66,13 @@ Follow TechSpec “Core Interfaces”, “API Endpoints”, “Integration Point
 
 ## Tests
 - Unit tests:
-  - [ ] Valid GitHub metadata response updates the CTA label with the expected star count.
-  - [ ] Invalid or incomplete GitHub metadata response preserves fallback CTA text.
-  - [ ] Network or rate-limit failures do not remove the CTA link or block navigation.
+  - [x] Valid GitHub metadata response updates the CTA label with the expected star count.
+  - [x] Invalid or incomplete GitHub metadata response preserves fallback CTA text.
+  - [x] Network or rate-limit failures do not remove the CTA link or block navigation.
 - Integration tests:
-  - [ ] With JavaScript disabled, the primary CTA still links directly to `https://github.com/MatheusBBarni/Atelier-ADE`.
-  - [ ] With a mocked successful GitHub response, the rendered CTA displays the updated star count.
-  - [ ] With a mocked failing GitHub response, the page still builds and the CTA remains clickable.
+  - [x] With JavaScript disabled, the primary CTA still links directly to `https://github.com/MatheusBBarni/Atelier-ADE`.
+  - [x] With a mocked successful GitHub response, the rendered CTA displays the updated star count.
+  - [x] With a mocked failing GitHub response, the page still builds and the CTA remains clickable.
 - Test coverage target: >=80%
 - All tests must pass
 

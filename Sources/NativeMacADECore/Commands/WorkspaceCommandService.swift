@@ -18,6 +18,9 @@ public enum WorkspaceCommandError: Error, Equatable, Sendable {
     case customShortcutResetRejected(UUID)
     case closeRejected(UUID)
     case dirtyFileTabCloseRejected(UUID)
+    case invalidProjectOrder(String)
+    case invalidTabOrder(String)
+    case reorderRestoreAlignmentFailed(String)
     case terminalUnavailable(String)
     case persistenceFailed(String)
 }
@@ -39,6 +42,8 @@ public protocol WorkspaceCommandService: AppShellStartupServicing {
     func selectProject(id: UUID?) async throws
     func selectSession(id: UUID?) async throws
     func selectTab(id: UUID?) async throws
+    func reorderProjects(_ orderedProjectIDs: [UUID]) async throws
+    func reorderTabs(sessionID: UUID, orderedVisibleTabIDs: [UUID]) async throws
     func recordSettingsOpened(surface: String)
     func loadAppPreferences() async throws -> AppPreferences
     func saveAppPreferences(_ preferences: AppPreferences) async throws

@@ -60,8 +60,67 @@ public struct ShellThemePalette: Equatable, Sendable {
     }
 }
 
+public enum AppThemeSelectionOptionKind: Equatable, Sendable {
+    case system
+    case preset
+}
+
+public struct AppThemeSelectionOption: Identifiable, Equatable, Sendable {
+    public var id: String
+    public var displayName: String
+    public var kind: AppThemeSelectionOptionKind
+    public var colorScheme: ThemeColorScheme?
+
+    public init(
+        id: String,
+        displayName: String,
+        kind: AppThemeSelectionOptionKind,
+        colorScheme: ThemeColorScheme?
+    ) {
+        self.id = id
+        self.displayName = displayName
+        self.kind = kind
+        self.colorScheme = colorScheme
+    }
+}
+
+public struct AppRuntimeAppearance: Equatable, Sendable {
+    public var selectionID: String
+    public var effectiveTheme: AppTheme
+    public var forcedColorScheme: ThemeColorScheme?
+
+    public init(
+        selectionID: String,
+        effectiveTheme: AppTheme,
+        forcedColorScheme: ThemeColorScheme?
+    ) {
+        self.selectionID = selectionID
+        self.effectiveTheme = effectiveTheme
+        self.forcedColorScheme = forcedColorScheme
+    }
+}
+
+public enum EditorSyntaxThemeKind: Equatable, Sendable {
+    case dark
+    case light
+}
+
+public extension ThemeColorScheme {
+    var editorSyntaxThemeKind: EditorSyntaxThemeKind {
+        switch self {
+        case .dark:
+            return .dark
+        case .light:
+            return .light
+        }
+    }
+}
+
 public struct AppTheme: Identifiable, Equatable, Sendable {
     public static let defaultID = "cursor"
+    public static let systemSelectionID = "system"
+    public static let systemSelectionDisplayName = "System"
+    public static let defaultSelectionID = systemSelectionID
 
     public var id: String
     public var displayName: String
@@ -170,6 +229,66 @@ public struct AppTheme: Identifiable, Equatable, Sendable {
             foregroundHex: "#4C4F69",
             cursorHex: "#1E66F5",
             selectionHex: "#CCD0DA"
+        )
+    )
+
+    public static let githubLight = AppTheme(
+        id: "github-light",
+        displayName: "GitHub Light",
+        colorScheme: .light,
+        shellPalette: ShellThemePalette(
+            shellBackground: NordColorToken(hex: "#F6F8FA"),
+            sidebarBackground: NordColorToken(hex: "#FFFFFF"),
+            contentBackground: NordColorToken(hex: "#FFFFFF"),
+            elevatedBackground: NordColorToken(hex: "#F6F8FA"),
+            tabBarBackground: NordColorToken(hex: "#EAEEF2"),
+            activeBackground: NordColorToken(hex: "#0969DA"),
+            activeBorder: NordColorToken(hex: "#0969DA"),
+            border: NordColorToken(hex: "#D0D7DE"),
+            primaryText: NordColorToken(hex: "#24292F"),
+            secondaryText: NordColorToken(hex: "#57606A"),
+            mutedText: NordColorToken(hex: "#6E7781", opacity: 0.76),
+            selectedText: NordColorToken(hex: "#FFFFFF"),
+            accent: NordColorToken(hex: "#0969DA"),
+            secondaryAccent: NordColorToken(hex: "#1A7F37"),
+            warning: NordColorToken(hex: "#9A6700"),
+            destructive: NordColorToken(hex: "#CF222E")
+        ),
+        terminalAppearance: TerminalAppearance(
+            backgroundHex: "#FFFFFF",
+            foregroundHex: "#24292F",
+            cursorHex: "#0969DA",
+            selectionHex: "#D0D7DE"
+        )
+    )
+
+    public static let solarizedLight = AppTheme(
+        id: "solarized-light",
+        displayName: "Solarized Light",
+        colorScheme: .light,
+        shellPalette: ShellThemePalette(
+            shellBackground: NordColorToken(hex: "#FDF6E3"),
+            sidebarBackground: NordColorToken(hex: "#EEE8D5"),
+            contentBackground: NordColorToken(hex: "#FDF6E3"),
+            elevatedBackground: NordColorToken(hex: "#FFF8E8"),
+            tabBarBackground: NordColorToken(hex: "#EEE8D5"),
+            activeBackground: NordColorToken(hex: "#268BD2"),
+            activeBorder: NordColorToken(hex: "#2AA198"),
+            border: NordColorToken(hex: "#D6CEB8"),
+            primaryText: NordColorToken(hex: "#586E75"),
+            secondaryText: NordColorToken(hex: "#657B83"),
+            mutedText: NordColorToken(hex: "#93A1A1", opacity: 0.76),
+            selectedText: NordColorToken(hex: "#FDF6E3"),
+            accent: NordColorToken(hex: "#268BD2"),
+            secondaryAccent: NordColorToken(hex: "#2AA198"),
+            warning: NordColorToken(hex: "#B58900"),
+            destructive: NordColorToken(hex: "#DC322F")
+        ),
+        terminalAppearance: TerminalAppearance(
+            backgroundHex: "#FDF6E3",
+            foregroundHex: "#586E75",
+            cursorHex: "#268BD2",
+            selectionHex: "#EEE8D5"
         )
     )
 
@@ -318,8 +437,12 @@ public struct AppTheme: Identifiable, Equatable, Sendable {
         terminalAppearance: .cursorDefault
     )
 
+    /// Catalog order is a runtime contract for System selection:
+    /// the first light preset resolves System in light mode, and the first dark preset resolves System in dark mode.
     public static let catalog: [AppTheme] = [
         catppuccin,
+        githubLight,
+        solarizedLight,
         dracula,
         oneDark,
         catppuccinFrappe,
@@ -331,6 +454,43 @@ public struct AppTheme: Identifiable, Equatable, Sendable {
 
     public static let defaultTheme = cursor
     public static let supportedIDs: Set<String> = Set(catalog.map(\.id))
+    public static let orderedSelectionIDs: [String] = [systemSelectionID] + catalog.map(\.id)
+    public static let supportedSelectionIDs: Set<String> = Set(orderedSelectionIDs)
+    public static var selectionOptions: [AppThemeSelectionOption] {
+        [
+            AppThemeSelectionOption(
+                id: systemSelectionID,
+                displayName: systemSelectionDisplayName,
+                kind: .system,
+                colorScheme: nil
+            )
+        ] + catalog.map { theme in
+            AppThemeSelectionOption(
+                id: theme.id,
+                displayName: theme.displayName,
+                kind: .preset,
+                colorScheme: theme.colorScheme
+            )
+        }
+    }
+
+    public static var firstLightPreset: AppTheme {
+        guard let theme = catalog.first(where: { $0.colorScheme == .light }) else {
+            preconditionFailure("AppTheme.catalog must contain at least one light preset")
+        }
+        return theme
+    }
+
+    public static var firstDarkPreset: AppTheme {
+        guard let theme = catalog.first(where: { $0.colorScheme == .dark }) else {
+            preconditionFailure("AppTheme.catalog must contain at least one dark preset")
+        }
+        return theme
+    }
+
+    public static func isSupportedSelectionID(_ id: String) -> Bool {
+        supportedSelectionIDs.contains(id)
+    }
 
     public static func resolve(id: String?) -> AppTheme {
         guard let id,
@@ -339,5 +499,33 @@ public struct AppTheme: Identifiable, Equatable, Sendable {
             return defaultTheme
         }
         return theme
+    }
+
+    public static func resolveEffective(selectionID: String?, systemScheme: ThemeColorScheme) -> AppTheme {
+        resolveRuntimeAppearance(selectionID: selectionID, systemScheme: systemScheme).effectiveTheme
+    }
+
+    public static func resolveRuntimeAppearance(
+        selectionID: String?,
+        systemScheme: ThemeColorScheme
+    ) -> AppRuntimeAppearance {
+        let normalizedSelectionID = selectionID.flatMap { isSupportedSelectionID($0) ? $0 : nil } ?? defaultSelectionID
+        let concreteTheme = catalog.first { $0.id == normalizedSelectionID }
+        let effectiveTheme = concreteTheme ?? systemPreset(for: systemScheme)
+
+        return AppRuntimeAppearance(
+            selectionID: normalizedSelectionID,
+            effectiveTheme: effectiveTheme,
+            forcedColorScheme: concreteTheme?.colorScheme
+        )
+    }
+
+    private static func systemPreset(for scheme: ThemeColorScheme) -> AppTheme {
+        switch scheme {
+        case .light:
+            return firstLightPreset
+        case .dark:
+            return firstDarkPreset
+        }
     }
 }

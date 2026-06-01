@@ -2,9 +2,10 @@ import Foundation
 
 public struct AppPreferences: Equatable, Sendable {
     public static let fixedID = 1
-    public static let defaultThemeID = AppTheme.defaultID
+    public static let defaultThemeID = AppTheme.defaultSelectionID
     public static let defaultTerminalFontSize: Double = 13
-    public static let supportedThemeIDs: Set<String> = AppTheme.supportedIDs
+    public static let supportedSelectionIDs: Set<String> = AppTheme.supportedSelectionIDs
+    public static let supportedThemeIDs = supportedSelectionIDs
 
     public var id: Int
     public var themeID: String
@@ -31,6 +32,10 @@ public struct AppPreferences: Equatable, Sendable {
 
     public static var defaults: AppPreferences {
         AppPreferences()
+    }
+
+    public static func isSupportedThemeSelectionID(_ themeID: String) -> Bool {
+        AppTheme.isSupportedSelectionID(themeID)
     }
 
     public var keybindingsJSON: String {

@@ -126,7 +126,7 @@ struct TerminalHostIntegrationTests {
         let hostView = try #require(controller.makeHostView(for: firstTab, isActive: true) as? TerminalSurfaceHostNSView)
 
         try await service.saveAppPreferences(AppPreferences(themeID: "catppuccin"))
-        controller.updateAppearance(store.activeTheme.terminalAppearance)
+        controller.updateAppearance(store.effectiveTheme(systemScheme: .light).terminalAppearance)
         let secondTab = try await service.createTab(sessionID: session.id)
 
         #expect(hostView.terminalAppearance == AppTheme.catppuccin.terminalAppearance)
@@ -170,13 +170,112 @@ struct TerminalHostIntegrationTests {
         try await persistence.save(appPreferences: AppPreferences(themeID: "catppuccin"))
 
         let startupResult = await AppShellStartupCoordinator.run(commandService: service, store: store) {
-            controller.updateAppearance(store.activeTheme.terminalAppearance)
+            controller.updateAppearance(store.effectiveTheme(systemScheme: .light).terminalAppearance)
         }
 
         #expect(startupResult.preferenceLoadErrorDescription == nil)
         #expect(startupResult.restoreErrorDescription == nil)
         #expect(adapter.createdConfigurations.map(\.appearance) == [AppTheme.catppuccin.terminalAppearance])
-        #expect(store.activeTheme == AppTheme.catppuccin)
+        #expect(store.effectiveTheme(systemScheme: .light) == AppTheme.catppuccin)
+    }
+
+    @Test
+    func startupSystemPreferenceAppliesResolvedTerminalAppearanceBeforeRestore() async throws {
+        let adapter = RecordingGhosttyAdapter()
+        let controller = TerminalHostController(adapter: adapter)
+        let store = WorkspaceStore()
+        let persistence = InMemoryWorkspacePersistenceStore()
+        let projectPath = try makeTemporaryDirectory()
+        let project = WorkspaceProject(path: projectPath, displayName: "System Restore")
+        let session = WorkspaceSession(projectID: project.id, title: "Restored")
+        let tab = WorkspaceTab(sessionID: session.id, workingDirectory: projectPath, ordinal: 0)
+        let service = DefaultWorkspaceCommandService(
+            store: store,
+            persistenceStore: persistence,
+            restoreCoordinator: RestoreCoordinator(persistenceStore: persistence),
+            terminalSurfaceManager: controller
+        )
+
+        try await persistence.save(project: project)
+        try await persistence.save(session: session)
+        try await persistence.save(tab: tab)
+        try await persistence.save(snapshot: RestoreSnapshot(
+            selectedProjectID: project.id,
+            selectedSessionID: session.id,
+            selectedTabID: tab.id,
+            openTabIDs: [tab.id]
+        ))
+        try await persistence.save(appPreferences: AppPreferences(themeID: AppTheme.systemSelectionID))
+
+        let startupResult = await AppShellStartupCoordinator.run(commandService: service, store: store) {
+            controller.updateAppearance(store.effectiveTheme(systemScheme: .dark).terminalAppearance)
+        }
+
+        #expect(startupResult.preferenceLoadErrorDescription == nil)
+        #expect(startupResult.restoreErrorDescription == nil)
+        #expect(store.appPreferences.themeID == AppTheme.systemSelectionID)
+        #expect(adapter.createdConfigurations.map(\.appearance) == [AppTheme.dracula.terminalAppearance])
+    }
+
+    @Test
+    func selectionChangesBetweenSystemAndConcreteThemesUpdateExistingAndNewTerminalSurfaces() async throws {
+        let adapter = RecordingGhosttyAdapter()
+        let controller = TerminalHostController(adapter: adapter)
+        let store = WorkspaceStore()
+        let persistence = InMemoryWorkspacePersistenceStore()
+        let service = DefaultWorkspaceCommandService(
+            store: store,
+            persistenceStore: persistence,
+            restoreCoordinator: RestoreCoordinator(persistenceStore: persistence),
+            terminalSurfaceManager: controller
+        )
+        let project = try await service.openProject(path: makeTemporaryDirectory())
+        let session = try await service.createSession(projectID: project.id, shortcutID: nil)
+        let firstTab = try #require(store.tabs.first)
+        let hostView = try #require(controller.makeHostView(for: firstTab, isActive: true) as? TerminalSurfaceHostNSView)
+
+        try await service.saveAppPreferences(AppPreferences(themeID: AppTheme.systemSelectionID))
+        controller.updateAppearance(store.effectiveTheme(systemScheme: .dark).terminalAppearance)
+
+        #expect(store.appPreferences.themeID == AppTheme.systemSelectionID)
+        #expect(hostView.terminalAppearance == AppTheme.dracula.terminalAppearance)
+
+        try await service.saveAppPreferences(AppPreferences(themeID: "catppuccin"))
+        controller.updateAppearance(store.effectiveTheme(systemScheme: .dark).terminalAppearance)
+        let secondTab = try await service.createTab(sessionID: session.id)
+
+        #expect(store.appPreferences.themeID == "catppuccin")
+        #expect(hostView.terminalAppearance == AppTheme.catppuccin.terminalAppearance)
+        #expect(adapter.createdConfigurations.map(\.appearance) == [
+            AppTheme.defaultTheme.terminalAppearance,
+            AppTheme.catppuccin.terminalAppearance
+        ])
+        #expect(secondTab.sessionID == session.id)
+
+        try await service.saveAppPreferences(AppPreferences(themeID: AppTheme.systemSelectionID))
+        controller.updateAppearance(store.effectiveTheme(systemScheme: .light).terminalAppearance)
+
+        #expect(store.appPreferences.themeID == AppTheme.systemSelectionID)
+        #expect(hostView.terminalAppearance == AppTheme.catppuccin.terminalAppearance)
+    }
+
+    @Test
+    func liveSystemSchemeChangeUpdatesExistingTerminalSurfaceWithoutRelaunch() async throws {
+        let adapter = RecordingGhosttyAdapter()
+        let controller = TerminalHostController(adapter: adapter)
+        let store = WorkspaceStore(appPreferences: AppPreferences(themeID: AppTheme.systemSelectionID))
+        let tab = WorkspaceTab(sessionID: UUID(), workingDirectory: "/tmp/native-mac-ade-live-system-theme", ordinal: 0)
+        let view = try #require(controller.makeHostView(for: tab, isActive: true) as? TerminalSurfaceHostNSView)
+        _ = try await controller.createSurface(for: tab)
+
+        controller.updateAppearance(store.effectiveTheme(systemScheme: .light).terminalAppearance)
+        #expect(view.terminalAppearance == AppTheme.catppuccin.terminalAppearance)
+
+        controller.updateAppearance(store.effectiveTheme(systemScheme: .dark).terminalAppearance)
+
+        #expect(store.appPreferences.themeID == AppTheme.systemSelectionID)
+        #expect(view.terminalAppearance == AppTheme.dracula.terminalAppearance)
+        #expect(adapter.createdConfigurations.map(\.appearance) == [AppTheme.defaultTheme.terminalAppearance])
     }
 
     @Test
