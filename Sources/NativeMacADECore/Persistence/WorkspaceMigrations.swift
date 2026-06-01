@@ -7,7 +7,7 @@ public enum WorkspaceMigrationError: Error, Equatable, Sendable {
 }
 
 public enum WorkspaceMigrations {
-    public static let currentUserVersion: Int32 = 5
+    public static let currentUserVersion: Int32 = 6
     public static let metadataTables: Set<String> = [
         "projects",
         "sessions",
@@ -40,6 +40,9 @@ public enum WorkspaceMigrations {
         }
         if existingUserVersion < 5 {
             try migrateToV5(database)
+        }
+        if existingUserVersion < 6 {
+            try migrateToV6(database)
         }
         try repairTabMetadataIfNeeded(database)
         try repairAppPreferencesMetadataIfNeeded(database)
@@ -116,6 +119,7 @@ public enum WorkspaceMigrations {
         default_session_shortcut_id TEXT REFERENCES session_shortcuts(id) ON DELETE SET NULL,
         terminal_font_size REAL NOT NULL DEFAULT \(AppPreferences.defaultTerminalFontSize),
         keybindings_json TEXT NOT NULL,
+        focus_workspace_enabled INTEGER NOT NULL DEFAULT 0 CHECK (focus_workspace_enabled IN (0, 1)),
         updated_at REAL NOT NULL
     )
     """
@@ -138,8 +142,8 @@ public enum WorkspaceMigrations {
             try execute(database, "ALTER TABLE session_shortcuts ADD COLUMN has_user_override INTEGER NOT NULL DEFAULT 0 CHECK (has_user_override IN (0, 1))")
         }
         try execute(database, """
-        INSERT OR IGNORE INTO app_preferences (id, theme_id, default_session_shortcut_id, terminal_font_size, keybindings_json, updated_at)
-        VALUES (1, '\(AppPreferences.defaultThemeID)', NULL, \(AppPreferences.defaultTerminalFontSize), '[]', 0)
+        INSERT OR IGNORE INTO app_preferences (id, theme_id, default_session_shortcut_id, terminal_font_size, keybindings_json, focus_workspace_enabled, updated_at)
+        VALUES (1, '\(AppPreferences.defaultThemeID)', NULL, \(AppPreferences.defaultTerminalFontSize), '[]', 0, 0)
         """)
     }
 
@@ -155,6 +159,10 @@ public enum WorkspaceMigrations {
         try addV5TabShortcutIDColumnIfNeeded(database)
     }
 
+    private static func migrateToV6(_ database: OpaquePointer?) throws {
+        try addV6AppPreferencesFocusWorkspaceColumnIfNeeded(database)
+    }
+
     private static func repairTabMetadataIfNeeded(_ database: OpaquePointer?) throws {
         try addV2TabMetadataColumnsIfNeeded(database)
         try addV3TabTitleColumnIfNeeded(database)
@@ -163,6 +171,7 @@ public enum WorkspaceMigrations {
 
     private static func repairAppPreferencesMetadataIfNeeded(_ database: OpaquePointer?) throws {
         try addV4AppPreferencesFontSizeColumnIfNeeded(database)
+        try addV6AppPreferencesFocusWorkspaceColumnIfNeeded(database)
     }
 
     private static func addV2TabMetadataColumnsIfNeeded(_ database: OpaquePointer?) throws {
@@ -189,6 +198,12 @@ public enum WorkspaceMigrations {
     private static func addV5TabShortcutIDColumnIfNeeded(_ database: OpaquePointer?) throws {
         if try !table("tabs", hasColumn: "shortcut_id", database: database) {
             try execute(database, "ALTER TABLE tabs ADD COLUMN shortcut_id TEXT REFERENCES session_shortcuts(id) ON DELETE SET NULL")
+        }
+    }
+
+    private static func addV6AppPreferencesFocusWorkspaceColumnIfNeeded(_ database: OpaquePointer?) throws {
+        if try !table("app_preferences", hasColumn: "focus_workspace_enabled", database: database) {
+            try execute(database, "ALTER TABLE app_preferences ADD COLUMN focus_workspace_enabled INTEGER NOT NULL DEFAULT 0 CHECK (focus_workspace_enabled IN (0, 1))")
         }
     }
 
