@@ -44,7 +44,7 @@ let package = Package(
         ),
         .testTarget(
             name: "NativeMacADEIntegrationTests",
-            dependencies: ["NativeMacADECore"]
+            dependencies: ["NativeMacADE", "NativeMacADECore"]
         )
     ]
 )
