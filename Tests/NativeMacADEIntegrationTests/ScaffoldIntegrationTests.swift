@@ -14,6 +14,39 @@ struct ScaffoldIntegrationTests {
     }
 
     @Test
+    func liveContainerPublishesTerminalExitsAndPreservesSingleLoggingSink() async throws {
+        let container = AppDependencyContainer.live()
+        let project = WorkspaceProject(path: try makeTemporaryDirectory(), displayName: "exit-observer")
+        let session = WorkspaceSession(projectID: project.id)
+        let tab = WorkspaceTab(sessionID: session.id, workingDirectory: project.path, ordinal: 0)
+        var observations: [TerminalExitObservation] = []
+
+        container.workspaceStore.upsertProject(project, select: false)
+        container.workspaceStore.upsertSession(session, select: false)
+        container.workspaceStore.upsertTab(tab, select: false)
+        container.terminalExitEvents.subscribe { observations.append($0) }
+
+        container.terminalHostController.onSurfaceExited?(tab.id, nil)
+
+        try await waitUntil("terminal exit fan-out") {
+            observations.count == 1
+                && container.workspaceLogger.events.filter { $0.name == "terminal_process_exited" }.count == 1
+        }
+
+        let snapshot = try #require(container.terminalExitEvents.snapshot(tabID: tab.id))
+        let events = container.workspaceLogger.events.filter { $0.name == "terminal_process_exited" }
+        let event = try #require(events.first)
+
+        #expect(observations == [TerminalExitObservation(tabID: tab.id, exitStatus: nil)])
+        #expect(snapshot == TerminalExitObservation(tabID: tab.id, exitStatus: nil))
+        #expect(events.count == 1)
+        #expect(container.performanceMetrics.terminalProcessExitCount == 1)
+        #expect(event.fields["tab_id"] == tab.id.uuidString)
+        #expect(event.fields["session_id"] == session.id.uuidString)
+        #expect(event.fields["exit_status"] == "unknown")
+    }
+
+    @Test
     func terminalHostCreatesSingleEmbeddedSurfaceWithoutRequiringGhosttyRuntime() async throws {
         let host = TerminalHostController()
         let tab = WorkspaceTab(sessionID: UUID(), workingDirectory: try makeTemporaryDirectory(), ordinal: 0)
@@ -64,4 +97,28 @@ private func makeTemporaryDirectory() throws -> String {
         .appendingPathComponent("native-mac-ade-scaffold-\(UUID().uuidString)", isDirectory: true)
     try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
     return url.path
+}
+
+@MainActor
+private func waitUntil(
+    _ description: String,
+    timeout: Duration = .seconds(1),
+    pollInterval: Duration = .milliseconds(10),
+    condition: @MainActor () -> Bool
+) async throws {
+    let clock = ContinuousClock()
+    let deadline = clock.now.advanced(by: timeout)
+
+    while clock.now < deadline {
+        if condition() {
+            return
+        }
+        try await Task.sleep(for: pollInterval)
+    }
+
+    throw WaitTimeoutError(description: description)
+}
+
+private struct WaitTimeoutError: Error, CustomStringConvertible {
+    let description: String
 }

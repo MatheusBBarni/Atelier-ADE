@@ -7,6 +7,7 @@ public struct AppDependencyContainer {
     public let restoreCoordinator: RestoreCoordinator
     public let ghosttyAdapter: any GhosttyAdapter
     public let terminalHostController: TerminalHostController
+    public let terminalExitEvents: TerminalExitEventSource
     public let fileAccessService: any WorkspaceFileAccessing
     public let fileBufferController: any WorkspaceFileBufferManaging
     public let externalEditorOpener: any ExternalEditorOpening
@@ -20,6 +21,7 @@ public struct AppDependencyContainer {
         restoreCoordinator: RestoreCoordinator,
         ghosttyAdapter: any GhosttyAdapter,
         terminalHostController: TerminalHostController,
+        terminalExitEvents: TerminalExitEventSource,
         fileAccessService: any WorkspaceFileAccessing,
         fileBufferController: any WorkspaceFileBufferManaging,
         externalEditorOpener: any ExternalEditorOpening,
@@ -32,6 +34,7 @@ public struct AppDependencyContainer {
         self.restoreCoordinator = restoreCoordinator
         self.ghosttyAdapter = ghosttyAdapter
         self.terminalHostController = terminalHostController
+        self.terminalExitEvents = terminalExitEvents
         self.fileAccessService = fileAccessService
         self.fileBufferController = fileBufferController
         self.externalEditorOpener = externalEditorOpener
@@ -46,6 +49,7 @@ public struct AppDependencyContainer {
         let restoreCoordinator = RestoreCoordinator(persistenceStore: persistenceStore)
         let ghosttyAdapter = LiveGhosttyAdapter()
         let terminalHostController = TerminalHostController(adapter: ghosttyAdapter)
+        let terminalExitEvents = TerminalExitEventSource()
         let fileAccessService = LocalWorkspaceFileAccess()
         let fileBufferController = WorkspaceFileBufferController(fileAccess: fileAccessService)
         let externalEditorOpener = SystemExternalEditorOpener()
@@ -62,9 +66,10 @@ public struct AppDependencyContainer {
             logger: workspaceLogger,
             metrics: performanceMetrics
         )
-        terminalHostController.onSurfaceExited = { tabID, exitStatus in
-            Task { @MainActor in
-                workspaceCommandService.recordTerminalProcessExit(tabID: tabID, exitStatus: exitStatus)
+        terminalHostController.onSurfaceExited = { [weak workspaceCommandService, terminalExitEvents] tabID, exitStatus in
+            Task { @MainActor [weak workspaceCommandService, terminalExitEvents] in
+                workspaceCommandService?.recordTerminalProcessExit(tabID: tabID, exitStatus: exitStatus)
+                terminalExitEvents.publish(tabID: tabID, exitStatus: exitStatus)
             }
         }
         return AppDependencyContainer(
@@ -73,6 +78,7 @@ public struct AppDependencyContainer {
             restoreCoordinator: restoreCoordinator,
             ghosttyAdapter: ghosttyAdapter,
             terminalHostController: terminalHostController,
+            terminalExitEvents: terminalExitEvents,
             fileAccessService: fileAccessService,
             fileBufferController: fileBufferController,
             externalEditorOpener: externalEditorOpener,
