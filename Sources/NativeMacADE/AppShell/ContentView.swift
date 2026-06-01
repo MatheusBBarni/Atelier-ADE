@@ -155,6 +155,7 @@ struct ContentView: View {
     let store: WorkspaceStore
     let commandService: any WorkspaceCommandService
     let terminalHostController: TerminalHostController
+    let terminalExitEvents: TerminalExitEventSource
     let fileAccessService: any WorkspaceFileAccessing
     let fileBufferController: any WorkspaceFileBufferManaging
     @Environment(\.colorScheme) private var runtimeColorScheme
@@ -171,7 +172,12 @@ struct ContentView: View {
     var body: some View {
         ZStack {
             NavigationSplitView(columnVisibility: $splitViewVisibility) {
-                ProjectSidebarView(store: store, commandService: commandService, userMessage: $userMessage)
+                ProjectSidebarView(
+                    store: store,
+                    commandService: commandService,
+                    terminalExitEvents: terminalExitEvents,
+                    userMessage: $userMessage
+                )
             } detail: {
                 WorkspaceDetailView(
                     store: store,
@@ -740,9 +746,15 @@ struct RestoreRecoveryView: View {
     }
 }
 
+private enum SessionShortcutCatalogReloadReason {
+    case initialLoad
+    case profileMutation
+}
+
 struct ProjectSidebarView: View {
     let store: WorkspaceStore
     let commandService: any WorkspaceCommandService
+    let terminalExitEvents: TerminalExitEventSource
     @Binding var userMessage: UserMessage?
     @Environment(\.shellThemePalette) private var theme
     @Environment(\.shellUIFontSize) private var uiFontSize
@@ -750,6 +762,9 @@ struct ProjectSidebarView: View {
     @State private var renameDraft: SessionRenameDraft?
     @State private var expandedProjectIDs: Set<UUID> = []
     @State private var hoveredSessionID: UUID?
+    @State private var shortcutCatalog = SessionShortcutCatalog()
+    @State private var terminalExitSnapshotsByTabID: [UUID: TerminalExitObservation] = [:]
+    @State private var terminalExitUnsubscribe: TerminalExitEventSource.Unsubscribe?
     @State private var draggedProjectID: UUID?
     @State private var activeProjectInsertion: ProjectOrderInsertion?
     @StateObject private var projectDragLifecycle = ReorderDragLifecycleMonitor()
@@ -813,6 +828,7 @@ struct ProjectSidebarView: View {
                                                 ForEach(projectSessions) { session in
                                                     SessionRowView(
                                                         session: session,
+                                                        terminalSummaries: terminalSummaries(for: session),
                                                         isActive: session.id == store.selectedSessionID,
                                                         showsMenu: hoveredSessionID == session.id || session.id == store.selectedSessionID,
                                                         onSelect: {
@@ -911,7 +927,15 @@ struct ProjectSidebarView: View {
             guard let selectedSessionID = store.selectedSessionID else { return }
             removeSession(selectedSessionID)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .sessionShortcutCatalogDidChange)) { _ in
+            Task { await reloadShortcutCatalog(reason: .profileMutation) }
+        }
+        .task {
+            await reloadShortcutCatalog(reason: .initialLoad)
+        }
+        .onAppear(perform: startTerminalExitObservation)
         .onDisappear(perform: endDraggingProject)
+        .onDisappear(perform: stopTerminalExitObservation)
     }
 
     private var removalDialogBinding: Binding<Bool> {
@@ -1000,6 +1024,45 @@ struct ProjectSidebarView: View {
 
     private func sessions(for projectID: UUID) -> [WorkspaceSession] {
         store.orderedSessions(for: projectID)
+    }
+
+    private func terminalSummaries(for session: WorkspaceSession) -> [SessionTerminalSummary] {
+        SessionTerminalSummaryBuilder(
+            store: store,
+            shortcutCatalog: shortcutCatalog,
+            exitSnapshot: { tabID in
+                terminalExitSnapshotsByTabID[tabID] ?? terminalExitEvents.snapshot(tabID: tabID)
+            }
+        )
+        .summaries(for: session)
+    }
+
+    private func reloadShortcutCatalog(reason: SessionShortcutCatalogReloadReason) async {
+        do {
+            let shortcuts = try await commandService.availableSessionShortcuts()
+            shortcutCatalog = SessionShortcutCatalog(shortcuts: shortcuts)
+        } catch {
+            let title: String
+            switch reason {
+            case .initialLoad:
+                title = "Agent profiles unavailable"
+            case .profileMutation:
+                title = "Agent profile refresh failed"
+            }
+            userMessage = UserMessage(title: title, detail: String(describing: error))
+        }
+    }
+
+    private func startTerminalExitObservation() {
+        guard terminalExitUnsubscribe == nil else { return }
+        terminalExitUnsubscribe = terminalExitEvents.subscribe { observation in
+            terminalExitSnapshotsByTabID[observation.tabID] = observation
+        }
+    }
+
+    private func stopTerminalExitObservation() {
+        terminalExitUnsubscribe?()
+        terminalExitUnsubscribe = nil
     }
 
     private func expandProject(_ id: UUID) {
@@ -2036,6 +2099,7 @@ struct SessionSearchPaletteRow: View {
 
 struct SessionRowView: View {
     let session: WorkspaceSession
+    var terminalSummaries: [SessionTerminalSummary] = []
     let isActive: Bool
     let showsMenu: Bool
     let onSelect: () -> Void
@@ -2090,7 +2154,16 @@ struct SessionRowView: View {
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
         .accessibilityLabel(session.title)
-        .accessibilityValue(isActive ? "Active session" : "Session")
+        .accessibilityValue(accessibilityValue)
+    }
+
+    private var accessibilityValue: String {
+        let sessionState = isActive ? "Active session" : "Session"
+        guard !terminalSummaries.isEmpty else {
+            return sessionState
+        }
+
+        return "\(sessionState), \(terminalSummaries.count) terminal tab\(terminalSummaries.count == 1 ? "" : "s")"
     }
 }
 
@@ -4627,6 +4700,7 @@ extension NordColorToken {
     let persistence = InMemoryWorkspacePersistenceStore()
     let restoreCoordinator = RestoreCoordinator(persistenceStore: persistence)
     let terminalHostController = TerminalHostController()
+    let terminalExitEvents = TerminalExitEventSource()
     let fileAccessService = LocalWorkspaceFileAccess()
     let fileBufferController = WorkspaceFileBufferController(fileAccess: fileAccessService)
     ContentView(
@@ -4641,6 +4715,7 @@ extension NordColorToken {
             fileBufferManager: fileBufferController
         ),
         terminalHostController: terminalHostController,
+        terminalExitEvents: terminalExitEvents,
         fileAccessService: fileAccessService,
         fileBufferController: fileBufferController
     )
