@@ -6,6 +6,12 @@ export const REQUIRED_WEB_VALIDATION_COMMANDS = Object.freeze([
     command: "npm run test:unit"
   },
   {
+    id: "integration-tests",
+    label: "Run web integration tests",
+    script: "test:integration",
+    command: "npm run test:integration"
+  },
+  {
     id: "astro-build",
     label: "Build Astro site",
     script: "build",

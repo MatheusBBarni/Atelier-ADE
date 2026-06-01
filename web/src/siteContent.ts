@@ -12,7 +12,7 @@ export const LANDING_PAGE_URL = `${DEFAULT_SITE_ORIGIN}${DEFAULT_PAGES_BASE}/`;
 
 const ASTRO_ASSET_PREFIX = "/_astro";
 
-type AssetOwner = "web/src/assets" | "web/public";
+type AssetOwner = "web/src/assets" | "web/public" | "web/src/pages";
 type CapabilityPriority = "critical" | "high" | "medium";
 type CtaKind = "repo" | "docs" | "quickstart";
 type CtaPriority = "primary" | "secondary";
@@ -29,7 +29,7 @@ type AstroManagedAsset = {
 
 type FixedPublicAsset = {
   kind: "fixed-public";
-  owner: Extract<AssetOwner, "web/public">;
+  owner: Extract<AssetOwner, "web/public" | "web/src/pages">;
   fileName: string;
   publicPath: `/${string}`;
   sourcePath?: string;
@@ -115,7 +115,7 @@ export const landingPageAssets = {
   },
   manifest: {
     kind: "fixed-public",
-    owner: "web/public",
+    owner: "web/src/pages",
     fileName: "site.webmanifest",
     publicPath: "/site.webmanifest",
     label: `${CANONICAL_PRODUCT_NAME} web manifest`

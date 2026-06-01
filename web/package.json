@@ -15,7 +15,7 @@
     "validate:links": "node ./scripts/validate-built-site.mjs --check links",
     "validate:no-js-cta": "node ./scripts/validate-built-site.mjs --check no-js-cta",
     "validate:a11y": "node ./scripts/validate-built-site.mjs --check a11y",
-    "validate:ci": "npm run test:unit && npm run build && npm run validate:built"
+    "validate:ci": "npm run test:unit && npm run test:integration && npm run build && npm run validate:built"
   },
   "engines": {
     "node": ">=22.12.0"

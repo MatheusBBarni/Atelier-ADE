@@ -49,6 +49,80 @@ private extension ColorScheme {
     }
 }
 
+private final class ReorderDragLifecycleMonitor: NSObject, ObservableObject {
+    private var localEventMonitor: Any?
+    private var globalEventMonitor: Any?
+    private var onEnd: (() -> Void)?
+
+    func begin(onEnd: @escaping () -> Void) {
+        finish()
+        self.onEnd = onEnd
+
+        let mouseUpEvents: NSEvent.EventTypeMask = [.leftMouseUp, .rightMouseUp, .otherMouseUp]
+        let localEvents: NSEvent.EventTypeMask = [mouseUpEvents, .keyDown]
+
+        localEventMonitor = NSEvent.addLocalMonitorForEvents(matching: localEvents) { [weak self] event in
+            if Self.shouldEndDrag(after: event) {
+                Self.requestFinish(for: self)
+            }
+            return event
+        }
+        globalEventMonitor = NSEvent.addGlobalMonitorForEvents(matching: mouseUpEvents) { [weak self] _ in
+            Self.requestFinish(for: self)
+        }
+    }
+
+    func finish() {
+        removeEventMonitors()
+        let endHandler = onEnd
+        onEnd = nil
+        endHandler?()
+    }
+
+    @objc private func finishAfterCurrentEvent() {
+        finish()
+    }
+
+    deinit {
+        if let localEventMonitor {
+            NSEvent.removeMonitor(localEventMonitor)
+        }
+        if let globalEventMonitor {
+            NSEvent.removeMonitor(globalEventMonitor)
+        }
+    }
+
+    private func removeEventMonitors() {
+        if let localEventMonitor {
+            NSEvent.removeMonitor(localEventMonitor)
+            self.localEventMonitor = nil
+        }
+        if let globalEventMonitor {
+            NSEvent.removeMonitor(globalEventMonitor)
+            self.globalEventMonitor = nil
+        }
+    }
+
+    nonisolated private static func shouldEndDrag(after event: NSEvent) -> Bool {
+        switch event.type {
+        case .leftMouseUp, .rightMouseUp, .otherMouseUp:
+            return true
+        case .keyDown:
+            return event.charactersIgnoringModifiers == "\u{1B}"
+        default:
+            return false
+        }
+    }
+
+    nonisolated private static func requestFinish(for monitor: ReorderDragLifecycleMonitor?) {
+        monitor?.performSelector(
+            onMainThread: #selector(finishAfterCurrentEvent),
+            with: nil,
+            waitUntilDone: false
+        )
+    }
+}
+
 struct ContentView: View {
     let shellState: AppShellState
     let store: WorkspaceStore
@@ -642,6 +716,7 @@ struct ProjectSidebarView: View {
     @State private var hoveredSessionID: UUID?
     @State private var draggedProjectID: UUID?
     @State private var activeProjectInsertion: ProjectOrderInsertion?
+    @StateObject private var projectDragLifecycle = ReorderDragLifecycleMonitor()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -743,6 +818,7 @@ struct ProjectSidebarView: View {
                                 currentProjectIDs: projectIDs,
                                 draggedProjectID: $draggedProjectID,
                                 activeInsertion: $activeProjectInsertion,
+                                onDragEnded: endDraggingProject,
                                 onCommit: submitProjectReorder
                             ))
                             .overlay(alignment: .top) {
@@ -799,6 +875,7 @@ struct ProjectSidebarView: View {
             guard let selectedSessionID = store.selectedSessionID else { return }
             removeSession(selectedSessionID)
         }
+        .onDisappear(perform: endDraggingProject)
     }
 
     private var removalDialogBinding: Binding<Bool> {
@@ -911,9 +988,20 @@ struct ProjectSidebarView: View {
     }
 
     private func beginDraggingProject(_ id: UUID) -> NSItemProvider {
+        projectDragLifecycle.begin(onEnd: clearProjectDragState)
         draggedProjectID = id
         activeProjectInsertion = nil
         return ProjectSidebarDrag.itemProvider(for: id)
+    }
+
+    private func endDraggingProject() {
+        projectDragLifecycle.finish()
+        clearProjectDragState()
+    }
+
+    private func clearProjectDragState() {
+        draggedProjectID = nil
+        activeProjectInsertion = nil
     }
 
     private func submitProjectReorder(moving movedProjectID: UUID, to insertion: ProjectOrderInsertion) {
@@ -947,6 +1035,7 @@ private struct ProjectSidebarDropTargetModifier: ViewModifier {
     let currentProjectIDs: [UUID]
     @Binding var draggedProjectID: UUID?
     @Binding var activeInsertion: ProjectOrderInsertion?
+    let onDragEnded: () -> Void
     let onCommit: (UUID, ProjectOrderInsertion) -> Void
     @State private var targetHeight: CGFloat = 1
 
@@ -971,6 +1060,7 @@ private struct ProjectSidebarDropTargetModifier: ViewModifier {
                     currentProjectIDs: currentProjectIDs,
                     draggedProjectID: $draggedProjectID,
                     activeInsertion: $activeInsertion,
+                    onDragEnded: onDragEnded,
                     onCommit: onCommit
                 )
             )
@@ -1004,6 +1094,7 @@ private struct ProjectSidebarDropDelegate: DropDelegate {
     let currentProjectIDs: [UUID]
     @Binding var draggedProjectID: UUID?
     @Binding var activeInsertion: ProjectOrderInsertion?
+    let onDragEnded: () -> Void
     let onCommit: (UUID, ProjectOrderInsertion) -> Void
 
     func validateDrop(info: DropInfo) -> Bool {
@@ -1029,8 +1120,7 @@ private struct ProjectSidebarDropDelegate: DropDelegate {
 
     func performDrop(info: DropInfo) -> Bool {
         defer {
-            draggedProjectID = nil
-            activeInsertion = nil
+            onDragEnded()
         }
 
         guard let movedProjectID = draggedProjectID,
@@ -2171,6 +2261,7 @@ struct TabChromeView: View {
     @State private var renameDraft: TabRenameDraft?
     @State private var draggedTabID: UUID?
     @State private var activeTabInsertion: TabOrderInsertion?
+    @StateObject private var tabDragLifecycle = ReorderDragLifecycleMonitor()
 
     var body: some View {
         let _ = dirtyRefreshToken
@@ -2201,6 +2292,7 @@ struct TabChromeView: View {
                             currentTabIDs: visibleTabIDs,
                             draggedTabID: $draggedTabID,
                             activeInsertion: $activeTabInsertion,
+                            onDragEnded: endDraggingTab,
                             onCommit: submitTabReorder
                         ))
                         .overlay(alignment: .leading) {
@@ -2269,12 +2361,13 @@ struct TabChromeView: View {
         }
         .onChange(of: visibleTabIDs) { _, updatedTabIDs in
             if let draggedTabID, !updatedTabIDs.contains(draggedTabID) {
-                self.draggedTabID = nil
+                endDraggingTab()
             }
             if let activeTabInsertion, !updatedTabIDs.contains(activeTabInsertion.targetTabID) {
                 self.activeTabInsertion = nil
             }
         }
+        .onDisappear(perform: endDraggingTab)
         .sheet(item: $renameDraft) { draft in
             TabRenameView(draft: draft) { tabID, title in
                 Task {
@@ -2363,9 +2456,20 @@ struct TabChromeView: View {
     }
 
     private func beginDraggingTab(_ id: UUID) -> NSItemProvider {
+        tabDragLifecycle.begin(onEnd: clearTabDragState)
         draggedTabID = id
         activeTabInsertion = nil
         return TabChromeDrag.itemProvider(for: id)
+    }
+
+    private func endDraggingTab() {
+        tabDragLifecycle.finish()
+        clearTabDragState()
+    }
+
+    private func clearTabDragState() {
+        draggedTabID = nil
+        activeTabInsertion = nil
     }
 
     private func submitTabReorder(moving movedTabID: UUID, to insertion: TabOrderInsertion) {
@@ -2415,6 +2519,7 @@ private struct TabChromeDropTargetModifier: ViewModifier {
     let currentTabIDs: [UUID]
     @Binding var draggedTabID: UUID?
     @Binding var activeInsertion: TabOrderInsertion?
+    let onDragEnded: () -> Void
     let onCommit: (UUID, TabOrderInsertion) -> Void
     @State private var targetWidth: CGFloat = 1
 
@@ -2439,6 +2544,7 @@ private struct TabChromeDropTargetModifier: ViewModifier {
                     currentTabIDs: currentTabIDs,
                     draggedTabID: $draggedTabID,
                     activeInsertion: $activeInsertion,
+                    onDragEnded: onDragEnded,
                     onCommit: onCommit
                 )
             )
@@ -2472,6 +2578,7 @@ private struct TabChromeDropDelegate: DropDelegate {
     let currentTabIDs: [UUID]
     @Binding var draggedTabID: UUID?
     @Binding var activeInsertion: TabOrderInsertion?
+    let onDragEnded: () -> Void
     let onCommit: (UUID, TabOrderInsertion) -> Void
 
     func validateDrop(info: DropInfo) -> Bool {
@@ -2497,8 +2604,7 @@ private struct TabChromeDropDelegate: DropDelegate {
 
     func performDrop(info: DropInfo) -> Bool {
         defer {
-            draggedTabID = nil
-            activeInsertion = nil
+            onDragEnded()
         }
 
         guard let movedTabID = draggedTabID,

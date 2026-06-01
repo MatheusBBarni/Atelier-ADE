@@ -48,6 +48,9 @@ jobs:
       - name: Run web unit tests
         run: npm run test:unit
 
+      - name: Run web integration tests
+        run: npm run test:integration
+
       - name: Build Astro site
         run: npm run build
 

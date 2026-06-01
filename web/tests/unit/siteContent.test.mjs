@@ -29,7 +29,7 @@ describe("landing page asset metadata", () => {
     expect(withSiteBase("/robots.txt", "Atelier-ADE")).toBe("/Atelier-ADE/robots.txt");
   });
 
-  it("keeps page-imported assets under web/src/assets and fixed public assets under web/public", () => {
+  it("keeps page-imported assets, public files, and generated public routes in their owners", () => {
     expect(getLandingPageAsset("screenshot")).toMatchObject({
       kind: "astro-managed",
       owner: "web/src/assets",
@@ -46,6 +46,11 @@ describe("landing page asset metadata", () => {
       kind: "fixed-public",
       owner: "web/public",
       publicPath: "/favicon.png"
+    });
+    expect(getLandingPageAsset("manifest")).toMatchObject({
+      kind: "fixed-public",
+      owner: "web/src/pages",
+      publicPath: "/site.webmanifest"
     });
   });
 

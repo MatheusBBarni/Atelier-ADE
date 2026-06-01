@@ -226,7 +226,7 @@ describe("Astro landing page integration", () => {
     expect(existsSync(resolve(webRoot, "dist", emittedPath))).toBe(true);
   });
 
-  it("serves fixed public metadata files from web/public after build", () => {
+  it("serves public metadata files after build using the configured Pages base", () => {
     const indexHtml = readFileSync(indexPath, "utf8");
     const manifest = JSON.parse(readFileSync(resolve(webRoot, "dist/site.webmanifest"), "utf8"));
 
@@ -237,6 +237,8 @@ describe("Astro landing page integration", () => {
     expect(existsSync(resolve(webRoot, "dist/.nojekyll"))).toBe(true);
     expect(manifest.name).toBe(CANONICAL_PRODUCT_NAME);
     expect(manifest.short_name).toBe(CANONICAL_PRODUCT_NAME);
+    expect(manifest.start_url).toBe("/Atelier-ADE/");
+    expect(manifest.scope).toBe("/Atelier-ADE/");
     expect(manifest.icons[0]).toMatchObject({
       src: "/Atelier-ADE/favicon.png",
       sizes: "512x512",
