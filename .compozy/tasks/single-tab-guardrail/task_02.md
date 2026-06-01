@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Introduce shared Focus Workspace policy helper"
 type: refactor
 complexity: medium
@@ -30,11 +30,11 @@ Add a small pure policy helper so command enforcement and UI affordances share o
 </requirements>
 
 ## Subtasks
-- [ ] 2.1 Define the Focus Workspace session-state model in core.
-- [ ] 2.2 Define the Focus Workspace violation model for blocked action outcomes.
-- [ ] 2.3 Add pure policy decisions for terminal creation eligibility and file-open eligibility.
-- [ ] 2.4 Reuse existing store tab queries or add a minimal derived-state helper only if it removes duplicated count logic.
-- [ ] 2.5 Add isolated matrix tests for allowed, blocked, and legacy-overflow cases.
+- [x] 2.1 Define the Focus Workspace session-state model in core.
+- [x] 2.2 Define the Focus Workspace violation model for blocked action outcomes.
+- [x] 2.3 Add pure policy decisions for terminal creation eligibility and file-open eligibility.
+- [x] 2.4 Reuse existing store tab queries or add a minimal derived-state helper only if it removes duplicated count logic.
+- [x] 2.5 Add isolated matrix tests for allowed, blocked, and legacy-overflow cases.
 
 ## Implementation Details
 Use the TechSpec **"System Architecture"**, **"Core Interfaces"**, and **"Technical Considerations"** sections as the reference for boundaries and naming. Keep the new helper tiny and stateless, similar in spirit to existing workspace helpers; do not expand it into a service or couple it to persistence or UI state.
@@ -69,14 +69,14 @@ Use the TechSpec **"System Architecture"**, **"Core Interfaces"**, and **"Techni
 
 ## Tests
 - Unit tests:
-  - [ ] Focus disabled returns terminal/file creation allowed regardless of current tab counts.
-  - [ ] Focus enabled with `terminal=0,file=0` allows first terminal creation and first file open.
-  - [ ] Focus enabled with `terminal=1,file=0` rejects additional terminal creation with the terminal-tab violation.
-  - [ ] Focus enabled with `terminal=1,file=1` allows same-file reopen but rejects a different-file second file tab.
-  - [ ] Legacy-overflow states such as `terminal=2,file=0` or `terminal=1,file=2` report non-compliant state without mutating anything.
+  - [x] Focus disabled returns terminal/file creation allowed regardless of current tab counts.
+  - [x] Focus enabled with `terminal=0,file=0` allows first terminal creation and first file open.
+  - [x] Focus enabled with `terminal=1,file=0` rejects additional terminal creation with the terminal-tab violation.
+  - [x] Focus enabled with `terminal=1,file=1` allows same-file reopen but rejects a different-file second file tab.
+  - [x] Legacy-overflow states such as `terminal=2,file=0` or `terminal=1,file=2` report non-compliant state without mutating anything.
 - Integration tests:
-  - [ ] A store-backed selected session with mixed visible tabs produces the same derived terminal/file counts used by policy evaluation.
-  - [ ] A restored legacy multi-tab store fixture remains readable as overflow/non-compliant state rather than being normalized by the helper.
+  - [x] A store-backed selected session with mixed visible tabs produces the same derived terminal/file counts used by policy evaluation.
+  - [x] A restored legacy multi-tab store fixture remains readable as overflow/non-compliant state rather than being normalized by the helper.
 - Test coverage target: >=80%
 - All tests must pass
 

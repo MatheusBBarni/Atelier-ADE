@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Terminal exit observer source"
 type: backend
 complexity: medium
@@ -28,11 +28,11 @@ Add a lightweight exit-event source that fans out `TerminalHostController` exit 
 </requirements>
 
 ## Subtasks
-- [ ] 2.1 Define the lightweight terminal-exit observer contract used by AppShell consumers.
-- [ ] 2.2 Wire the observer source into the existing `TerminalHostController.onSurfaceExited` path.
-- [ ] 2.3 Preserve the existing command-service logging and metrics sink while adding fan-out behavior.
-- [ ] 2.4 Expose snapshot and subscription behavior suitable for AppShell factual status consumers.
-- [ ] 2.5 Add automated coverage for fan-out, snapshot, unsubscribe, and logging preservation behavior.
+- [x] 2.1 Define the lightweight terminal-exit observer contract used by AppShell consumers.
+- [x] 2.2 Wire the observer source into the existing `TerminalHostController.onSurfaceExited` path.
+- [x] 2.3 Preserve the existing command-service logging and metrics sink while adding fan-out behavior.
+- [x] 2.4 Expose snapshot and subscription behavior suitable for AppShell factual status consumers.
+- [x] 2.5 Add automated coverage for fan-out, snapshot, unsubscribe, and logging preservation behavior.
 
 ## Implementation Details
 Create the observer near `AppDependencyContainer` as described in the TechSpec "System Architecture" and "Monitoring and Observability" sections. Do not add store-owned status or any new persisted status field. Missing exit data must remain neutral and must not imply a running state.
@@ -62,14 +62,14 @@ Create the observer near `AppDependencyContainer` as described in the TechSpec "
 
 ## Tests
 - Unit tests:
-  - [ ] Initial snapshot for an unseen tab ID returns no exit observation.
-  - [ ] Publishing an exit stores the expected snapshot for the matching tab ID.
-  - [ ] Multiple subscribers receive the same `(tabID, exitStatus)` event.
-  - [ ] Unsubscribed listeners do not receive later exit events.
-  - [ ] `nil` exit status is preserved in the snapshot path while remaining valid for logging.
+  - [x] Initial snapshot for an unseen tab ID returns no exit observation.
+  - [x] Publishing an exit stores the expected snapshot for the matching tab ID.
+  - [x] Multiple subscribers receive the same `(tabID, exitStatus)` event.
+  - [x] Unsubscribed listeners do not receive later exit events.
+  - [x] `nil` exit status is preserved in the snapshot path while remaining valid for logging.
 - Integration tests:
-  - [ ] Live container wiring publishes exit events to the observer source and still emits the existing `terminal_process_exited` behavior exactly once.
-  - [ ] Existing terminal host exit propagation tests remain green after fan-out is added.
+  - [x] Live container wiring publishes exit events to the observer source and still emits the existing `terminal_process_exited` behavior exactly once.
+  - [x] Existing terminal host exit propagation tests remain green after fan-out is added.
 - Test coverage target: >=80%
 - All tests must pass
 

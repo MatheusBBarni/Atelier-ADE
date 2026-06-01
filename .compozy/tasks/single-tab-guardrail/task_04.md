@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Add Focus Workspace settings UI and active-state framing"
 type: frontend
 complexity: medium
@@ -29,11 +29,11 @@ Add the user-facing settings and shell framing that make Focus Workspace feel in
 </requirements>
 
 ## Subtasks
-- [ ] 4.1 Add a dedicated Focus Workspace section to the existing Settings modal composition.
-- [ ] 4.2 Persist the Focus Workspace toggle through the app-global preferences save/load flow.
-- [ ] 4.3 Add explanatory copy that describes what Focus Workspace changes and what it does not change.
-- [ ] 4.4 Add a lightweight active-state cue to the shell header when Focus Workspace is enabled.
-- [ ] 4.5 Add regression and manual verification coverage for settings persistence and truthful active-state framing.
+- [x] 4.1 Add a dedicated Focus Workspace section to the existing Settings modal composition.
+- [x] 4.2 Persist the Focus Workspace toggle through the app-global preferences save/load flow.
+- [x] 4.3 Add explanatory copy that describes what Focus Workspace changes and what it does not change.
+- [x] 4.4 Add a lightweight active-state cue to the shell header when Focus Workspace is enabled.
+- [x] 4.5 Add regression and manual verification coverage for settings persistence and truthful active-state framing.
 
 ## Implementation Details
 Use the TechSpec **"Shell/UI behavior"**, **"User Experience"**, and **"Known Risks"** sections as the source of truth for feature framing. Follow existing `ConfigModal*Section` patterns and keep the active cue lightweight; do not implement affordance hiding or blocked-action alert mapping here.
@@ -68,13 +68,13 @@ Use the TechSpec **"Shell/UI behavior"**, **"User Experience"**, and **"Known Ri
 
 ## Tests
 - Unit tests:
-  - [ ] Saving Focus Workspace on preserves unrelated `AppPreferences` fields and updates observable store state.
-  - [ ] Saving Focus Workspace off preserves unrelated `AppPreferences` fields and removes the shell active-state cue condition.
-  - [ ] The active-state cue visibility logic renders only when `focusWorkspaceEnabled` is true.
+  - [x] Saving Focus Workspace on preserves unrelated `AppPreferences` fields and updates observable store state.
+  - [x] Saving Focus Workspace off preserves unrelated `AppPreferences` fields and removes the shell active-state cue condition.
+  - [x] The active-state cue visibility logic renders only when `focusWorkspaceEnabled` is true.
 - Integration tests:
-  - [ ] Opening Settings shows a dedicated Focus Workspace section with explanatory copy and the current persisted toggle state.
-  - [ ] Toggling Focus Workspace on or off updates the shell cue without requiring relaunch.
-  - [ ] Relaunching the app preserves the toggle state and restores the active cue correctly when Focus Workspace is enabled.
+  - [x] Opening Settings shows a dedicated Focus Workspace section with explanatory copy and the current persisted toggle state.
+  - [x] Toggling Focus Workspace on or off updates the shell cue without requiring relaunch.
+  - [x] Relaunching the app preserves the toggle state and restores the active cue correctly when Focus Workspace is enabled.
 - Test coverage target: >=80%
 - All tests must pass
 

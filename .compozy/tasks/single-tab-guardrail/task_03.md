@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Enforce focus rules in commands and local observability"
 type: backend
 complexity: high
@@ -32,12 +32,12 @@ Implement Focus Workspace as a future-only command-layer policy inside `DefaultW
 </requirements>
 
 ## Subtasks
-- [ ] 3.1 Add the typed Focus Workspace rejection case to the public command-service error surface.
-- [ ] 3.2 Enforce additional-terminal-tab blocking across all terminal-tab creation flows.
-- [ ] 3.3 Enforce the approved file-open matrix for first file open, same-file reuse, and second different-file rejection.
-- [ ] 3.4 Keep blocked actions side-effect free across store state, persistence, and terminal surfaces.
-- [ ] 3.5 Extend local metrics and logging for enable/disable and blocked-attempt observability.
-- [ ] 3.6 Add regression coverage for no-mutation blocking, grandfathered restore behavior, and observability fields.
+- [x] 3.1 Add the typed Focus Workspace rejection case to the public command-service error surface.
+- [x] 3.2 Enforce additional-terminal-tab blocking across all terminal-tab creation flows.
+- [x] 3.3 Enforce the approved file-open matrix for first file open, same-file reuse, and second different-file rejection.
+- [x] 3.4 Keep blocked actions side-effect free across store state, persistence, and terminal surfaces.
+- [x] 3.5 Extend local metrics and logging for enable/disable and blocked-attempt observability.
+- [x] 3.6 Add regression coverage for no-mutation blocking, grandfathered restore behavior, and observability fields.
 
 ## Implementation Details
 Use the TechSpec **"API Endpoints"**, **"Monitoring and Observability"**, **"Known Risks"**, and **"Development Sequencing"** sections as the implementation guide. Keep all durable enforcement inside `DefaultWorkspaceCommandService`; do not split focus ownership into restore, views, or a new subsystem.
@@ -74,16 +74,16 @@ Use the TechSpec **"API Endpoints"**, **"Monitoring and Observability"**, **"Kno
 
 ## Tests
 - Unit tests:
-  - [ ] With Focus Workspace enabled and an existing terminal tab, `createTab`, `createPlainTab`, `createDefaultAgentTab`, and `createAgentTab` each reject with the focus terminal-tab violation.
-  - [ ] Blocked terminal-tab attempts create no new terminal surface, add no tab, and do not mutate the restore snapshot.
-  - [ ] With Focus Workspace enabled, opening the first file tab succeeds and preserves selection behavior.
-  - [ ] With Focus Workspace enabled and an existing file tab for the same path, `openFileTab` reuses the tab instead of blocking or creating a duplicate.
-  - [ ] With Focus Workspace enabled and an existing different file tab, `openFileTab` rejects with the focus file-tab violation and does not mutate store or persistence state.
-  - [ ] Saving preferences from focus off→on and on→off records the correct local metrics/log events.
+  - [x] With Focus Workspace enabled and an existing terminal tab, `createTab`, `createPlainTab`, `createDefaultAgentTab`, and `createAgentTab` each reject with the focus terminal-tab violation.
+  - [x] Blocked terminal-tab attempts create no new terminal surface, add no tab, and do not mutate the restore snapshot.
+  - [x] With Focus Workspace enabled, opening the first file tab succeeds and preserves selection behavior.
+  - [x] With Focus Workspace enabled and an existing file tab for the same path, `openFileTab` reuses the tab instead of blocking or creating a duplicate.
+  - [x] With Focus Workspace enabled and an existing different file tab, `openFileTab` rejects with the focus file-tab violation and does not mutate store or persistence state.
+  - [x] Saving preferences from focus off→on and on→off records the correct local metrics/log events.
 - Integration tests:
-  - [ ] A restored legacy multi-tab session remains unchanged after restore when Focus Workspace is enabled.
-  - [ ] After restoring a legacy multi-tab session, a future terminal-tab creation attempt is blocked by the command service.
-  - [ ] A SQLite-backed session with one terminal and one file tab still allows same-file reopen but blocks a second different file tab under Focus Workspace.
+  - [x] A restored legacy multi-tab session remains unchanged after restore when Focus Workspace is enabled.
+  - [x] After restoring a legacy multi-tab session, a future terminal-tab creation attempt is blocked by the command service.
+  - [x] A SQLite-backed session with one terminal and one file tab still allows same-file reopen but blocks a second different file tab under Focus Workspace.
 - Test coverage target: >=80%
 - All tests must pass
 

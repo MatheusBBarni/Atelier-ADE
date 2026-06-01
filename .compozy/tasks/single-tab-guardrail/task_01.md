@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Persist Focus Workspace preference and ship migration v6"
 type: backend
 complexity: high
@@ -29,11 +29,11 @@ Persist the Focus Workspace feature as part of the existing app-global preferenc
 </requirements>
 
 ## Subtasks
-- [ ] 1.1 Extend the persisted `AppPreferences` model to carry the Focus Workspace flag with stable defaults.
-- [ ] 1.2 Add a v6 metadata migration and repair path for the new `app_preferences` column.
-- [ ] 1.3 Update SQLite preference load/save queries so the new field round-trips with the existing settings payload.
-- [ ] 1.4 Preserve startup preference loading and `.defaults` fallback semantics with the expanded model.
-- [ ] 1.5 Add regression coverage for fresh databases, upgraded databases, repaired preference loads, and startup ordering.
+- [x] 1.1 Extend the persisted `AppPreferences` model to carry the Focus Workspace flag with stable defaults.
+- [x] 1.2 Add a v6 metadata migration and repair path for the new `app_preferences` column.
+- [x] 1.3 Update SQLite preference load/save queries so the new field round-trips with the existing settings payload.
+- [x] 1.4 Preserve startup preference loading and `.defaults` fallback semantics with the expanded model.
+- [x] 1.5 Add regression coverage for fresh databases, upgraded databases, repaired preference loads, and startup ordering.
 
 ## Implementation Details
 Implement this task using the TechSpec **"Data Models"**, **"Impact Analysis"**, and **"Development Sequencing"** sections as the authoritative guide. Keep the change inside the existing preferences and metadata seams; do not widen scope into command enforcement, UI behavior, or restore normalization.
@@ -70,13 +70,13 @@ Implement this task using the TechSpec **"Data Models"**, **"Impact Analysis"**,
 
 ## Tests
 - Unit tests:
-  - [ ] `AppPreferences.defaults` returns `focusWorkspaceEnabled == false` and preserves existing default theme/font/keybinding behavior.
-  - [ ] Saving and reloading preferences through the command service preserves `focusWorkspaceEnabled` without mutating unrelated fields.
-  - [ ] Preference repair for stale theme or default-profile data does not clobber `focusWorkspaceEnabled`.
+  - [x] `AppPreferences.defaults` returns `focusWorkspaceEnabled == false` and preserves existing default theme/font/keybinding behavior.
+  - [x] Saving and reloading preferences through the command service preserves `focusWorkspaceEnabled` without mutating unrelated fields.
+  - [x] Preference repair for stale theme or default-profile data does not clobber `focusWorkspaceEnabled`.
 - Integration tests:
-  - [ ] Fresh SQLite bootstrap creates `user_version == 6`, includes `focus_workspace_enabled`, and seeds one `app_preferences` row with the flag set to false.
-  - [ ] Upgrading a v5 database to v6 preserves existing workspace metadata and adds `focus_workspace_enabled` with a false default.
-  - [ ] Startup still loads preferences before restore, and load failure still falls back to `.defaults` with Focus Workspace disabled.
+  - [x] Fresh SQLite bootstrap creates `user_version == 6`, includes `focus_workspace_enabled`, and seeds one `app_preferences` row with the flag set to false.
+  - [x] Upgrading a v5 database to v6 preserves existing workspace metadata and adds `focus_workspace_enabled` with a false default.
+  - [x] Startup still loads preferences before restore, and load failure still falls back to `.defaults` with Focus Workspace disabled.
 - Test coverage target: >=80%
 - All tests must pass
 

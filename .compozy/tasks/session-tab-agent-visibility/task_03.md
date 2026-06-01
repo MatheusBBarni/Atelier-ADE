@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Session terminal summary pipeline and shortcut catalog refresh"
 type: frontend
 complexity: high
@@ -31,12 +31,12 @@ Build the AppShell summary pipeline that prepares terminal-only child rows for e
 </requirements>
 
 ## Subtasks
-- [ ] 3.1 Define the render-ready terminal summary model and builder contract for one session.
-- [ ] 3.2 Build terminal-only summary generation from store tabs, resolver output, and exit snapshots.
-- [ ] 3.3 Add AppShell shortcut-catalog caching keyed by shortcut ID.
-- [ ] 3.4 Add event-driven catalog refresh behavior after profile save, reset, and delete flows.
-- [ ] 3.5 Keep selected-file-tab scenarios neutral so no terminal child row is falsely marked selected.
-- [ ] 3.6 Add automated coverage for mixed sessions, custom profile refresh, exit overlay, and neutral fallback behavior.
+- [x] 3.1 Define the render-ready terminal summary model and builder contract for one session.
+- [x] 3.2 Build terminal-only summary generation from store tabs, resolver output, and exit snapshots.
+- [x] 3.3 Add AppShell shortcut-catalog caching keyed by shortcut ID.
+- [x] 3.4 Add event-driven catalog refresh behavior after profile save, reset, and delete flows.
+- [x] 3.5 Keep selected-file-tab scenarios neutral so no terminal child row is falsely marked selected.
+- [x] 3.6 Add automated coverage for mixed sessions, custom profile refresh, exit overlay, and neutral fallback behavior.
 
 ## Implementation Details
 Implement the summary builder in AppShell and use the TechSpec "Data Models", "Testing Approach", and "Technical Considerations" sections as the authoritative pattern guide. Do not expand scope into file-tab rows, persisted status, or priority ranking. Existing command-service catalog loading remains the source of truth.
@@ -71,15 +71,15 @@ Implement the summary builder in AppShell and use the TechSpec "Data Models", "T
 
 ## Tests
 - Unit tests:
-  - [ ] Mixed session input containing terminal and file tabs produces summaries for terminal tabs only.
-  - [ ] Summary ordering follows `WorkspaceStore.terminalTabs(in:)` output order.
-  - [ ] Custom profile lookup resolves updated label and icon data after a catalog refresh.
-  - [ ] Exit snapshots only affect matching terminal tab summaries.
-  - [ ] A selected file tab in a mixed session results in no terminal summary marked selected.
+  - [x] Mixed session input containing terminal and file tabs produces summaries for terminal tabs only.
+  - [x] Summary ordering follows `WorkspaceStore.terminalTabs(in:)` output order.
+  - [x] Custom profile lookup resolves updated label and icon data after a catalog refresh.
+  - [x] Exit snapshots only affect matching terminal tab summaries.
+  - [x] A selected file tab in a mixed session results in no terminal summary marked selected.
 - Integration tests:
-  - [ ] Saving a custom agent profile triggers catalog refresh and updates subsequent summary identity output.
-  - [ ] Resetting or deleting an agent profile triggers catalog refresh without requiring app restart.
-  - [ ] Summary generation remains stable for sessions created with plain, default, and explicit agent-tab flows.
+  - [x] Saving a custom agent profile triggers catalog refresh and updates subsequent summary identity output.
+  - [x] Resetting or deleting an agent profile triggers catalog refresh without requiring app restart.
+  - [x] Summary generation remains stable for sessions created with plain, default, and explicit agent-tab flows.
 - Test coverage target: >=80%
 - All tests must pass
 
