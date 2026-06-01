@@ -59,6 +59,28 @@ struct AppThemeTests {
     }
 
     @Test
+    func selectionOptionsReturnSystemFirstThenCuratedCatalogOrder() {
+        let options = AppTheme.selectionOptions
+
+        #expect(options.map(\.id) == AppTheme.orderedSelectionIDs)
+        #expect(options.first == AppThemeSelectionOption(
+            id: AppTheme.systemSelectionID,
+            displayName: AppTheme.systemSelectionDisplayName,
+            kind: .system,
+            colorScheme: nil
+        ))
+
+        for (option, theme) in zip(options.dropFirst(), AppTheme.catalog) {
+            #expect(option == AppThemeSelectionOption(
+                id: theme.id,
+                displayName: theme.displayName,
+                kind: .preset,
+                colorScheme: theme.colorScheme
+            ))
+        }
+    }
+
+    @Test
     func curatedCatalogOrderDefinesSystemFallbackPresets() {
         #expect(AppTheme.catalog.map(\.id) == [
             "catppuccin",
@@ -79,25 +101,57 @@ struct AppThemeTests {
     }
 
     @Test
-    func workspaceStoreActiveThemeTracksPersistedPreferenceID() {
+    func runtimeAppearanceUsesEffectiveResolverAndOnlyForcesConcreteSelections() {
+        let store = WorkspaceStore(appPreferences: AppPreferences(themeID: AppTheme.systemSelectionID))
+
+        #expect(store.runtimeAppearance(systemScheme: .light) == AppRuntimeAppearance(
+            selectionID: AppTheme.systemSelectionID,
+            effectiveTheme: .catppuccin,
+            forcedColorScheme: nil
+        ))
+        #expect(store.runtimeAppearance(systemScheme: .dark) == AppRuntimeAppearance(
+            selectionID: AppTheme.systemSelectionID,
+            effectiveTheme: .dracula,
+            forcedColorScheme: nil
+        ))
+
+        store.updateAppPreferences(AppPreferences(themeID: "catppuccin"))
+
+        #expect(store.runtimeAppearance(systemScheme: .dark) == AppRuntimeAppearance(
+            selectionID: "catppuccin",
+            effectiveTheme: .catppuccin,
+            forcedColorScheme: .light
+        ))
+
+        store.updateAppPreferences(AppPreferences(themeID: "unknown-theme"))
+
+        #expect(store.runtimeAppearance(systemScheme: .dark) == AppRuntimeAppearance(
+            selectionID: AppTheme.systemSelectionID,
+            effectiveTheme: .dracula,
+            forcedColorScheme: nil
+        ))
+    }
+
+    @Test
+    func workspaceStoreEffectiveThemeTracksPersistedPreferenceID() {
         let store = WorkspaceStore(appPreferences: AppPreferences(themeID: "catppuccin"))
 
-        #expect(store.activeTheme.id == "catppuccin")
-        #expect(store.activeTheme.colorScheme == .light)
+        #expect(store.effectiveTheme(systemScheme: .dark).id == "catppuccin")
+        #expect(store.effectiveTheme(systemScheme: .dark).colorScheme == .light)
 
         store.updateAppPreferences(AppPreferences(themeID: "dracula"))
 
-        #expect(store.activeTheme.id == "dracula")
-        #expect(store.activeTheme.colorScheme == .dark)
+        #expect(store.effectiveTheme(systemScheme: .light).id == "dracula")
+        #expect(store.effectiveTheme(systemScheme: .light).colorScheme == .dark)
     }
 
     @Test
     func activeThemeUpdatesShellAndTerminalPaletteValues() {
         let store = WorkspaceStore(appPreferences: AppPreferences(themeID: "cursor"))
-        let cursorTheme = store.activeTheme
+        let cursorTheme = store.effectiveTheme(systemScheme: .dark)
 
         store.updateAppPreferences(AppPreferences(themeID: "catppuccin"))
-        let catppuccinTheme = store.activeTheme
+        let catppuccinTheme = store.effectiveTheme(systemScheme: .dark)
 
         #expect(cursorTheme.shellPalette.shellBackground.hex != catppuccinTheme.shellPalette.shellBackground.hex)
         #expect(cursorTheme.shellPalette.primaryText.hex != catppuccinTheme.shellPalette.primaryText.hex)
@@ -109,5 +163,15 @@ struct AppThemeTests {
         let nordTheme = AppTheme.resolve(id: "nord")
         #expect(nordTheme.colorScheme == .dark)
         #expect(nordTheme.terminalAppearance.backgroundHex == "#2E3440")
+    }
+
+    @Test
+    func editorSyntaxThemeKindStaysGenericLightDarkAndPresetAgnostic() {
+        #expect(ThemeColorScheme.dark.editorSyntaxThemeKind == .dark)
+        #expect(ThemeColorScheme.light.editorSyntaxThemeKind == .light)
+
+        for theme in AppTheme.catalog {
+            #expect(theme.colorScheme.editorSyntaxThemeKind == (theme.colorScheme == .dark ? .dark : .light))
+        }
     }
 }

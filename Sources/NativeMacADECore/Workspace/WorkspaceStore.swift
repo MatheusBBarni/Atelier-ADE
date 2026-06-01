@@ -16,8 +16,17 @@ public final class WorkspaceStore {
         WorkspaceSelection(projectID: selectedProjectID, sessionID: selectedSessionID, tabID: selectedTabID)
     }
 
+    public func runtimeAppearance(systemScheme: ThemeColorScheme) -> AppRuntimeAppearance {
+        AppTheme.resolveRuntimeAppearance(selectionID: appPreferences.themeID, systemScheme: systemScheme)
+    }
+
+    public func effectiveTheme(systemScheme: ThemeColorScheme) -> AppTheme {
+        runtimeAppearance(systemScheme: systemScheme).effectiveTheme
+    }
+
+    @available(*, deprecated, message: "Use runtimeAppearance(systemScheme:) for selection-aware runtime appearance.")
     public var activeTheme: AppTheme {
-        AppTheme.resolve(id: appPreferences.themeID)
+        effectiveTheme(systemScheme: .dark)
     }
 
     public init(

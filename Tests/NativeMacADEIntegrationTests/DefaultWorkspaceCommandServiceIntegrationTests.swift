@@ -231,8 +231,8 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
             let loadedPreferences = try await harness.service.loadAppPreferences()
 
             #expect(loadedPreferences.themeID == theme.id)
-            #expect(harness.store.activeTheme == theme)
-            observedSchemes.insert(harness.store.activeTheme.colorScheme)
+            #expect(harness.store.effectiveTheme(systemScheme: .dark) == theme)
+            observedSchemes.insert(harness.store.effectiveTheme(systemScheme: .dark).colorScheme)
         }
 
         #expect(observedSchemes.contains(.dark))

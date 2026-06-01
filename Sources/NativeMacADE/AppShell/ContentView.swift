@@ -35,6 +35,19 @@ private extension ThemeColorScheme {
     }
 }
 
+private extension ColorScheme {
+    var themeColorScheme: ThemeColorScheme {
+        switch self {
+        case .dark:
+            return .dark
+        case .light:
+            return .light
+        @unknown default:
+            return .light
+        }
+    }
+}
+
 struct ContentView: View {
     let shellState: AppShellState
     let store: WorkspaceStore
@@ -42,6 +55,7 @@ struct ContentView: View {
     let terminalHostController: TerminalHostController
     let fileAccessService: any WorkspaceFileAccessing
     let fileBufferController: any WorkspaceFileBufferManaging
+    @Environment(\.colorScheme) private var runtimeColorScheme
     @State private var didRequestRestore = false
     @State private var isRestoring = true
     @State private var restoreResult: RestoreWorkspaceResult?
@@ -134,12 +148,12 @@ struct ContentView: View {
         }
         .frame(minWidth: 1_040, minHeight: 680)
         .background(theme.shellBackground.color)
-        .preferredColorScheme(activeTheme.colorScheme.swiftUIColorScheme)
+        .preferredColorScheme(runtimeAppearance.forcedColorScheme?.swiftUIColorScheme)
         .tint(theme.accent.color)
         .environment(\.shellThemePalette, theme)
         .environment(\.shellUIFontSize, store.appPreferences.terminalFontSize)
         .onAppear(perform: applyActiveTheme)
-        .onChange(of: activeTheme) { _, _ in applyActiveTheme() }
+        .onChange(of: runtimeAppearance) { _, _ in applyActiveTheme() }
         .task {
             guard !didRequestRestore else { return }
             didRequestRestore = true
@@ -188,8 +202,12 @@ struct ContentView: View {
         }
     }
 
+    private var runtimeAppearance: AppRuntimeAppearance {
+        store.runtimeAppearance(systemScheme: runtimeColorScheme.themeColorScheme)
+    }
+
     private var activeTheme: AppTheme {
-        store.activeTheme
+        runtimeAppearance.effectiveTheme
     }
 
     private var theme: ShellThemePalette {
@@ -2557,7 +2575,12 @@ struct FileEditorHostView: View {
     }
 
     private var codeEditorTheme: Theme {
-        colorScheme == .dark ? Theme.defaultDark : Theme.defaultLight
+        switch colorScheme.themeColorScheme.editorSyntaxThemeKind {
+        case .dark:
+            return Theme.defaultDark
+        case .light:
+            return Theme.defaultLight
+        }
     }
 
     private func loadBuffer() async {

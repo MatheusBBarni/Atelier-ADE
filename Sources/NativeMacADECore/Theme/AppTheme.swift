@@ -60,9 +60,66 @@ public struct ShellThemePalette: Equatable, Sendable {
     }
 }
 
+public enum AppThemeSelectionOptionKind: Equatable, Sendable {
+    case system
+    case preset
+}
+
+public struct AppThemeSelectionOption: Identifiable, Equatable, Sendable {
+    public var id: String
+    public var displayName: String
+    public var kind: AppThemeSelectionOptionKind
+    public var colorScheme: ThemeColorScheme?
+
+    public init(
+        id: String,
+        displayName: String,
+        kind: AppThemeSelectionOptionKind,
+        colorScheme: ThemeColorScheme?
+    ) {
+        self.id = id
+        self.displayName = displayName
+        self.kind = kind
+        self.colorScheme = colorScheme
+    }
+}
+
+public struct AppRuntimeAppearance: Equatable, Sendable {
+    public var selectionID: String
+    public var effectiveTheme: AppTheme
+    public var forcedColorScheme: ThemeColorScheme?
+
+    public init(
+        selectionID: String,
+        effectiveTheme: AppTheme,
+        forcedColorScheme: ThemeColorScheme?
+    ) {
+        self.selectionID = selectionID
+        self.effectiveTheme = effectiveTheme
+        self.forcedColorScheme = forcedColorScheme
+    }
+}
+
+public enum EditorSyntaxThemeKind: Equatable, Sendable {
+    case dark
+    case light
+}
+
+public extension ThemeColorScheme {
+    var editorSyntaxThemeKind: EditorSyntaxThemeKind {
+        switch self {
+        case .dark:
+            return .dark
+        case .light:
+            return .light
+        }
+    }
+}
+
 public struct AppTheme: Identifiable, Equatable, Sendable {
     public static let defaultID = "cursor"
     public static let systemSelectionID = "system"
+    public static let systemSelectionDisplayName = "System"
     public static let defaultSelectionID = systemSelectionID
 
     public var id: String
@@ -399,6 +456,23 @@ public struct AppTheme: Identifiable, Equatable, Sendable {
     public static let supportedIDs: Set<String> = Set(catalog.map(\.id))
     public static let orderedSelectionIDs: [String] = [systemSelectionID] + catalog.map(\.id)
     public static let supportedSelectionIDs: Set<String> = Set(orderedSelectionIDs)
+    public static var selectionOptions: [AppThemeSelectionOption] {
+        [
+            AppThemeSelectionOption(
+                id: systemSelectionID,
+                displayName: systemSelectionDisplayName,
+                kind: .system,
+                colorScheme: nil
+            )
+        ] + catalog.map { theme in
+            AppThemeSelectionOption(
+                id: theme.id,
+                displayName: theme.displayName,
+                kind: .preset,
+                colorScheme: theme.colorScheme
+            )
+        }
+    }
 
     public static var firstLightPreset: AppTheme {
         guard let theme = catalog.first(where: { $0.colorScheme == .light }) else {
@@ -428,13 +502,22 @@ public struct AppTheme: Identifiable, Equatable, Sendable {
     }
 
     public static func resolveEffective(selectionID: String?, systemScheme: ThemeColorScheme) -> AppTheme {
-        guard let selectionID,
-              selectionID != systemSelectionID,
-              let theme = catalog.first(where: { $0.id == selectionID })
-        else {
-            return systemPreset(for: systemScheme)
-        }
-        return theme
+        resolveRuntimeAppearance(selectionID: selectionID, systemScheme: systemScheme).effectiveTheme
+    }
+
+    public static func resolveRuntimeAppearance(
+        selectionID: String?,
+        systemScheme: ThemeColorScheme
+    ) -> AppRuntimeAppearance {
+        let normalizedSelectionID = selectionID.flatMap { isSupportedSelectionID($0) ? $0 : nil } ?? defaultSelectionID
+        let concreteTheme = catalog.first { $0.id == normalizedSelectionID }
+        let effectiveTheme = concreteTheme ?? systemPreset(for: systemScheme)
+
+        return AppRuntimeAppearance(
+            selectionID: normalizedSelectionID,
+            effectiveTheme: effectiveTheme,
+            forcedColorScheme: concreteTheme?.colorScheme
+        )
     }
 
     private static func systemPreset(for scheme: ThemeColorScheme) -> AppTheme {
