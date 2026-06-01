@@ -175,6 +175,32 @@ public final class WorkspaceStore {
         appPreferences = preferences
     }
 
+    func applyProjectOrder(_ orderedProjectIDs: [UUID]) {
+        var sortIndexByID: [UUID: Int] = [:]
+        for (index, projectID) in orderedProjectIDs.enumerated() where sortIndexByID[projectID] == nil {
+            sortIndexByID[projectID] = index
+        }
+        for index in projects.indices {
+            guard let sortIndex = sortIndexByID[projects[index].id] else { continue }
+            projects[index].sortIndex = sortIndex
+        }
+        projects.sort {
+            if $0.sortIndex == $1.sortIndex { return $0.lastOpenedAt > $1.lastOpenedAt }
+            return $0.sortIndex < $1.sortIndex
+        }
+    }
+
+    func applyTabOrder(sessionID: UUID, orderedTabIDs: [UUID]) {
+        var ordinalByID: [UUID: Int] = [:]
+        for (index, tabID) in orderedTabIDs.enumerated() where ordinalByID[tabID] == nil {
+            ordinalByID[tabID] = index
+        }
+        for index in tabs.indices where tabs[index].sessionID == sessionID {
+            guard let ordinal = ordinalByID[tabs[index].id] else { continue }
+            tabs[index].ordinal = ordinal
+        }
+    }
+
     public func removeTab(id: UUID) {
         let tabsBeforeRemoval = tabsForSelectedSession
         let removed = tabs.first { $0.id == id }

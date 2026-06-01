@@ -228,6 +228,70 @@ struct WorkspaceStoreTests {
     }
 
     @Test
+    func applyingProjectOrderRewritesDenseSortIndexesWithoutChangingSelection() {
+        let firstProjectID = UUID()
+        let secondProjectID = UUID()
+        let thirdProjectID = UUID()
+        let sessionID = UUID()
+        let tabID = UUID()
+        let store = WorkspaceStore(
+            projects: [
+                WorkspaceProject(id: firstProjectID, path: "/tmp/first", displayName: "first", sortIndex: 20),
+                WorkspaceProject(id: secondProjectID, path: "/tmp/second", displayName: "second", sortIndex: 20),
+                WorkspaceProject(id: thirdProjectID, path: "/tmp/third", displayName: "third", sortIndex: 10)
+            ],
+            sessions: [
+                WorkspaceSession(id: sessionID, projectID: secondProjectID, title: "Selected")
+            ],
+            tabs: [
+                WorkspaceTab(id: tabID, sessionID: sessionID, workingDirectory: "/tmp/second", ordinal: 0)
+            ],
+            selectedProjectID: secondProjectID,
+            selectedSessionID: sessionID,
+            selectedTabID: tabID
+        )
+
+        store.applyProjectOrder([thirdProjectID, firstProjectID, secondProjectID])
+
+        #expect(store.projects.map(\.id) == [thirdProjectID, firstProjectID, secondProjectID])
+        #expect(store.projects.map(\.sortIndex) == [0, 1, 2])
+        #expect(store.selectedProjectID == secondProjectID)
+        #expect(store.selectedSessionID == sessionID)
+        #expect(store.selectedTabID == tabID)
+    }
+
+    @Test
+    func applyingTabOrderRewritesDenseOrdinalsWithoutChangingSelection() {
+        let projectID = UUID()
+        let sessionID = UUID()
+        let firstTabID = UUID()
+        let secondTabID = UUID()
+        let thirdTabID = UUID()
+        let store = WorkspaceStore(
+            projects: [
+                WorkspaceProject(id: projectID, path: "/tmp/project", displayName: "project")
+            ],
+            sessions: [
+                WorkspaceSession(id: sessionID, projectID: projectID, title: "Selected")
+            ],
+            tabs: [
+                WorkspaceTab(id: firstTabID, sessionID: sessionID, workingDirectory: "/tmp/project", ordinal: 20),
+                WorkspaceTab(id: secondTabID, sessionID: sessionID, workingDirectory: "/tmp/project", ordinal: 10),
+                WorkspaceTab(id: thirdTabID, sessionID: sessionID, workingDirectory: "/tmp/project", ordinal: 20)
+            ],
+            selectedProjectID: projectID,
+            selectedSessionID: sessionID,
+            selectedTabID: secondTabID
+        )
+
+        store.applyTabOrder(sessionID: sessionID, orderedTabIDs: [thirdTabID, firstTabID, secondTabID])
+
+        #expect(store.tabsForSelectedSession.map(\.id) == [thirdTabID, firstTabID, secondTabID])
+        #expect(store.tabsForSelectedSession.map(\.ordinal) == [0, 1, 2])
+        #expect(store.selectedTabID == secondTabID)
+    }
+
+    @Test
     func mixedTabActivationOrderProducesWorkingSetInputForRightSidebar() {
         let projectID = UUID()
         let sessionID = UUID()

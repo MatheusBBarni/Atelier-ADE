@@ -185,6 +185,70 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
         try await activateSelection { $0.selectTab(id: id) }
     }
 
+    public func reorderProjects(_ orderedProjectIDs: [UUID]) async throws {
+        let visibleProjectIDs = store.projects.map(\.id)
+        try validateProjectReorderPayload(orderedProjectIDs, visibleProjectIDs: visibleProjectIDs)
+
+        let persistedProjects = try await persist { try await persistenceStore.loadProjects() }
+        let persistedProjectIDs = persistedProjects.map(\.id)
+        let persistedProjectIDSet = Set(persistedProjectIDs)
+        guard Set(visibleProjectIDs).isSubset(of: persistedProjectIDSet) else {
+            throw WorkspaceCommandError.invalidProjectOrder("Project order cannot be persisted because a visible project is missing from persistence")
+        }
+
+        let visibleProjectIDSet = Set(visibleProjectIDs)
+        let hiddenPersistedProjectIDs = persistedProjectIDs.filter { !visibleProjectIDSet.contains($0) }
+        let persistedProjectOrder = orderedProjectIDs + hiddenPersistedProjectIDs
+
+        try await persist { try await persistenceStore.saveProjectOrder(persistedProjectOrder) }
+        store.applyProjectOrder(orderedProjectIDs)
+        try await persistSnapshot()
+    }
+
+    public func reorderTabs(sessionID: UUID, orderedVisibleTabIDs: [UUID]) async throws {
+        guard store.sessions.contains(where: { $0.id == sessionID }) else {
+            throw WorkspaceCommandError.missingSession(sessionID)
+        }
+        guard store.selectedSessionID == sessionID else {
+            throw WorkspaceCommandError.invalidTabOrder("Tab order can only be changed for the selected session")
+        }
+
+        let visibleTabIDs = store.tabs(for: sessionID).map(\.id)
+        try validateTabReorderPayload(orderedVisibleTabIDs, visibleTabIDs: visibleTabIDs)
+
+        let persistedTabs = try await persist { try await persistenceStore.loadTabs() }
+        let persistedSessionTabs = persistedTabs
+            .filter { $0.sessionID == sessionID }
+            .sorted {
+                if $0.ordinal == $1.ordinal { return $0.id.uuidString < $1.id.uuidString }
+                return $0.ordinal < $1.ordinal
+            }
+        let persistedSessionTabIDs = Set(persistedSessionTabs.map(\.id))
+        guard Set(visibleTabIDs).isSubset(of: persistedSessionTabIDs) else {
+            throw WorkspaceCommandError.invalidTabOrder("Tab order cannot be persisted because a visible tab is missing from persistence")
+        }
+
+        let visibleTabIDSet = Set(visibleTabIDs)
+        let hiddenPersistedTabIDs = persistedSessionTabs
+            .map(\.id)
+            .filter { !visibleTabIDSet.contains($0) }
+        let plan = SessionTabReorderPlan(
+            sessionID: sessionID,
+            visibleTabIDs: orderedVisibleTabIDs,
+            hiddenPersistedTabIDs: hiddenPersistedTabIDs
+        )
+        let snapshot = RestoreSnapshot(
+            selectedProjectID: store.selectedProjectID,
+            selectedSessionID: store.selectedSessionID,
+            selectedTabID: store.selectedTabID,
+            tabOrder: canonicalTabOrder(afterReordering: plan, persistedTabs: persistedTabs),
+            updatedAt: now()
+        )
+
+        try await persist { try await persistenceStore.saveTabOrder(plan, snapshot: snapshot) }
+        store.applyTabOrder(sessionID: sessionID, orderedTabIDs: orderedVisibleTabIDs)
+    }
+
     public func recordSettingsOpened(surface: String) {
         metrics.recordSettingsOpened()
         logger.emit("settings_opened", fields: [
@@ -1117,6 +1181,67 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
         return session
     }
 
+    private func validateProjectReorderPayload(
+        _ orderedProjectIDs: [UUID],
+        visibleProjectIDs: [UUID]
+    ) throws {
+        if let duplicateID = firstDuplicateID(in: orderedProjectIDs) {
+            throw WorkspaceCommandError.invalidProjectOrder("Duplicate project ID \(duplicateID.uuidString) in project order")
+        }
+        guard Set(orderedProjectIDs) == Set(visibleProjectIDs) else {
+            throw WorkspaceCommandError.invalidProjectOrder("Project order must include every visible project exactly once")
+        }
+    }
+
+    private func validateTabReorderPayload(
+        _ orderedVisibleTabIDs: [UUID],
+        visibleTabIDs: [UUID]
+    ) throws {
+        if let duplicateID = firstDuplicateID(in: orderedVisibleTabIDs) {
+            throw WorkspaceCommandError.invalidTabOrder("Duplicate tab ID \(duplicateID.uuidString) in tab order")
+        }
+        guard Set(orderedVisibleTabIDs) == Set(visibleTabIDs) else {
+            throw WorkspaceCommandError.invalidTabOrder("Tab order must include every visible tab for the selected session exactly once")
+        }
+    }
+
+    private func firstDuplicateID(in ids: [UUID]) -> UUID? {
+        var seen: Set<UUID> = []
+        for id in ids where !seen.insert(id).inserted {
+            return id
+        }
+        return nil
+    }
+
+    private func canonicalTabOrder(
+        afterReordering plan: SessionTabReorderPlan,
+        persistedTabs: [WorkspaceTab]
+    ) -> [UUID] {
+        var reorderedOrdinalByID: [UUID: Int] = [:]
+        for (ordinal, tabID) in plan.orderedTabIDs.enumerated() where reorderedOrdinalByID[tabID] == nil {
+            reorderedOrdinalByID[tabID] = ordinal
+        }
+        return persistedTabs
+            .sorted { lhs, rhs in
+                if lhs.sessionID != rhs.sessionID {
+                    return lhs.sessionID.uuidString < rhs.sessionID.uuidString
+                }
+
+                if lhs.sessionID == plan.sessionID {
+                    let lhsOrdinal = reorderedOrdinalByID[lhs.id] ?? Int.max
+                    let rhsOrdinal = reorderedOrdinalByID[rhs.id] ?? Int.max
+                    if lhsOrdinal != rhsOrdinal { return lhsOrdinal < rhsOrdinal }
+                    return lhs.id.uuidString < rhs.id.uuidString
+                }
+
+                if lhs.ordinal != rhs.ordinal {
+                    return lhs.ordinal < rhs.ordinal
+                }
+                return lhs.id.uuidString < rhs.id.uuidString
+            }
+            .map(\.id)
+    }
+
     private func persistedProject(matchingPath path: String) async throws -> WorkspaceProject? {
         let standardizedPath = URL(fileURLWithPath: path).standardizedFileURL.path
         let persistedProjects = try await persist { try await persistenceStore.loadProjects() }
@@ -1387,6 +1512,10 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
             return "terminal_close_rejected"
         case .dirtyFileTabCloseRejected:
             return "dirty_file_close_rejected"
+        case .invalidProjectOrder:
+            return "invalid_project_order"
+        case .invalidTabOrder:
+            return "invalid_tab_order"
         case .terminalUnavailable:
             return "terminal_unavailable"
         case .persistenceFailed:
