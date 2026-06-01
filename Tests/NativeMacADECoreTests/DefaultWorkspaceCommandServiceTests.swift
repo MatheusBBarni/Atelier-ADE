@@ -1649,6 +1649,22 @@ struct DefaultWorkspaceCommandServiceTests {
     }
 
     @Test
+    func reorderingSelectedProjectKeepsItSelectedAfterCommandCompletes() async throws {
+        let harness = makeHarness()
+        let firstProject = try await harness.service.openProject(path: makeTemporaryProjectDirectory(named: "first"))
+        let secondProject = try await harness.service.openProject(path: makeTemporaryProjectDirectory(named: "second"))
+        let thirdProject = try await harness.service.openProject(path: makeTemporaryProjectDirectory(named: "third"))
+        try await harness.service.selectProject(id: secondProject.id)
+
+        try await harness.service.reorderProjects([thirdProject.id, secondProject.id, firstProject.id])
+
+        #expect(harness.store.projects.map(\.id) == [thirdProject.id, secondProject.id, firstProject.id])
+        #expect(harness.store.selectedProjectID == secondProject.id)
+        #expect(try await harness.persistence.loadProjects().map(\.id) == [thirdProject.id, secondProject.id, firstProject.id])
+        #expect(try await harness.persistence.loadRestoreSnapshot()?.selectedProjectID == secondProject.id)
+    }
+
+    @Test
     func reorderTabsRejectsUnknownOrOutOfSessionIDsWithoutMutatingState() async throws {
         let harness = makeHarness()
         let project = try await harness.service.openProject(path: makeTemporaryProjectDirectory())

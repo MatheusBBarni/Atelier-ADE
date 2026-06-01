@@ -3,6 +3,7 @@ import AppKit
 import LanguageSupport
 import NativeMacADECore
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ShellThemePaletteKey: EnvironmentKey {
     static let defaultValue = AppTheme.defaultTheme.shellPalette
@@ -639,6 +640,8 @@ struct ProjectSidebarView: View {
     @State private var renameDraft: SessionRenameDraft?
     @State private var expandedProjectIDs: Set<UUID> = []
     @State private var hoveredSessionID: UUID?
+    @State private var draggedProjectID: UUID?
+    @State private var activeProjectInsertion: ProjectOrderInsertion?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -661,6 +664,7 @@ struct ProjectSidebarView: View {
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 10) {
+                        let projectIDs = store.projects.map(\.id)
                         ForEach(store.projects) { project in
                             let projectSessions = sessions(for: project.id)
                             let isExpanded = expandedProjectIDs.contains(project.id)
@@ -677,6 +681,9 @@ struct ProjectSidebarView: View {
                                     }
                                 ) {
                                     pendingRemoval = project
+                                }
+                                .onDrag {
+                                    beginDraggingProject(project.id)
                                 }
 
                                 if isExpanded {
@@ -731,6 +738,22 @@ struct ProjectSidebarView: View {
                                 RoundedRectangle(cornerRadius: 18)
                                     .stroke(project.id == store.selectedProjectID ? theme.activeBorder.color.opacity(0.85) : theme.border.color.opacity(0.65), lineWidth: 1)
                             }
+                            .modifier(ProjectSidebarDropTargetModifier(
+                                targetProjectID: project.id,
+                                currentProjectIDs: projectIDs,
+                                draggedProjectID: $draggedProjectID,
+                                activeInsertion: $activeProjectInsertion,
+                                onCommit: submitProjectReorder
+                            ))
+                            .overlay(alignment: .top) {
+                                projectInsertionIndicator(for: project.id, edge: .before)
+                            }
+                            .overlay(alignment: .bottom) {
+                                projectInsertionIndicator(for: project.id, edge: .after)
+                            }
+                            .opacity(draggedProjectID == project.id ? 0.62 : 1)
+                            .animation(.easeInOut(duration: 0.12), value: draggedProjectID)
+                            .animation(.easeInOut(duration: 0.12), value: activeProjectInsertion)
                         }
                     }
                     .padding(.horizontal, 16)
@@ -885,6 +908,186 @@ struct ProjectSidebarView: View {
             expandedProjectIDs.insert(id)
         }
         selectProject(id)
+    }
+
+    private func beginDraggingProject(_ id: UUID) -> NSItemProvider {
+        draggedProjectID = id
+        activeProjectInsertion = nil
+        return ProjectSidebarDrag.itemProvider(for: id)
+    }
+
+    private func submitProjectReorder(moving movedProjectID: UUID, to insertion: ProjectOrderInsertion) {
+        guard let orderedProjectIDs = ProjectReorderPayload.orderedProjectIDs(
+            moving: movedProjectID,
+            to: insertion,
+            in: store.projects.map(\.id)
+        ) else {
+            return
+        }
+
+        Task {
+            do {
+                try await commandService.reorderProjects(orderedProjectIDs)
+            } catch {
+                userMessage = UserMessage(title: "Project order could not be saved", detail: String(describing: error))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func projectInsertionIndicator(for projectID: UUID, edge: ProjectOrderInsertionEdge) -> some View {
+        if activeProjectInsertion == ProjectOrderInsertion(targetProjectID: projectID, edge: edge) {
+            ProjectInsertionIndicator(edge: edge)
+        }
+    }
+}
+
+private struct ProjectSidebarDropTargetModifier: ViewModifier {
+    let targetProjectID: UUID
+    let currentProjectIDs: [UUID]
+    @Binding var draggedProjectID: UUID?
+    @Binding var activeInsertion: ProjectOrderInsertion?
+    let onCommit: (UUID, ProjectOrderInsertion) -> Void
+    @State private var targetHeight: CGFloat = 1
+
+    func body(content: Content) -> some View {
+        content
+            .background {
+                GeometryReader { proxy in
+                    Color.clear.preference(
+                        key: ProjectDropTargetHeightPreferenceKey.self,
+                        value: max(proxy.size.height, 1)
+                    )
+                }
+            }
+            .onPreferenceChange(ProjectDropTargetHeightPreferenceKey.self) { height in
+                targetHeight = max(height, 1)
+            }
+            .onDrop(
+                of: [ProjectSidebarDrag.projectIDType],
+                delegate: ProjectSidebarDropDelegate(
+                    targetProjectID: targetProjectID,
+                    targetHeight: targetHeight,
+                    currentProjectIDs: currentProjectIDs,
+                    draggedProjectID: $draggedProjectID,
+                    activeInsertion: $activeInsertion,
+                    onCommit: onCommit
+                )
+            )
+    }
+}
+
+private enum ProjectSidebarDrag {
+    static let projectIDType = UTType(exportedAs: "com.native-mac-ade.project-id")
+
+    static func itemProvider(for projectID: UUID) -> NSItemProvider {
+        let provider = NSItemProvider()
+        provider.registerDataRepresentation(forTypeIdentifier: projectIDType.identifier, visibility: .ownProcess) { completion in
+            completion(projectID.uuidString.data(using: .utf8), nil)
+            return nil
+        }
+        return provider
+    }
+}
+
+private struct ProjectDropTargetHeightPreferenceKey: PreferenceKey {
+    static let defaultValue: CGFloat = 1
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+private struct ProjectSidebarDropDelegate: DropDelegate {
+    let targetProjectID: UUID
+    let targetHeight: CGFloat
+    let currentProjectIDs: [UUID]
+    @Binding var draggedProjectID: UUID?
+    @Binding var activeInsertion: ProjectOrderInsertion?
+    let onCommit: (UUID, ProjectOrderInsertion) -> Void
+
+    func validateDrop(info: DropInfo) -> Bool {
+        proposedInsertion(for: info) != nil
+    }
+
+    func dropEntered(info: DropInfo) {
+        updateActiveInsertion(for: info)
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        guard updateActiveInsertion(for: info) else {
+            return DropProposal(operation: .cancel)
+        }
+        return DropProposal(operation: .move)
+    }
+
+    func dropExited(info: DropInfo) {
+        if activeInsertion?.targetProjectID == targetProjectID {
+            activeInsertion = nil
+        }
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        defer {
+            draggedProjectID = nil
+            activeInsertion = nil
+        }
+
+        guard let movedProjectID = draggedProjectID,
+              let insertion = proposedInsertion(for: info)
+        else {
+            return false
+        }
+
+        onCommit(movedProjectID, insertion)
+        return true
+    }
+
+    @discardableResult
+    private func updateActiveInsertion(for info: DropInfo) -> Bool {
+        guard let insertion = proposedInsertion(for: info) else {
+            if activeInsertion?.targetProjectID == targetProjectID {
+                activeInsertion = nil
+            }
+            return false
+        }
+
+        activeInsertion = insertion
+        return true
+    }
+
+    private func proposedInsertion(for info: DropInfo) -> ProjectOrderInsertion? {
+        guard let draggedProjectID,
+              draggedProjectID != targetProjectID,
+              currentProjectIDs.contains(draggedProjectID),
+              currentProjectIDs.contains(targetProjectID)
+        else {
+            return nil
+        }
+
+        let edge: ProjectOrderInsertionEdge = info.location.y < targetHeight / 2 ? .before : .after
+        return ProjectOrderInsertion(targetProjectID: targetProjectID, edge: edge)
+    }
+}
+
+private struct ProjectInsertionIndicator: View {
+    let edge: ProjectOrderInsertionEdge
+    @Environment(\.shellThemePalette) private var theme
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Circle()
+                .fill(theme.accent.color)
+                .frame(width: 7, height: 7)
+            Rectangle()
+                .fill(theme.accent.color)
+                .frame(height: 2)
+        }
+        .shadow(color: theme.accent.color.opacity(0.32), radius: 3, y: 1)
+        .padding(.horizontal, 8)
+        .offset(y: edge == .before ? -6 : 6)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
 
