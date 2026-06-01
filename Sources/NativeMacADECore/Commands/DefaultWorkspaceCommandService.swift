@@ -17,6 +17,7 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
     private let persistenceStore: any WorkspacePersistenceStore
     private let restoreCoordinator: RestoreCoordinator
     private let terminalSurfaceManager: any WorkspaceTerminalSurfaceManaging
+    private let terminalExitEvents: TerminalExitEventSource?
     private let fileAccess: any WorkspaceFileAccessing
     private let fileBufferManager: any WorkspaceFileBufferManaging
     private let externalEditorOpener: any ExternalEditorOpening
@@ -31,6 +32,7 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
         persistenceStore: any WorkspacePersistenceStore,
         restoreCoordinator: RestoreCoordinator,
         terminalSurfaceManager: any WorkspaceTerminalSurfaceManaging,
+        terminalExitEvents: TerminalExitEventSource? = nil,
         fileAccess: (any WorkspaceFileAccessing)? = nil,
         fileBufferManager: (any WorkspaceFileBufferManaging)? = nil,
         externalEditorOpener: (any ExternalEditorOpening)? = nil,
@@ -44,6 +46,7 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
         self.persistenceStore = persistenceStore
         self.restoreCoordinator = restoreCoordinator
         self.terminalSurfaceManager = terminalSurfaceManager
+        self.terminalExitEvents = terminalExitEvents
         self.fileAccess = resolvedFileAccess
         self.fileBufferManager = fileBufferManager ?? WorkspaceFileBufferController(fileAccess: resolvedFileAccess, now: now)
         self.externalEditorOpener = externalEditorOpener ?? SystemExternalEditorOpener()
@@ -107,7 +110,19 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
             guard persistedProjects.contains(where: { $0.id == id }) else {
                 throw WorkspaceCommandError.missingProject(id)
             }
+            let persistedSessions = try await persist { try await persistenceStore.loadSessions() }
+            let removedSessionIDs = Set(persistedSessions.filter { $0.projectID == id }.map(\.id))
+            let removedTerminalTabIDs: Set<UUID>
+            if removedSessionIDs.isEmpty {
+                removedTerminalTabIDs = []
+            } else {
+                let persistedTabs = try await persist { try await persistenceStore.loadTabs() }
+                removedTerminalTabIDs = Set(persistedTabs
+                    .filter { removedSessionIDs.contains($0.sessionID) && $0.kind == .terminal }
+                    .map(\.id))
+            }
             try await persist { try await persistenceStore.deleteProject(id: id) }
+            removeTerminalExitSnapshots(for: removedTerminalTabIDs)
             try await persistSnapshot()
             return
         }
@@ -144,7 +159,12 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
             guard persistedSessions.contains(where: { $0.id == id }) else {
                 throw WorkspaceCommandError.missingSession(id)
             }
+            let persistedTabs = try await persist { try await persistenceStore.loadTabs() }
+            let removedTerminalTabIDs = Set(persistedTabs
+                .filter { $0.sessionID == id && $0.kind == .terminal }
+                .map(\.id))
             try await persist { try await persistenceStore.deleteSession(id: id) }
+            removeTerminalExitSnapshots(for: removedTerminalTabIDs)
             try await persistSnapshot()
             return
         }
@@ -802,6 +822,7 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
             tabs: restoredStore.tabs,
             selection: restoredStore.selection
         )
+        pruneTerminalExitSnapshotsToCurrentTerminalTabs()
         surfacesByTabID.removeAll()
         for tab in store.tabs where tab.kind == .terminal {
             let surfaceStartedAt = now()
@@ -1840,6 +1861,17 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
         guard tab.kind == .terminal else { return }
         surfacesByTabID[tab.id] = nil
         terminalSurfaceManager.releaseSurface(for: tab.id)
+        terminalExitEvents?.removeSnapshot(tabID: tab.id)
+    }
+
+    private func removeTerminalExitSnapshots(for tabIDs: Set<UUID>) {
+        terminalExitEvents?.removeSnapshots(tabIDs: tabIDs)
+    }
+
+    private func pruneTerminalExitSnapshotsToCurrentTerminalTabs() {
+        terminalExitEvents?.pruneSnapshots(retaining: Set(store.tabs
+            .filter { $0.kind == .terminal }
+            .map(\.id)))
     }
 
     private func persist<T>(_ operation: @MainActor () async throws -> T) async throws -> T {

@@ -1754,6 +1754,23 @@ struct DefaultWorkspaceCommandServiceTests {
     }
 
     @Test
+    func closingTerminalTabRemovesTerminalExitSnapshot() async throws {
+        let harness = makeHarness()
+        let project = try await harness.service.openProject(path: makeTemporaryProjectDirectory())
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let retainedTab = try #require(harness.store.tabs.first)
+        let closedTab = try await harness.service.createTab(sessionID: session.id)
+        harness.terminalExitEvents.publish(tabID: retainedTab.id, exitStatus: 0)
+        harness.terminalExitEvents.publish(tabID: closedTab.id, exitStatus: 42)
+
+        try await harness.service.closeTab(tabID: closedTab.id, force: true)
+
+        #expect(harness.terminalExitEvents.snapshot(tabID: closedTab.id) == nil)
+        let retainedSnapshot = try #require(harness.terminalExitEvents.snapshot(tabID: retainedTab.id))
+        #expect(retainedSnapshot == TerminalExitObservation(tabID: retainedTab.id, exitStatus: 0))
+    }
+
+    @Test
     func closingFileTabBypassesTerminalCloseProtectionAndRemovesMetadata() async throws {
         let harness = makeHarness()
         let projectPath = try makeTemporaryProjectDirectory()
@@ -1844,6 +1861,27 @@ struct DefaultWorkspaceCommandServiceTests {
     }
 
     @Test
+    func removingSessionRemovesTerminalExitSnapshotsForItsTabs() async throws {
+        let harness = makeHarness()
+        let project = try await harness.service.openProject(path: makeTemporaryProjectDirectory())
+        let removedSession = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let firstRemovedTab = try #require(harness.store.tabs.first { $0.sessionID == removedSession.id })
+        let secondRemovedTab = try await harness.service.createTab(sessionID: removedSession.id)
+        let retainedSession = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let retainedTab = try #require(harness.store.tabs.first { $0.sessionID == retainedSession.id })
+        harness.terminalExitEvents.publish(tabID: firstRemovedTab.id, exitStatus: 1)
+        harness.terminalExitEvents.publish(tabID: secondRemovedTab.id, exitStatus: 2)
+        harness.terminalExitEvents.publish(tabID: retainedTab.id, exitStatus: 3)
+
+        try await harness.service.removeSession(id: removedSession.id)
+
+        #expect(harness.terminalExitEvents.snapshot(tabID: firstRemovedTab.id) == nil)
+        #expect(harness.terminalExitEvents.snapshot(tabID: secondRemovedTab.id) == nil)
+        let retainedSnapshot = try #require(harness.terminalExitEvents.snapshot(tabID: retainedTab.id))
+        #expect(retainedSnapshot == TerminalExitObservation(tabID: retainedTab.id, exitStatus: 3))
+    }
+
+    @Test
     func removingSessionWithMixedTabsReleasesOnlyTerminalSurfaces() async throws {
         let harness = makeHarness()
         let projectPath = try makeTemporaryProjectDirectory()
@@ -1926,6 +1964,28 @@ struct DefaultWorkspaceCommandServiceTests {
         #expect(harness.store.tabs.isEmpty)
         #expect(harness.terminal.canCloseRequestCount == 1)
         #expect(harness.terminal.releasedTabIDs == [terminalTab.id])
+    }
+
+    @Test
+    func removingProjectRemovesTerminalExitSnapshotsForContainedTabs() async throws {
+        let harness = makeHarness()
+        let removedProject = try await harness.service.openProject(path: makeTemporaryProjectDirectory(named: "removed"))
+        let removedSession = try await harness.service.createSession(projectID: removedProject.id, shortcutID: nil)
+        let removedFirstTab = try #require(harness.store.tabs.first { $0.sessionID == removedSession.id })
+        let removedSecondTab = try await harness.service.createTab(sessionID: removedSession.id)
+        let retainedProject = try await harness.service.openProject(path: makeTemporaryProjectDirectory(named: "retained"))
+        let retainedSession = try await harness.service.createSession(projectID: retainedProject.id, shortcutID: nil)
+        let retainedTab = try #require(harness.store.tabs.first { $0.sessionID == retainedSession.id })
+        harness.terminalExitEvents.publish(tabID: removedFirstTab.id, exitStatus: 4)
+        harness.terminalExitEvents.publish(tabID: removedSecondTab.id, exitStatus: 5)
+        harness.terminalExitEvents.publish(tabID: retainedTab.id, exitStatus: 6)
+
+        try await harness.service.removeProject(id: removedProject.id)
+
+        #expect(harness.terminalExitEvents.snapshot(tabID: removedFirstTab.id) == nil)
+        #expect(harness.terminalExitEvents.snapshot(tabID: removedSecondTab.id) == nil)
+        let retainedSnapshot = try #require(harness.terminalExitEvents.snapshot(tabID: retainedTab.id))
+        #expect(retainedSnapshot == TerminalExitObservation(tabID: retainedTab.id, exitStatus: 6))
     }
 
     @Test
@@ -2353,6 +2413,7 @@ struct DefaultWorkspaceCommandServiceTests {
         let store = WorkspaceStore()
         let persistence = InMemoryWorkspacePersistenceStore()
         let terminal = FakeTerminalSurfaceManager()
+        let terminalExitEvents = TerminalExitEventSource()
         let coordinator = RestoreCoordinator(persistenceStore: persistence)
         let fileAccess = LocalWorkspaceFileAccess()
         let fileBuffers = WorkspaceFileBufferController(fileAccess: fileAccess, now: now)
@@ -2362,6 +2423,7 @@ struct DefaultWorkspaceCommandServiceTests {
             persistenceStore: persistence,
             restoreCoordinator: coordinator,
             terminalSurfaceManager: terminal,
+            terminalExitEvents: terminalExitEvents,
             fileAccess: fileAccess,
             fileBufferManager: fileBuffers,
             externalEditorOpener: externalEditor,
@@ -2372,6 +2434,7 @@ struct DefaultWorkspaceCommandServiceTests {
             store: store,
             persistence: persistence,
             terminal: terminal,
+            terminalExitEvents: terminalExitEvents,
             fileBuffers: fileBuffers,
             externalEditor: externalEditor,
             service: service
@@ -2443,6 +2506,7 @@ private struct CommandServiceHarness<Persistence: WorkspacePersistenceStore> {
     let store: WorkspaceStore
     let persistence: Persistence
     let terminal: FakeTerminalSurfaceManager
+    let terminalExitEvents: TerminalExitEventSource
     let fileBuffers: WorkspaceFileBufferController
     let externalEditor: FakeExternalEditorOpener
     let service: DefaultWorkspaceCommandService

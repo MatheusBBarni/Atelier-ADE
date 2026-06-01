@@ -24,6 +24,19 @@ public final class TerminalExitEventSource {
         snapshotsByTabID[tabID]
     }
 
+    public func removeSnapshot(tabID: UUID) {
+        snapshotsByTabID[tabID] = nil
+    }
+
+    public func removeSnapshots(tabIDs: Set<UUID>) {
+        guard !tabIDs.isEmpty else { return }
+        snapshotsByTabID = snapshotsByTabID.filter { tabID, _ in !tabIDs.contains(tabID) }
+    }
+
+    public func pruneSnapshots(retaining retainedTabIDs: Set<UUID>) {
+        snapshotsByTabID = snapshotsByTabID.filter { tabID, _ in retainedTabIDs.contains(tabID) }
+    }
+
     public func publish(tabID: UUID, exitStatus: Int32?) {
         let observation = TerminalExitObservation(tabID: tabID, exitStatus: exitStatus)
         snapshotsByTabID[tabID] = observation

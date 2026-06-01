@@ -60,6 +60,7 @@ public struct AppDependencyContainer {
             persistenceStore: persistenceStore,
             restoreCoordinator: restoreCoordinator,
             terminalSurfaceManager: terminalHostController,
+            terminalExitEvents: terminalExitEvents,
             fileAccess: fileAccessService,
             fileBufferManager: fileBufferController,
             externalEditorOpener: externalEditorOpener,

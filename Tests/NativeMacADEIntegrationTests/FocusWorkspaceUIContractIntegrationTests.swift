@@ -41,6 +41,18 @@ struct FocusWorkspaceUIContractIntegrationTests {
     }
 
     @Test
+    func fileEditorHeaderExposesSelectedFileTabRenameAndCloseAffordances() throws {
+        let contentViewSource = try sourceFile("Sources/NativeMacADE/AppShell/ContentView.swift")
+
+        #expect(contentViewSource.contains("Button(\"Rename Tab\", systemImage: \"pencil\", action: renameTab)"))
+        #expect(contentViewSource.contains("Button(\"Close Tab\", systemImage: \"xmark\", action: closeTab)"))
+        #expect(contentViewSource.contains("private func renameTab()"))
+        #expect(contentViewSource.contains("NotificationCenter.default.post(name: .renameSelectedTab, object: nil)"))
+        #expect(contentViewSource.contains("private func closeTab()"))
+        #expect(contentViewSource.contains("NotificationCenter.default.post(name: .closeSelectedTab, object: nil)"))
+    }
+
+    @Test
     func appMenuHidesTerminalCreationCommandsWhenSelectedSessionPolicyBlocksThem() throws {
         let appSource = try sourceFile("Sources/NativeMacADE/NativeMacADEApp.swift")
 
