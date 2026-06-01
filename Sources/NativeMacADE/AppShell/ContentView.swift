@@ -2411,7 +2411,12 @@ struct TabChromeView: View {
                                 isReordering: draggedTabID != nil,
                                 onSelect: { selectTab(tab.id) },
                                 onDragStarted: { beginDraggingTab(tab.id) },
-                                onRename: { renameDraft = TabRenameDraft(tab: tab) },
+                                onRename: {
+                                    renameDraft = TabRenameDraft(
+                                        tab: tab,
+                                        legacySessionShortcutID: store.selectedSession?.shortcutID
+                                    )
+                                },
                                 onClose: { closeTab(tab.id) }
                             )
                         }
@@ -2482,7 +2487,10 @@ struct TabChromeView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .renameSelectedTab)) { _ in
             guard let selectedTab = store.selectedTab else { return }
-            renameDraft = TabRenameDraft(tab: selectedTab)
+            renameDraft = TabRenameDraft(
+                tab: selectedTab,
+                legacySessionShortcutID: store.selectedSession?.shortcutID
+            )
         }
         .onChange(of: visibleTabIDs) { _, updatedTabIDs in
             if let draggedTabID, !updatedTabIDs.contains(draggedTabID) {
@@ -2810,14 +2818,37 @@ struct TabItemView: View {
     let onDragStarted: () -> NSItemProvider
     let onRename: () -> Void
     let onClose: () -> Void
+    private let terminalPresentationResolver = SessionTerminalPresentationResolver()
     @Environment(\.shellThemePalette) private var theme
     @State private var isHovered = false
+
+    init(
+        tab: WorkspaceTab,
+        legacySessionShortcutID: UUID?,
+        isActive: Bool,
+        isDirty: Bool,
+        isReordering: Bool,
+        onSelect: @escaping () -> Void,
+        onDragStarted: @escaping () -> NSItemProvider,
+        onRename: @escaping () -> Void,
+        onClose: @escaping () -> Void
+    ) {
+        self.tab = tab
+        self.legacySessionShortcutID = legacySessionShortcutID
+        self.isActive = isActive
+        self.isDirty = isDirty
+        self.isReordering = isReordering
+        self.onSelect = onSelect
+        self.onDragStarted = onDragStarted
+        self.onRename = onRename
+        self.onClose = onClose
+    }
 
     var body: some View {
         ZStack(alignment: .trailing) {
             HStack(spacing: 8) {
                 tabIcon
-                Text(title)
+                Text(resolvedTitle)
                     .lineLimit(1)
                 if isDirty {
                     Circle()
@@ -2880,7 +2911,7 @@ struct TabItemView: View {
         .accessibilityValue(isActive ? "Active tab" : "Tab")
     }
 
-    private var title: String {
+    var resolvedTitle: String {
         if let customTitle = tab.title?.trimmingCharacters(in: .whitespacesAndNewlines), !customTitle.isEmpty {
             return customTitle
         }
@@ -2895,42 +2926,17 @@ struct TabItemView: View {
         }
 
         if tab.kind == .terminal {
-            return terminalTabTitle
+            return terminalPresentation?.title ?? "Terminal"
         }
 
         let directoryName = URL(fileURLWithPath: tab.workingDirectory).lastPathComponent
         return directoryName.isEmpty ? tab.workingDirectory : directoryName
     }
 
-    private var terminalTabTitle: String {
-        if let canonicalShortcut = canonicalTerminalShortcut {
-            return canonicalShortcut.label
-        }
-
-        guard let command = tab.launchCommand?.trimmingCharacters(in: .whitespacesAndNewlines), !command.isEmpty else {
-            return "Terminal"
-        }
-
-        let executableName = URL(fileURLWithPath: command).lastPathComponent.lowercased()
-        switch executableName {
-        case "codex":
-            return "Codex"
-        case "claude":
-            return "Claude"
-        case "opencode":
-            return "OpenCode"
-        default:
-            return executableName
-                .replacingOccurrences(of: "-", with: " ")
-                .replacingOccurrences(of: "_", with: " ")
-                .capitalized
-        }
-    }
-
     private var iconName: String {
         switch tab.kind {
         case .terminal:
-            return isActive ? "terminal.fill" : "terminal"
+            return terminalPresentation?.fallbackSystemImage(isActive: isActive) ?? (isActive ? "terminal.fill" : "terminal")
         case .file:
             return isActive ? "doc.text.fill" : "doc.text"
         }
@@ -2938,8 +2944,13 @@ struct TabItemView: View {
 
     @ViewBuilder
     private var tabIcon: some View {
-        if let agentShortcutForIcon {
-            AgentProfileIconView(shortcut: agentShortcutForIcon, fallbackSystemImage: nil, size: 18)
+        if tab.kind == .terminal,
+           let iconShortcut = terminalPresentation?.iconShortcut {
+            AgentProfileIconView(
+                shortcut: iconShortcut,
+                fallbackSystemImage: nil,
+                size: 18
+            )
                 .frame(width: 18, height: 18)
         } else {
             Image(systemName: iconName)
@@ -2947,35 +2958,8 @@ struct TabItemView: View {
         }
     }
 
-    private var agentShortcutForIcon: SessionShortcut? {
-        if let canonicalShortcut = canonicalTerminalShortcut {
-            return canonicalShortcut
-        }
-
-        guard tab.kind == .terminal,
-              let command = tab.launchCommand?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !command.isEmpty
-        else {
-            return nil
-        }
-
-        return SessionShortcut(label: "", launchCommand: command)
-    }
-
-    private var canonicalTerminalShortcut: SessionShortcut? {
-        guard tab.kind == .terminal else { return nil }
-
-        if let shortcutID = tab.shortcutID,
-           let shortcut = SessionShortcut.builtInDefaults.first(where: { $0.id == shortcutID }) {
-            return shortcut
-        }
-
-        guard tab.shortcutID == nil,
-              tab.launchCommand?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false,
-              let legacySessionShortcutID
-        else { return nil }
-
-        return SessionShortcut.builtInDefaults.first { $0.id == legacySessionShortcutID }
+    private var terminalPresentation: SessionTerminalPresentation? {
+        terminalPresentationResolver.resolve(tab: tab, legacySessionShortcutID: legacySessionShortcutID)
     }
 
     private var closeHelp: String {
@@ -2990,9 +2974,9 @@ struct TabItemView: View {
     private var accessibilityLabel: String {
         switch tab.kind {
         case .terminal:
-            return "Terminal tab \(title) in \(tab.workingDirectory)"
+            return "Terminal tab \(resolvedTitle) in \(tab.workingDirectory)"
         case .file:
-            return isDirty ? "Unsaved file tab \(title)" : "File tab \(title)"
+            return isDirty ? "Unsaved file tab \(resolvedTitle)" : "File tab \(resolvedTitle)"
         }
     }
 
@@ -4363,27 +4347,21 @@ struct TabRenameDraft: Identifiable, Equatable {
     let currentTitle: String
     let placeholderTitle: String
 
-    init(tab: WorkspaceTab) {
+    init(
+        tab: WorkspaceTab,
+        legacySessionShortcutID: UUID? = nil,
+        terminalPresentationResolver: SessionTerminalPresentationResolver = SessionTerminalPresentationResolver()
+    ) {
         id = tab.id
         currentTitle = tab.title ?? ""
         if tab.kind == .file, let filePath = tab.fileReference?.path {
             let fileName = URL(fileURLWithPath: filePath).lastPathComponent
             placeholderTitle = fileName.isEmpty ? filePath : fileName
-        } else if let command = tab.launchCommand?.trimmingCharacters(in: .whitespacesAndNewlines), !command.isEmpty {
-            let executableName = URL(fileURLWithPath: command).lastPathComponent.lowercased()
-            switch executableName {
-            case "codex":
-                placeholderTitle = "Codex"
-            case "claude":
-                placeholderTitle = "Claude"
-            case "opencode":
-                placeholderTitle = "OpenCode"
-            default:
-                placeholderTitle = executableName
-                    .replacingOccurrences(of: "-", with: " ")
-                    .replacingOccurrences(of: "_", with: " ")
-                    .capitalized
-            }
+        } else if let terminalPresentation = terminalPresentationResolver.resolve(
+            tab: tab,
+            legacySessionShortcutID: legacySessionShortcutID
+        ) {
+            placeholderTitle = terminalPresentation.fallbackTitle
         } else {
             placeholderTitle = "Terminal"
         }
