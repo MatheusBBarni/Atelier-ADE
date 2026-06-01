@@ -1,6 +1,7 @@
 ---
 import appScreenshot from "../assets/atelier-app-screenshot.png";
 import logo from "../assets/atelier-logo.png";
+import RepoStarCTA from "../components/RepoStarCTA.astro";
 import { getAstroSiteConfig } from "../config/siteConfig.mjs";
 import {
   getLandingPageAssetUrl,
@@ -63,26 +64,7 @@ const pageTitle = `${siteContent.productName} | Native macOS agent workspace`;
           </ul>
 
           <div class="hero-actions" aria-label="Primary evaluation paths">
-            {
-              primaryCta && (
-                <div
-                  class="repo-cta-slot"
-                  id="repo-star-cta"
-                  data-repo-star-cta
-                  data-repo-url={primaryCta.href}
-                >
-                  <a
-                    class="button button-primary"
-                    href={primaryCta.href}
-                    aria-label={primaryCta.ariaLabel}
-                    data-repo-cta-fallback
-                  >
-                    {primaryCta.label}
-                  </a>
-                  <p id="repo-cta-note">{primaryCta.description}</p>
-                </div>
-              )
-            }
+            {primaryCta && <RepoStarCTA cta={primaryCta} />}
             <div class="secondary-actions">
               {
                 secondaryCtas.map((link) => (

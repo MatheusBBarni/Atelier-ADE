@@ -3,8 +3,10 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { JSDOM } from "jsdom";
 import { beforeAll, describe, expect, it } from "vitest";
 
+import { enhanceRepoStarCTA } from "../../src/repoStarCta.ts";
 import {
   CANONICAL_PRODUCT_NAME,
   getLandingPageAssetUrl,
@@ -59,8 +61,10 @@ describe("Astro landing page integration", () => {
 
   it("renders fallback repo-first CTA markup before any JavaScript enhancement", () => {
     const indexHtml = readFileSync(indexPath, "utf8");
+    const dom = new JSDOM(indexHtml);
+    const repoLink = dom.window.document.querySelector("[data-repo-cta-link]");
     const repoSlotIndex = indexHtml.indexOf("data-repo-star-cta");
-    const fallbackIndex = indexHtml.indexOf("data-repo-cta-fallback");
+    const fallbackIndex = indexHtml.indexOf("data-repo-cta-link");
     const repoEvaluationIndex = indexHtml.indexOf('data-cta-kind="repo"');
     const docsEvaluationIndex = indexHtml.indexOf('data-cta-kind="docs"');
     const quickstartEvaluationIndex = indexHtml.indexOf('data-cta-kind="quickstart"');
@@ -70,11 +74,70 @@ describe("Astro landing page integration", () => {
     expect(indexHtml).toContain(`data-repo-url="${siteContent.repoUrl}"`);
     expect(indexHtml).toContain(`href="${siteContent.repoUrl}"`);
     expect(indexHtml).toContain("Open the repository");
-    expect(indexHtml).not.toContain("api.github.com");
+    expect(repoLink?.getAttribute("href")).toBe(siteContent.repoUrl);
+    expect(repoLink?.textContent).toContain("Open the repository");
 
     expect(repoEvaluationIndex).toBeGreaterThan(-1);
     expect(repoEvaluationIndex).toBeLessThan(docsEvaluationIndex);
     expect(docsEvaluationIndex).toBeLessThan(quickstartEvaluationIndex);
+  });
+
+  it("enhances the rendered CTA with mocked successful GitHub star metadata", async () => {
+    const indexHtml = readFileSync(indexPath, "utf8");
+    const dom = new JSDOM(indexHtml);
+    const fetchImpl = async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        stargazers_count: 321,
+        html_url: siteContent.repoUrl
+      })
+    });
+
+    const [state] = await enhanceRepoStarCTA({
+      documentRef: dom.window.document,
+      fetchImpl
+    });
+    const repoRoot = dom.window.document.querySelector("[data-repo-star-cta]");
+    const repoLink = dom.window.document.querySelector("[data-repo-cta-link]");
+
+    expect(state).toMatchObject({
+      stars: 321,
+      fallback: false
+    });
+    expect(repoRoot?.getAttribute("data-repo-cta-state")).toBe("enhanced");
+    expect(repoRoot?.getAttribute("data-repo-cta-stars")).toBe("321");
+    expect(repoLink?.getAttribute("href")).toBe(siteContent.repoUrl);
+    expect(repoLink?.textContent).toContain("Open the repository - 321 stars");
+  });
+
+  it("keeps the rendered CTA clickable when mocked GitHub metadata fails", async () => {
+    const indexHtml = readFileSync(indexPath, "utf8");
+    const dom = new JSDOM(indexHtml);
+
+    const [state] = await enhanceRepoStarCTA({
+      documentRef: dom.window.document,
+      fetchImpl: async () => ({
+        ok: false,
+        status: 429,
+        json: async () => ({
+          message: "rate limited"
+        })
+      })
+    });
+    const repoRoot = dom.window.document.querySelector("[data-repo-star-cta]");
+    const repoLink = dom.window.document.querySelector("[data-repo-cta-link]");
+
+    expect(state).toMatchObject({
+      href: siteContent.repoUrl,
+      label: "Open the repository",
+      fallback: true,
+      errorCode: "rate_limited"
+    });
+    expect(repoRoot?.getAttribute("data-repo-cta-state")).toBe("fallback");
+    expect(repoRoot?.getAttribute("data-repo-cta-stars")).toBeNull();
+    expect(repoLink?.getAttribute("href")).toBe(siteContent.repoUrl);
+    expect(repoLink?.textContent).toContain("Open the repository");
   });
 
   it("renders secondary README and quickstart paths without displacing the repository CTA", () => {
@@ -93,6 +156,29 @@ describe("Astro landing page integration", () => {
     expect(indexHtml).toContain("Atelier");
     expect(indexHtml).toContain("Atelier is an early open-source macOS project.");
     expect(indexHtml).not.toMatch(/NativeMacADE/);
+  });
+
+  it("passes a basic accessibility smoke check for headings, images, and links", () => {
+    const indexHtml = readFileSync(indexPath, "utf8");
+    const dom = new JSDOM(indexHtml);
+    const document = dom.window.document;
+    const headingLevels = [...document.querySelectorAll("h1, h2, h3")].map((heading) =>
+      Number(heading.tagName.slice(1))
+    );
+    const links = [...document.querySelectorAll("a")];
+
+    for (let index = 1; index < headingLevels.length; index += 1) {
+      expect(headingLevels[index] - headingLevels[index - 1]).toBeLessThanOrEqual(1);
+    }
+
+    expect(document.querySelector("h1")?.textContent).toBe(siteContent.productName);
+    expect(document.querySelector(`img[alt="${landingPageAssets.screenshot.alt}"]`)).toBeTruthy();
+    expect(document.querySelector("[data-repo-cta-link]")?.getAttribute("aria-label")).toBe(
+      "Open the Atelier GitHub repository"
+    );
+    expect(
+      links.every((link) => link.textContent?.trim() || link.getAttribute("aria-label"))
+    ).toBe(true);
   });
 
   it("keeps the Swift package buildable from the repository root", () => {
