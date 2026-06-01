@@ -189,7 +189,12 @@ describe("Astro landing page integration", () => {
   });
 
   it("keeps the Swift package buildable from the repository root", () => {
-    expect(() => run("swift", ["build"], repositoryRoot)).not.toThrow();
+    if (process.platform === "darwin") {
+      expect(() => run("swift", ["build"], repositoryRoot)).not.toThrow();
+      return;
+    }
+
+    expect(() => run("swift", ["package", "dump-package"], repositoryRoot)).not.toThrow();
   });
 
   it("keeps web tooling isolated from Swift and release automation surfaces", () => {
