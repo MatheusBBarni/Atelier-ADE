@@ -34,3 +34,24 @@ public struct FocusWorkspaceActiveCuePresentation: Equatable, Sendable {
         isVisible = preferences.focusWorkspaceEnabled
     }
 }
+
+public struct FocusWorkspaceBlockedActionPresentation: Equatable, Sendable {
+    public let title: String
+    public let detail: String
+
+    public init?(error: WorkspaceCommandError) {
+        guard case .focusWorkspaceRejected(let violation) = error else { return nil }
+        self.init(violation: violation)
+    }
+
+    public init(violation: FocusWorkspaceViolation) {
+        switch violation {
+        case .additionalTerminalTabBlocked:
+            title = "Focus Workspace kept this session focused"
+            detail = "This session already has a terminal tab. Use the current tab, or turn off Focus Workspace in Settings to use multiple terminal tabs."
+        case .additionalFileTabBlocked:
+            title = "Focus Workspace kept this file slot focused"
+            detail = "This session already has a file tab. Reopen that file to return to it, or turn off Focus Workspace in Settings before opening a different file."
+        }
+    }
+}

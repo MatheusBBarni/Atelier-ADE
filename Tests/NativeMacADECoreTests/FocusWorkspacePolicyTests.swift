@@ -55,6 +55,67 @@ struct FocusWorkspacePolicyTests {
     }
 
     @Test
+    func focusTerminalCreationAffordanceOnlyHidesWhenCreationIsBlocked() {
+        #expect(FocusWorkspacePolicy.shouldShowTerminalCreationAffordance(in: nil))
+        #expect(FocusWorkspacePolicy.shouldShowTerminalCreationAffordance(in: FocusWorkspaceSessionState(
+            enabled: false,
+            terminalTabCount: 2,
+            fileTabCount: 1
+        )))
+        #expect(FocusWorkspacePolicy.shouldShowTerminalCreationAffordance(in: FocusWorkspaceSessionState(
+            enabled: true,
+            terminalTabCount: 0,
+            fileTabCount: 1
+        )))
+        #expect(!FocusWorkspacePolicy.shouldShowTerminalCreationAffordance(in: FocusWorkspaceSessionState(
+            enabled: true,
+            terminalTabCount: 1,
+            fileTabCount: 0
+        )))
+    }
+
+    @Test
+    func focusTabRowVisibilityOnlyHidesForExactlyOneVisibleTab() {
+        #expect(FocusWorkspacePolicy.shouldShowTabRow(in: nil))
+        #expect(FocusWorkspacePolicy.shouldShowTabRow(in: FocusWorkspaceSessionState(
+            enabled: false,
+            terminalTabCount: 1,
+            fileTabCount: 0,
+            visibleTabCount: 1
+        )))
+        #expect(FocusWorkspacePolicy.shouldShowTabRow(in: FocusWorkspaceSessionState(
+            enabled: true,
+            terminalTabCount: 0,
+            fileTabCount: 0,
+            visibleTabCount: 0
+        )))
+        #expect(!FocusWorkspacePolicy.shouldShowTabRow(in: FocusWorkspaceSessionState(
+            enabled: true,
+            terminalTabCount: 1,
+            fileTabCount: 0,
+            visibleTabCount: 1
+        )))
+        #expect(!FocusWorkspacePolicy.shouldShowTabRow(in: FocusWorkspaceSessionState(
+            enabled: true,
+            terminalTabCount: 0,
+            fileTabCount: 1,
+            visibleTabCount: 1
+        )))
+        #expect(FocusWorkspacePolicy.shouldShowTabRow(in: FocusWorkspaceSessionState(
+            enabled: true,
+            terminalTabCount: 1,
+            fileTabCount: 1,
+            visibleTabCount: 2
+        )))
+        #expect(FocusWorkspacePolicy.shouldShowTabRow(in: FocusWorkspaceSessionState(
+            enabled: true,
+            terminalTabCount: 2,
+            fileTabCount: 1,
+            visibleTabCount: 3
+        )))
+    }
+
+    @Test
     func focusEnabledOneTerminalAndOneFileAllowsSameFileAndRejectsDifferentFile() {
         let state = FocusWorkspaceSessionState(
             enabled: true,
