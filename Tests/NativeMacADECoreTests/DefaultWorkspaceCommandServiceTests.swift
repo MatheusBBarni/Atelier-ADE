@@ -213,6 +213,62 @@ struct DefaultWorkspaceCommandServiceTests {
     }
 
     @Test
+    func defaultPreferencesAndFreshServiceLoadUseSystemSelection() async throws {
+        let harness = makeHarness()
+
+        let loadedPreferences = try await harness.service.loadAppPreferences()
+
+        #expect(AppPreferences.defaults.themeID == AppTheme.systemSelectionID)
+        #expect(AppPreferences.defaultThemeID == AppTheme.systemSelectionID)
+        #expect(AppPreferences.isSupportedThemeSelectionID(AppTheme.systemSelectionID))
+        #expect(loadedPreferences.themeID == AppTheme.systemSelectionID)
+        #expect(harness.store.appPreferences.themeID == AppTheme.systemSelectionID)
+    }
+
+    @Test
+    func savingSystemThemeSelectionPersistsAndUpdatesStore() async throws {
+        let now = Date(timeIntervalSince1970: 1_717_393_777)
+        let harness = makeHarness(now: { now })
+        let preferences = AppPreferences(
+            themeID: AppTheme.systemSelectionID,
+            terminalFontSize: 16,
+            updatedAt: Date(timeIntervalSince1970: 200)
+        )
+
+        try await harness.service.saveAppPreferences(preferences)
+
+        let persistedPreferences = try await harness.persistence.loadAppPreferences()
+        #expect(persistedPreferences.themeID == AppTheme.systemSelectionID)
+        #expect(persistedPreferences.terminalFontSize == 16)
+        #expect(persistedPreferences.updatedAt == now)
+        #expect(harness.store.appPreferences == persistedPreferences)
+        #expect(harness.service.metrics.settingsSavedCount == 1)
+        #expect(harness.service.metrics.settingsSaveFailureCount == 0)
+    }
+
+    @Test
+    func savingSystemAfterConcreteThemeRecordsSelectionAppliedObservation() async throws {
+        let harness = makeHarness()
+        try await harness.service.saveAppPreferences(AppPreferences(themeID: "dracula"))
+        harness.service.logger.clear()
+
+        try await harness.service.saveAppPreferences(AppPreferences(themeID: AppTheme.systemSelectionID))
+
+        #expect(try await harness.persistence.loadAppPreferences().themeID == AppTheme.systemSelectionID)
+        #expect(harness.store.appPreferences.themeID == AppTheme.systemSelectionID)
+        #expect(harness.service.metrics.themeChangedCount == 2)
+        #expect(harness.service.metrics.effectiveThemeAppliedCount == 2)
+        #expect(harness.service.logger.events.contains { event in
+            event.name == "theme_applied" &&
+                event.fields["theme_id"] == AppTheme.systemSelectionID &&
+                event.fields["selection_id"] == AppTheme.systemSelectionID &&
+                event.fields["resolved_theme_id"] == AppTheme.systemSelectionID &&
+                event.fields["resolution_status"] == "deferred_to_runtime_system_scheme" &&
+                event.fields["source"] == "user_selection"
+        })
+    }
+
+    @Test
     func savingPreferencesRejectsUnknownThemeAndLeavesPersistenceUnchanged() async throws {
         let harness = makeHarness()
         let originalPreferences = AppPreferences(
@@ -227,6 +283,55 @@ struct DefaultWorkspaceCommandServiceTests {
 
         #expect(try await harness.persistence.loadAppPreferences() == originalPreferences)
         #expect(harness.store.appPreferences == .defaults)
+        #expect(harness.service.metrics.settingsSaveFailureCount == 1)
+        #expect(harness.service.logger.events.contains { event in
+            event.name == "settings_save_failed" &&
+                event.fields["field"] == "theme_id" &&
+                event.fields["reason"] == "unknown_theme_id:unknown-theme"
+        })
+    }
+
+    @Test
+    func loadingInvalidPersistedThemeRepairsToSystemAndRecordsObservability() async throws {
+        let now = Date(timeIntervalSince1970: 1_717_393_888)
+        let harness = makeHarness(now: { now })
+        let originalOverride = KeybindingOverride(
+            commandID: .openSettings,
+            keyEquivalent: ",",
+            modifiers: [.command, .shift]
+        )
+        let stalePreferences = AppPreferences(
+            themeID: "removed-theme",
+            terminalFontSize: 18,
+            keybindings: [.openSettings: originalOverride],
+            updatedAt: Date(timeIntervalSince1970: 300)
+        )
+        try await harness.persistence.save(appPreferences: stalePreferences)
+
+        let loadedPreferences = try await harness.service.loadAppPreferences()
+        let persistedPreferences = try await harness.persistence.loadAppPreferences()
+
+        #expect(loadedPreferences.themeID == AppTheme.systemSelectionID)
+        #expect(loadedPreferences.terminalFontSize == 18)
+        #expect(loadedPreferences.keybindings == [.openSettings: originalOverride])
+        #expect(loadedPreferences.updatedAt == now)
+        #expect(persistedPreferences == loadedPreferences)
+        #expect(harness.store.appPreferences == loadedPreferences)
+        #expect(harness.service.metrics.themeRepairCount == 1)
+        #expect(harness.service.metrics.effectiveThemeAppliedCount == 1)
+        #expect(harness.service.logger.events.contains { event in
+            event.name == "theme_repaired" &&
+                event.fields["invalid_theme_id"] == "removed-theme" &&
+                event.fields["fallback_theme_id"] == AppTheme.systemSelectionID &&
+                event.fields["field"] == "theme_id"
+        })
+        #expect(harness.service.logger.events.contains { event in
+            event.name == "theme_applied" &&
+                event.fields["selection_id"] == AppTheme.systemSelectionID &&
+                event.fields["resolved_theme_id"] == AppTheme.systemSelectionID &&
+                event.fields["resolution_status"] == "deferred_to_runtime_system_scheme" &&
+                event.fields["source"] == "repair"
+        })
     }
 
     @Test
@@ -268,6 +373,7 @@ struct DefaultWorkspaceCommandServiceTests {
 
         #expect(harness.service.metrics.settingsSavedCount == 1)
         #expect(harness.service.metrics.themeChangedCount == 1)
+        #expect(harness.service.metrics.effectiveThemeAppliedCount == 1)
         #expect(harness.service.metrics.keybindingChangedCount == 0)
         #expect(harness.service.metrics.lastSavedChangedKeybindingCount == 0)
         #expect(harness.service.logger.events.contains { event in
@@ -276,7 +382,12 @@ struct DefaultWorkspaceCommandServiceTests {
                 event.fields["changed_keybinding_count"] == "0"
         })
         #expect(harness.service.logger.events.contains { event in
-            event.name == "theme_applied" && event.fields["theme_id"] == "dracula"
+            event.name == "theme_applied" &&
+                event.fields["theme_id"] == "dracula" &&
+                event.fields["selection_id"] == "dracula" &&
+                event.fields["resolved_theme_id"] == "dracula" &&
+                event.fields["resolution_status"] == "resolved_concrete" &&
+                event.fields["source"] == "user_selection"
         })
         #expect(harness.service.logger.events.contains { $0.name == "keybinding_changed" } == false)
     }

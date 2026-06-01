@@ -25,12 +25,16 @@ struct PerformanceMetricsTests {
         metrics.recordSettingsSaved(changedKeybindingCount: 3)
         metrics.recordSettingsSaveFailure()
         metrics.recordThemeChanged()
+        metrics.recordEffectiveThemeApplied()
+        metrics.recordThemeRepair()
         metrics.recordKeybindingsChanged(changedCommandCount: 3)
 
         #expect(metrics.settingsOpenedCount == 1)
         #expect(metrics.settingsSavedCount == 1)
         #expect(metrics.settingsSaveFailureCount == 1)
         #expect(metrics.themeChangedCount == 1)
+        #expect(metrics.effectiveThemeAppliedCount == 1)
+        #expect(metrics.themeRepairCount == 1)
         #expect(metrics.keybindingChangedCount == 3)
         #expect(metrics.lastSavedChangedKeybindingCount == 3)
     }

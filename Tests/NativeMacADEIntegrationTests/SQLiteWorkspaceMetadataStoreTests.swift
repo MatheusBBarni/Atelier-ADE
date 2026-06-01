@@ -17,9 +17,11 @@ struct SQLiteWorkspaceMetadataStoreTests {
         #expect(try inspectColumnNames(path: path, tableName: "session_shortcuts").contains("has_user_override"))
         #expect(try inspectColumnNames(path: path, tableName: "tabs").isSuperset(of: ["kind", "file_path", "title", "shortcut_id"]))
         #expect(try inspectColumnNames(path: path, tableName: "app_preferences").contains("terminal_font_size"))
+        #expect(WorkspaceMigrations.currentUserVersion == 5)
         #expect(try inspectUserVersion(path: path) == WorkspaceMigrations.currentUserVersion)
         #expect(try inspectAppPreferencesRowCount(path: path) == 1)
         #expect(preferences == .defaults)
+        #expect(preferences.themeID == AppTheme.systemSelectionID)
     }
 
     @Test
@@ -356,6 +358,30 @@ struct SQLiteWorkspaceMetadataStoreTests {
         try await store.save(appPreferences: nonNilDefaultPreferences)
 
         #expect(try await store.loadAppPreferences() == nonNilDefaultPreferences)
+    }
+
+    @Test
+    func appPreferencesRoundTripPreservesSystemThemeSelection() async throws {
+        let path = temporaryDatabasePath()
+        let store = try SQLiteWorkspaceMetadataStore(path: path)
+        let preferences = AppPreferences(
+            themeID: AppTheme.systemSelectionID,
+            terminalFontSize: 14,
+            updatedAt: Date(timeIntervalSince1970: 700)
+        )
+
+        try await store.save(appPreferences: preferences)
+
+        #expect(try await store.loadAppPreferences() == preferences)
+        #expect(try inspectUserVersion(path: path) == WorkspaceMigrations.currentUserVersion)
+        #expect(try inspectColumnNames(path: path, tableName: "app_preferences") == [
+            "id",
+            "theme_id",
+            "default_session_shortcut_id",
+            "terminal_font_size",
+            "keybindings_json",
+            "updated_at"
+        ])
     }
 
     @Test

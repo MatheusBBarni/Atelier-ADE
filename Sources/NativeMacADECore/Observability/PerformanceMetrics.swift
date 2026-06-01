@@ -41,6 +41,8 @@ public final class PerformanceMetrics {
     public private(set) var settingsSavedCount = 0
     public private(set) var settingsSaveFailureCount = 0
     public private(set) var themeChangedCount = 0
+    public private(set) var effectiveThemeAppliedCount = 0
+    public private(set) var themeRepairCount = 0
     public private(set) var keybindingChangedCount = 0
     public private(set) var lastSavedChangedKeybindingCount = 0
 
@@ -140,6 +142,14 @@ public final class PerformanceMetrics {
 
     public func recordThemeChanged() {
         themeChangedCount += 1
+    }
+
+    public func recordEffectiveThemeApplied() {
+        effectiveThemeAppliedCount += 1
+    }
+
+    public func recordThemeRepair() {
+        themeRepairCount += 1
     }
 
     public func recordKeybindingsChanged(changedCommandCount: Int) {

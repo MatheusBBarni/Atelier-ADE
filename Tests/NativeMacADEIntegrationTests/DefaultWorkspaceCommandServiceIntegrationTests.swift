@@ -174,6 +174,30 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
     }
 
     @Test
+    func systemThemeSelectionRoundTripsThroughSQLiteCommandService() async throws {
+        let harness = try makeHarness()
+
+        try await harness.service.saveAppPreferences(AppPreferences(
+            themeID: AppTheme.systemSelectionID,
+            terminalFontSize: 15
+        ))
+
+        let reloadedStore = WorkspaceStore()
+        let reloadedService = DefaultWorkspaceCommandService(
+            store: reloadedStore,
+            persistenceStore: harness.persistence,
+            restoreCoordinator: RestoreCoordinator(persistenceStore: harness.persistence),
+            terminalSurfaceManager: FakeIntegrationTerminalSurfaceManager()
+        )
+        let loadedPreferences = try await reloadedService.loadAppPreferences()
+
+        #expect(loadedPreferences.themeID == AppTheme.systemSelectionID)
+        #expect(loadedPreferences.terminalFontSize == 15)
+        #expect(try await harness.persistence.loadAppPreferences().themeID == AppTheme.systemSelectionID)
+        #expect(reloadedStore.appPreferences.themeID == AppTheme.systemSelectionID)
+    }
+
+    @Test
     func loadedKeybindingOverridesResolveAtRuntimeAndResetToDefaults() async throws {
         let harness = try makeHarness()
         let overrides = managedKeybindingOverrides()
@@ -197,11 +221,11 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
     }
 
     @Test
-    func loadingSavedNonDefaultThemesUpdatesObservedStoreActiveTheme() async throws {
+    func loadingSavedConcreteThemesUpdatesObservedStoreActiveTheme() async throws {
         let harness = try makeHarness()
         var observedSchemes: Set<ThemeColorScheme> = []
 
-        for theme in AppTheme.catalog where theme.id != AppTheme.defaultID {
+        for theme in AppTheme.catalog {
             try await harness.persistence.save(appPreferences: AppPreferences(themeID: theme.id))
 
             let loadedPreferences = try await harness.service.loadAppPreferences()
@@ -213,6 +237,49 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
 
         #expect(observedSchemes.contains(.dark))
         #expect(observedSchemes.contains(.light))
+    }
+
+    @Test
+    func startupLoadRepairsStaleThemeToSystemWithoutMutatingOtherPreferenceFields() async throws {
+        let now = Date(timeIntervalSince1970: 1_717_394_000)
+        let harness = try makeHarness(now: { now })
+        let shortcut = SessionShortcut(
+            label: "Valid Default",
+            launchCommand: "codex",
+            launchArgumentsJSON: "[]",
+            isBuiltIn: true
+        )
+        let override = KeybindingOverride(
+            commandID: .openSettings,
+            keyEquivalent: ",",
+            modifiers: [.command, .shift]
+        )
+        try await harness.persistence.save(shortcut: shortcut)
+        try await harness.persistence.save(appPreferences: AppPreferences(
+            themeID: "retired-theme",
+            defaultSessionShortcutID: shortcut.id,
+            terminalFontSize: 17,
+            keybindings: [.openSettings: override],
+            updatedAt: Date(timeIntervalSince1970: 400)
+        ))
+
+        let startupResult = await AppShellStartupCoordinator.run(commandService: harness.service, store: harness.store)
+        let persistedPreferences = try await harness.persistence.loadAppPreferences()
+
+        #expect(startupResult.preferenceLoadErrorDescription == nil)
+        #expect(startupResult.restoreErrorDescription == nil)
+        #expect(harness.store.appPreferences.themeID == AppTheme.systemSelectionID)
+        #expect(harness.store.appPreferences.defaultSessionShortcutID == shortcut.id)
+        #expect(harness.store.appPreferences.terminalFontSize == 17)
+        #expect(harness.store.appPreferences.keybindings == [.openSettings: override])
+        #expect(harness.store.appPreferences.updatedAt == now)
+        #expect(persistedPreferences == harness.store.appPreferences)
+        #expect(harness.service.metrics.themeRepairCount == 1)
+        #expect(harness.service.logger.events.contains { event in
+            event.name == "theme_repaired" &&
+                event.fields["invalid_theme_id"] == "retired-theme" &&
+                event.fields["fallback_theme_id"] == AppTheme.systemSelectionID
+        })
     }
 
     @Test

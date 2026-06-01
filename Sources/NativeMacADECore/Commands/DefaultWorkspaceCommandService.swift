@@ -225,9 +225,11 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
 
             if previousPreferences.themeID != updatedPreferences.themeID {
                 metrics.recordThemeChanged()
-                logger.emit("theme_applied", fields: [
-                    "theme_id": updatedPreferences.themeID
-                ])
+                metrics.recordEffectiveThemeApplied()
+                logger.emit("theme_applied", fields: themeAppliedFields(
+                    selectionID: updatedPreferences.themeID,
+                    source: "user_selection"
+                ))
             }
 
             if !changedKeybindingIDs.isEmpty {
@@ -859,14 +861,22 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
         var preferences = try await persist { try await persistenceStore.loadAppPreferences() }
         var shouldPersistRepair = false
 
-        if !AppPreferences.supportedThemeIDs.contains(preferences.themeID) {
-            logger.emit("settings_preference_repaired", fields: [
-                "field": "theme_id",
-                "theme_id": preferences.themeID,
-                "reason": "unknown_theme"
-            ])
+        if !AppPreferences.isSupportedThemeSelectionID(preferences.themeID) {
+            let invalidThemeID = preferences.themeID
             preferences.themeID = AppPreferences.defaultThemeID
             shouldPersistRepair = true
+            metrics.recordThemeRepair()
+            metrics.recordEffectiveThemeApplied()
+            logger.emit("theme_repaired", fields: [
+                "field": "theme_id",
+                "invalid_theme_id": invalidThemeID,
+                "fallback_theme_id": preferences.themeID,
+                "reason": "unknown_theme"
+            ])
+            logger.emit("theme_applied", fields: themeAppliedFields(
+                selectionID: preferences.themeID,
+                source: "repair"
+            ))
         }
 
         if let defaultShortcutID = preferences.defaultSessionShortcutID {
@@ -895,7 +905,7 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
     }
 
     private func validateAppPreferences(_ preferences: AppPreferences) async throws {
-        guard AppPreferences.supportedThemeIDs.contains(preferences.themeID) else {
+        guard AppPreferences.isSupportedThemeSelectionID(preferences.themeID) else {
             throw WorkspaceCommandError.settingsValidationFailed(.unknownThemeID(preferences.themeID))
         }
 
@@ -932,6 +942,16 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
             AppCommandRegistry.resolvedKeybinding(for: commandID, preferences: previousPreferences) !=
                 AppCommandRegistry.resolvedKeybinding(for: commandID, preferences: updatedPreferences)
         }
+    }
+
+    private func themeAppliedFields(selectionID: String, source: String) -> [String: String] {
+        return [
+            "theme_id": selectionID,
+            "selection_id": selectionID,
+            "resolved_theme_id": selectionID,
+            "resolution_status": selectionID == AppTheme.systemSelectionID ? "deferred_to_runtime_system_scheme" : "resolved_concrete",
+            "source": source
+        ]
     }
 
     private func recordSettingsSaveFailure(_ error: Error) {
