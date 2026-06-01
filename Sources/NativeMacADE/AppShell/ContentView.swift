@@ -53,16 +53,21 @@ private final class ReorderDragLifecycleMonitor: NSObject, ObservableObject {
     private var localEventMonitor: Any?
     private var globalEventMonitor: Any?
     private var onEnd: (() -> Void)?
+    private var shouldFinishOnLocalMouseUp: (() -> Bool)?
 
-    func begin(onEnd: @escaping () -> Void) {
+    func begin(
+        onEnd: @escaping () -> Void,
+        shouldFinishOnLocalMouseUp: @escaping () -> Bool = { true }
+    ) {
         finish()
         self.onEnd = onEnd
+        self.shouldFinishOnLocalMouseUp = shouldFinishOnLocalMouseUp
 
         let mouseUpEvents: NSEvent.EventTypeMask = [.leftMouseUp, .rightMouseUp, .otherMouseUp]
         let localEvents: NSEvent.EventTypeMask = [mouseUpEvents, .keyDown]
 
         localEventMonitor = NSEvent.addLocalMonitorForEvents(matching: localEvents) { [weak self] event in
-            if Self.shouldEndDrag(after: event) {
+            if Self.shouldEndDrag(after: event, shouldFinishOnLocalMouseUp: self?.shouldFinishOnLocalMouseUp) {
                 Self.requestFinish(for: self)
             }
             return event
@@ -76,6 +81,7 @@ private final class ReorderDragLifecycleMonitor: NSObject, ObservableObject {
         removeEventMonitors()
         let endHandler = onEnd
         onEnd = nil
+        shouldFinishOnLocalMouseUp = nil
         endHandler?()
     }
 
@@ -103,10 +109,13 @@ private final class ReorderDragLifecycleMonitor: NSObject, ObservableObject {
         }
     }
 
-    nonisolated private static func shouldEndDrag(after event: NSEvent) -> Bool {
+    nonisolated private static func shouldEndDrag(
+        after event: NSEvent,
+        shouldFinishOnLocalMouseUp: (() -> Bool)?
+    ) -> Bool {
         switch event.type {
         case .leftMouseUp, .rightMouseUp, .otherMouseUp:
-            return true
+            return shouldFinishOnLocalMouseUp?() ?? true
         case .keyDown:
             return event.charactersIgnoringModifiers == "\u{1B}"
         default:
@@ -120,6 +129,24 @@ private final class ReorderDragLifecycleMonitor: NSObject, ObservableObject {
             with: nil,
             waitUntilDone: false
         )
+    }
+}
+
+private final class MainThreadUUIDDelivery: NSObject, @unchecked Sendable {
+    private let completion: (UUID?) -> Void
+    private var value: UUID?
+
+    init(completion: @escaping (UUID?) -> Void) {
+        self.completion = completion
+    }
+
+    @objc func deliver() {
+        completion(value)
+    }
+
+    nonisolated func schedule(_ value: UUID?) {
+        self.value = value
+        self.performSelector(onMainThread: #selector(deliver), with: nil, waitUntilDone: false)
     }
 }
 
@@ -816,7 +843,6 @@ struct ProjectSidebarView: View {
                             .modifier(ProjectSidebarDropTargetModifier(
                                 targetProjectID: project.id,
                                 currentProjectIDs: projectIDs,
-                                draggedProjectID: $draggedProjectID,
                                 activeInsertion: $activeProjectInsertion,
                                 onDragEnded: endDraggingProject,
                                 onCommit: submitProjectReorder
@@ -988,7 +1014,11 @@ struct ProjectSidebarView: View {
     }
 
     private func beginDraggingProject(_ id: UUID) -> NSItemProvider {
-        projectDragLifecycle.begin(onEnd: clearProjectDragState)
+        let activeInsertion = $activeProjectInsertion
+        projectDragLifecycle.begin(
+            onEnd: clearProjectDragState,
+            shouldFinishOnLocalMouseUp: { activeInsertion.wrappedValue == nil }
+        )
         draggedProjectID = id
         activeProjectInsertion = nil
         return ProjectSidebarDrag.itemProvider(for: id)
@@ -1033,7 +1063,6 @@ struct ProjectSidebarView: View {
 private struct ProjectSidebarDropTargetModifier: ViewModifier {
     let targetProjectID: UUID
     let currentProjectIDs: [UUID]
-    @Binding var draggedProjectID: UUID?
     @Binding var activeInsertion: ProjectOrderInsertion?
     let onDragEnded: () -> Void
     let onCommit: (UUID, ProjectOrderInsertion) -> Void
@@ -1058,7 +1087,6 @@ private struct ProjectSidebarDropTargetModifier: ViewModifier {
                     targetProjectID: targetProjectID,
                     targetHeight: targetHeight,
                     currentProjectIDs: currentProjectIDs,
-                    draggedProjectID: $draggedProjectID,
                     activeInsertion: $activeInsertion,
                     onDragEnded: onDragEnded,
                     onCommit: onCommit
@@ -1072,11 +1100,32 @@ private enum ProjectSidebarDrag {
 
     static func itemProvider(for projectID: UUID) -> NSItemProvider {
         let provider = NSItemProvider()
-        provider.registerDataRepresentation(forTypeIdentifier: projectIDType.identifier, visibility: .ownProcess) { completion in
+        provider.registerDataRepresentation(forTypeIdentifier: projectIDType.identifier, visibility: .all) { completion in
             completion(projectID.uuidString.data(using: .utf8), nil)
             return nil
         }
         return provider
+    }
+
+    static func containsProjectID(in info: DropInfo) -> Bool {
+        !info.itemProviders(for: [projectIDType.identifier]).isEmpty
+    }
+
+    static func loadProjectID(from info: DropInfo, completion: @escaping (UUID?) -> Void) -> Bool {
+        guard let provider = info.itemProviders(for: [projectIDType.identifier]).first else {
+            return false
+        }
+
+        let delivery = MainThreadUUIDDelivery(completion: completion)
+        provider.loadDataRepresentation(forTypeIdentifier: projectIDType.identifier) { data, _ in
+            let projectID = data
+                .flatMap { String(data: $0, encoding: .utf8) }
+                .flatMap(UUID.init(uuidString:))
+
+            delivery.schedule(projectID)
+        }
+
+        return true
     }
 }
 
@@ -1092,7 +1141,6 @@ private struct ProjectSidebarDropDelegate: DropDelegate {
     let targetProjectID: UUID
     let targetHeight: CGFloat
     let currentProjectIDs: [UUID]
-    @Binding var draggedProjectID: UUID?
     @Binding var activeInsertion: ProjectOrderInsertion?
     let onDragEnded: () -> Void
     let onCommit: (UUID, ProjectOrderInsertion) -> Void
@@ -1119,18 +1167,21 @@ private struct ProjectSidebarDropDelegate: DropDelegate {
     }
 
     func performDrop(info: DropInfo) -> Bool {
+        let didCommitDrop: Bool
         defer {
             onDragEnded()
         }
 
-        guard let movedProjectID = draggedProjectID,
-              let insertion = proposedInsertion(for: info)
-        else {
+        guard let insertion = proposedInsertion(for: info) else {
             return false
         }
 
-        onCommit(movedProjectID, insertion)
-        return true
+        didCommitDrop = ProjectSidebarDrag.loadProjectID(from: info) { movedProjectID in
+            guard let movedProjectID else { return }
+            onCommit(movedProjectID, insertion)
+        }
+
+        return didCommitDrop
     }
 
     @discardableResult
@@ -1147,9 +1198,7 @@ private struct ProjectSidebarDropDelegate: DropDelegate {
     }
 
     private func proposedInsertion(for info: DropInfo) -> ProjectOrderInsertion? {
-        guard let draggedProjectID,
-              draggedProjectID != targetProjectID,
-              currentProjectIDs.contains(draggedProjectID),
+        guard ProjectSidebarDrag.containsProjectID(in: info),
               currentProjectIDs.contains(targetProjectID)
         else {
             return nil
@@ -2290,7 +2339,6 @@ struct TabChromeView: View {
                         .modifier(TabChromeDropTargetModifier(
                             targetTabID: tab.id,
                             currentTabIDs: visibleTabIDs,
-                            draggedTabID: $draggedTabID,
                             activeInsertion: $activeTabInsertion,
                             onDragEnded: endDraggingTab,
                             onCommit: submitTabReorder
@@ -2456,7 +2504,11 @@ struct TabChromeView: View {
     }
 
     private func beginDraggingTab(_ id: UUID) -> NSItemProvider {
-        tabDragLifecycle.begin(onEnd: clearTabDragState)
+        let activeInsertion = $activeTabInsertion
+        tabDragLifecycle.begin(
+            onEnd: clearTabDragState,
+            shouldFinishOnLocalMouseUp: { activeInsertion.wrappedValue == nil }
+        )
         draggedTabID = id
         activeTabInsertion = nil
         return TabChromeDrag.itemProvider(for: id)
@@ -2517,7 +2569,6 @@ struct TabChromeView: View {
 private struct TabChromeDropTargetModifier: ViewModifier {
     let targetTabID: UUID
     let currentTabIDs: [UUID]
-    @Binding var draggedTabID: UUID?
     @Binding var activeInsertion: TabOrderInsertion?
     let onDragEnded: () -> Void
     let onCommit: (UUID, TabOrderInsertion) -> Void
@@ -2542,7 +2593,6 @@ private struct TabChromeDropTargetModifier: ViewModifier {
                     targetTabID: targetTabID,
                     targetWidth: targetWidth,
                     currentTabIDs: currentTabIDs,
-                    draggedTabID: $draggedTabID,
                     activeInsertion: $activeInsertion,
                     onDragEnded: onDragEnded,
                     onCommit: onCommit
@@ -2556,11 +2606,32 @@ private enum TabChromeDrag {
 
     static func itemProvider(for tabID: UUID) -> NSItemProvider {
         let provider = NSItemProvider()
-        provider.registerDataRepresentation(forTypeIdentifier: tabIDType.identifier, visibility: .ownProcess) { completion in
+        provider.registerDataRepresentation(forTypeIdentifier: tabIDType.identifier, visibility: .all) { completion in
             completion(tabID.uuidString.data(using: .utf8), nil)
             return nil
         }
         return provider
+    }
+
+    static func containsTabID(in info: DropInfo) -> Bool {
+        !info.itemProviders(for: [tabIDType.identifier]).isEmpty
+    }
+
+    static func loadTabID(from info: DropInfo, completion: @escaping (UUID?) -> Void) -> Bool {
+        guard let provider = info.itemProviders(for: [tabIDType.identifier]).first else {
+            return false
+        }
+
+        let delivery = MainThreadUUIDDelivery(completion: completion)
+        provider.loadDataRepresentation(forTypeIdentifier: tabIDType.identifier) { data, _ in
+            let tabID = data
+                .flatMap { String(data: $0, encoding: .utf8) }
+                .flatMap(UUID.init(uuidString:))
+
+            delivery.schedule(tabID)
+        }
+
+        return true
     }
 }
 
@@ -2576,7 +2647,6 @@ private struct TabChromeDropDelegate: DropDelegate {
     let targetTabID: UUID
     let targetWidth: CGFloat
     let currentTabIDs: [UUID]
-    @Binding var draggedTabID: UUID?
     @Binding var activeInsertion: TabOrderInsertion?
     let onDragEnded: () -> Void
     let onCommit: (UUID, TabOrderInsertion) -> Void
@@ -2603,18 +2673,21 @@ private struct TabChromeDropDelegate: DropDelegate {
     }
 
     func performDrop(info: DropInfo) -> Bool {
+        let didCommitDrop: Bool
         defer {
             onDragEnded()
         }
 
-        guard let movedTabID = draggedTabID,
-              let insertion = proposedInsertion(for: info)
-        else {
+        guard let insertion = proposedInsertion(for: info) else {
             return false
         }
 
-        onCommit(movedTabID, insertion)
-        return true
+        didCommitDrop = TabChromeDrag.loadTabID(from: info) { movedTabID in
+            guard let movedTabID else { return }
+            onCommit(movedTabID, insertion)
+        }
+
+        return didCommitDrop
     }
 
     @discardableResult
@@ -2631,9 +2704,7 @@ private struct TabChromeDropDelegate: DropDelegate {
     }
 
     private func proposedInsertion(for info: DropInfo) -> TabOrderInsertion? {
-        guard let draggedTabID,
-              draggedTabID != targetTabID,
-              currentTabIDs.contains(draggedTabID),
+        guard TabChromeDrag.containsTabID(in: info),
               currentTabIDs.contains(targetTabID)
         else {
             return nil
