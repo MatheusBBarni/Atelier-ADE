@@ -2,8 +2,15 @@ import { describe, expect, it } from "vitest";
 
 import {
   CANONICAL_PRODUCT_NAME,
+  DOCS_URL,
+  QUICKSTART_URL,
+  REPOSITORY_URL,
+  getOrderedCtas,
   getLandingPageAsset,
   getLandingPageAssetUrl,
+  getPrimaryCta,
+  getSecondaryEvaluationLinks,
+  landingPageCtas,
   landingPageAssets,
   siteContent,
   withSiteBase
@@ -57,5 +64,75 @@ describe("landing page asset metadata", () => {
     expect(siteContent.productName).toBe(CANONICAL_PRODUCT_NAME);
     expect(CANONICAL_PRODUCT_NAME).toBe("Atelier");
     expect(assetLabels.every((label) => label.includes(CANONICAL_PRODUCT_NAME))).toBe(true);
+  });
+});
+
+describe("public landing page content", () => {
+  it("exports the canonical product name and evaluation URLs used by the page", () => {
+    expect(siteContent.productName).toBe("Atelier");
+    expect(siteContent.productName).toBe(CANONICAL_PRODUCT_NAME);
+    expect(siteContent.repoUrl).toBe(REPOSITORY_URL);
+    expect(siteContent.docsUrl).toBe(DOCS_URL);
+    expect(siteContent.quickstartUrl).toBe(QUICKSTART_URL);
+    expect(REPOSITORY_URL).toBe("https://github.com/MatheusBBarni/Atelier-ADE");
+    expect(DOCS_URL).toBe(`${REPOSITORY_URL}#readme`);
+    expect(QUICKSTART_URL).toBe(`${REPOSITORY_URL}#build-test-and-run`);
+  });
+
+  it("includes renderable hero, proof, capability, and trust data for the MVP route", () => {
+    expect(siteContent.hero).toMatchObject({
+      eyebrow: "Native macOS agent workspace",
+      title: "Atelier"
+    });
+    expect(siteContent.hero.summary).toMatch(/coding agents/i);
+    expect(siteContent.hero.bullets).toHaveLength(3);
+    expect(siteContent.proof.title).toMatch(/real workspace/i);
+    expect(siteContent.proof.caption).toMatch(/Current Atelier macOS workspace/);
+
+    expect(siteContent.capabilities.map((capability) => capability.title)).toEqual(
+      expect.arrayContaining([
+        "Persistent projects",
+        "Project-scoped sessions",
+        "Native terminal tabs",
+        "Restore and resume"
+      ])
+    );
+    expect(siteContent.capabilities.every((capability) => capability.description.length > 40)).toBe(
+      true
+    );
+    expect(siteContent.trustNotes).toHaveLength(3);
+    expect(siteContent.trustNotes.map((note) => note.title)).toEqual(
+      expect.arrayContaining(["Open source surface", "Honest maturity", "No hidden conversion layer"])
+    );
+  });
+
+  it("preserves repo-first CTA priority for route rendering and future star enhancement", () => {
+    const intentionallyUnordered = [...landingPageCtas].reverse();
+    const orderedCtas = getOrderedCtas(intentionallyUnordered);
+
+    expect(orderedCtas.map((link) => link.kind)).toEqual(["repo", "docs", "quickstart"]);
+    expect(orderedCtas[0]).toMatchObject({
+      kind: "repo",
+      priority: "primary",
+      href: REPOSITORY_URL,
+      label: "Open the repository"
+    });
+    expect(getPrimaryCta()?.kind).toBe("repo");
+    expect(getSecondaryEvaluationLinks().map((link) => link.kind)).toEqual(["docs", "quickstart"]);
+  });
+
+  it("keeps public copy on the Atelier name instead of internal package names", () => {
+    const publicContent = JSON.stringify({
+      hero: siteContent.hero,
+      proof: siteContent.proof,
+      capabilities: siteContent.capabilities,
+      trustNotes: siteContent.trustNotes,
+      ctas: siteContent.ctas,
+      statusNote: siteContent.statusNote,
+      metaDescription: siteContent.metaDescription
+    });
+
+    expect(publicContent).toContain("Atelier");
+    expect(publicContent).not.toMatch(/NativeMacADE/);
   });
 });

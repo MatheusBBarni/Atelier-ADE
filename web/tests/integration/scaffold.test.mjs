@@ -8,7 +8,8 @@ import { beforeAll, describe, expect, it } from "vitest";
 import {
   CANONICAL_PRODUCT_NAME,
   getLandingPageAssetUrl,
-  landingPageAssets
+  landingPageAssets,
+  siteContent
 } from "../../src/siteContent.ts";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -29,7 +30,7 @@ function run(command, args, cwd, timeout = 300_000) {
   });
 }
 
-describe("Astro scaffold integration", () => {
+describe("Astro landing page integration", () => {
   beforeAll(() => {
     buildOutput = run("npm", ["run", "build"], webRoot);
   });
@@ -38,6 +39,60 @@ describe("Astro scaffold integration", () => {
     expect(buildOutput).toContain("Complete");
     expect(existsSync(indexPath)).toBe(true);
     expect(readFileSync(indexPath, "utf8")).toContain("<h1");
+  });
+
+  it("renders the trust-first hero, proof, and capability summary", () => {
+    const indexHtml = readFileSync(indexPath, "utf8");
+
+    expect(indexHtml).toMatch(new RegExp(`<h1 id="hero-title"[^>]*>${siteContent.productName}</h1>`));
+    expect(indexHtml).toContain(siteContent.hero.summary);
+    expect(indexHtml).toContain('id="proof"');
+    expect(indexHtml).toContain(siteContent.proof.title);
+    expect(indexHtml).toContain(siteContent.proof.caption);
+    expect(indexHtml).toContain('id="capabilities"');
+
+    for (const capability of siteContent.capabilities) {
+      expect(indexHtml).toContain(capability.title);
+      expect(indexHtml).toContain(capability.description);
+    }
+  });
+
+  it("renders fallback repo-first CTA markup before any JavaScript enhancement", () => {
+    const indexHtml = readFileSync(indexPath, "utf8");
+    const repoSlotIndex = indexHtml.indexOf("data-repo-star-cta");
+    const fallbackIndex = indexHtml.indexOf("data-repo-cta-fallback");
+    const repoEvaluationIndex = indexHtml.indexOf('data-cta-kind="repo"');
+    const docsEvaluationIndex = indexHtml.indexOf('data-cta-kind="docs"');
+    const quickstartEvaluationIndex = indexHtml.indexOf('data-cta-kind="quickstart"');
+
+    expect(repoSlotIndex).toBeGreaterThan(-1);
+    expect(fallbackIndex).toBeGreaterThan(repoSlotIndex);
+    expect(indexHtml).toContain(`data-repo-url="${siteContent.repoUrl}"`);
+    expect(indexHtml).toContain(`href="${siteContent.repoUrl}"`);
+    expect(indexHtml).toContain("Open the repository");
+    expect(indexHtml).not.toContain("api.github.com");
+
+    expect(repoEvaluationIndex).toBeGreaterThan(-1);
+    expect(repoEvaluationIndex).toBeLessThan(docsEvaluationIndex);
+    expect(docsEvaluationIndex).toBeLessThan(quickstartEvaluationIndex);
+  });
+
+  it("renders secondary README and quickstart paths without displacing the repository CTA", () => {
+    const indexHtml = readFileSync(indexPath, "utf8");
+
+    expect(indexHtml).toContain(`href="${siteContent.docsUrl}"`);
+    expect(indexHtml).toContain(`href="${siteContent.quickstartUrl}"`);
+    expect(indexHtml).toContain("Read the README");
+    expect(indexHtml).toContain("Build and run");
+    expect(indexHtml.indexOf("Open the repository")).toBeLessThan(indexHtml.indexOf("Read the README"));
+  });
+
+  it("uses Atelier as public copy and does not expose internal package naming", () => {
+    const indexHtml = readFileSync(indexPath, "utf8");
+
+    expect(indexHtml).toContain("Atelier");
+    expect(indexHtml).toContain("Atelier is an early open-source macOS project.");
+    expect(indexHtml).not.toMatch(/NativeMacADE/);
   });
 
   it("keeps the Swift package buildable from the repository root", () => {
