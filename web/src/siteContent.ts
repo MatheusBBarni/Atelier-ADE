@@ -1,9 +1,14 @@
-import { REPOSITORY_URL as CONFIG_REPOSITORY_URL } from "./config/repository.mjs";
+import {
+  DEFAULT_PAGES_BASE,
+  DEFAULT_SITE_ORIGIN,
+  REPOSITORY_URL as CONFIG_REPOSITORY_URL
+} from "./config/repository.mjs";
 
 export const CANONICAL_PRODUCT_NAME = "Atelier";
 export const REPOSITORY_URL = CONFIG_REPOSITORY_URL;
 export const DOCS_URL = `${REPOSITORY_URL}#readme`;
 export const QUICKSTART_URL = `${REPOSITORY_URL}#build-test-and-run`;
+export const LANDING_PAGE_URL = `${DEFAULT_SITE_ORIGIN}${DEFAULT_PAGES_BASE}/`;
 
 const ASTRO_ASSET_PREFIX = "/_astro";
 
@@ -61,6 +66,7 @@ type SiteContent = {
   repoUrl: string;
   docsUrl: string;
   quickstartUrl: string;
+  landingPageUrl: string;
   statusNote: string;
   hero: {
     eyebrow: string;
@@ -166,10 +172,11 @@ export const siteContent = {
   productName: CANONICAL_PRODUCT_NAME,
   tagline: "A native, local-first macOS workspace for agentic development.",
   metaDescription:
-    "Atelier is an early, open-source macOS app for developers who want native, local-first agentic workflows with inspectable project and session state.",
+    "Atelier is an early macOS app for developers who want native, local-first agentic workflows with inspectable project and session state.",
   repoUrl: REPOSITORY_URL,
   docsUrl: DOCS_URL,
   quickstartUrl: QUICKSTART_URL,
+  landingPageUrl: LANDING_PAGE_URL,
   statusNote: "Early, usable, and source-build-first.",
   hero: {
     eyebrow: "Native macOS agent workspace",
@@ -224,9 +231,9 @@ export const siteContent = {
   ],
   trustNotes: [
     {
-      title: "Open source surface",
+      title: "Source-visible surface",
       description:
-        "The repository is the primary evaluation path because the product is early and benefits from direct inspection."
+        "The repository is the primary evaluation path because the product is early and benefits from direct source inspection."
     },
     {
       title: "Honest maturity",

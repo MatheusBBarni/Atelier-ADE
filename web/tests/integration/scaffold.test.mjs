@@ -159,7 +159,9 @@ describe("Astro landing page integration", () => {
     const indexHtml = readFileSync(indexPath, "utf8");
 
     expect(indexHtml).toContain("Atelier");
-    expect(indexHtml).toContain("Atelier is an early open-source macOS project.");
+    expect(indexHtml).toContain(
+      "Atelier is an early macOS project with public source for inspection."
+    );
     expect(indexHtml).not.toMatch(/NativeMacADE/);
   });
 

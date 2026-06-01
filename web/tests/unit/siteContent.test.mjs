@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   CANONICAL_PRODUCT_NAME,
   DOCS_URL,
+  LANDING_PAGE_URL,
   QUICKSTART_URL,
   REPOSITORY_URL,
   getOrderedCtas,
@@ -74,6 +75,8 @@ describe("public landing page content", () => {
     expect(siteContent.repoUrl).toBe(REPOSITORY_URL);
     expect(siteContent.docsUrl).toBe(DOCS_URL);
     expect(siteContent.quickstartUrl).toBe(QUICKSTART_URL);
+    expect(siteContent.landingPageUrl).toBe(LANDING_PAGE_URL);
+    expect(LANDING_PAGE_URL).toBe("https://matheusbbarni.github.io/Atelier-ADE/");
     expect(REPOSITORY_URL).toBe("https://github.com/MatheusBBarni/Atelier-ADE");
     expect(DOCS_URL).toBe(`${REPOSITORY_URL}#readme`);
     expect(QUICKSTART_URL).toBe(`${REPOSITORY_URL}#build-test-and-run`);
@@ -102,7 +105,11 @@ describe("public landing page content", () => {
     );
     expect(siteContent.trustNotes).toHaveLength(3);
     expect(siteContent.trustNotes.map((note) => note.title)).toEqual(
-      expect.arrayContaining(["Open source surface", "Honest maturity", "No hidden conversion layer"])
+      expect.arrayContaining([
+        "Source-visible surface",
+        "Honest maturity",
+        "No hidden conversion layer"
+      ])
     );
   });
 
