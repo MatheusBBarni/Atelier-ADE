@@ -764,7 +764,7 @@ struct ProjectSidebarView: View {
     @State private var sessionDisclosure = SessionSidebarDisclosureState()
     @State private var hoveredSessionID: UUID?
     @State private var shortcutCatalog = SessionShortcutCatalog()
-    @State private var terminalExitSnapshotsByTabID: [UUID: TerminalExitObservation] = [:]
+    @State private var terminalExitRefreshVersion = 0
     @State private var terminalExitUnsubscribe: TerminalExitEventSource.Unsubscribe?
     @State private var draggedProjectID: UUID?
     @State private var activeProjectInsertion: ProjectOrderInsertion?
@@ -1050,11 +1050,12 @@ struct ProjectSidebarView: View {
     }
 
     private func terminalSummaries(for session: WorkspaceSession) -> [SessionTerminalSummary] {
-        SessionTerminalSummaryBuilder(
+        _ = terminalExitRefreshVersion
+        return SessionTerminalSummaryBuilder(
             store: store,
             shortcutCatalog: shortcutCatalog,
             exitSnapshot: { tabID in
-                terminalExitSnapshotsByTabID[tabID] ?? terminalExitEvents.snapshot(tabID: tabID)
+                terminalExitEvents.snapshot(tabID: tabID)
             }
         )
         .summaries(for: session)
@@ -1078,8 +1079,8 @@ struct ProjectSidebarView: View {
 
     private func startTerminalExitObservation() {
         guard terminalExitUnsubscribe == nil else { return }
-        terminalExitUnsubscribe = terminalExitEvents.subscribe { observation in
-            terminalExitSnapshotsByTabID[observation.tabID] = observation
+        terminalExitUnsubscribe = terminalExitEvents.subscribe { _ in
+            terminalExitRefreshVersion += 1
         }
     }
 
@@ -3401,6 +3402,14 @@ struct FileEditorHostView: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(theme.warning.color)
             }
+            Button("Rename Tab", systemImage: "pencil", action: renameTab)
+                .labelStyle(.iconOnly)
+                .buttonStyle(.borderless)
+                .help("Rename tab")
+            Button("Close Tab", systemImage: "xmark", action: closeTab)
+                .labelStyle(.iconOnly)
+                .buttonStyle(.borderless)
+                .help("Close tab")
             Button("Revert", systemImage: "arrow.uturn.backward", action: revert)
                 .labelStyle(.iconOnly)
                 .buttonStyle(.borderless)
@@ -3520,6 +3529,14 @@ struct FileEditorHostView: View {
                 userMessage = UserMessage(title: "File could not be opened", detail: String(describing: error))
             }
         }
+    }
+
+    private func renameTab() {
+        NotificationCenter.default.post(name: .renameSelectedTab, object: nil)
+    }
+
+    private func closeTab() {
+        NotificationCenter.default.post(name: .closeSelectedTab, object: nil)
     }
 
     private func updateEditorPosition(_ position: CodeEditor.Position) {
@@ -4875,6 +4892,7 @@ extension NordColorToken {
             persistenceStore: persistence,
             restoreCoordinator: restoreCoordinator,
             terminalSurfaceManager: terminalHostController,
+            terminalExitEvents: terminalExitEvents,
             fileAccess: fileAccessService,
             fileBufferManager: fileBufferController
         ),

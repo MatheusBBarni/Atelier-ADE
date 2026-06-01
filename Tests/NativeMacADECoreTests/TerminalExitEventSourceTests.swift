@@ -71,4 +71,34 @@ struct TerminalExitEventSourceTests {
         #expect(snapshot.exitStatus == nil)
         #expect(subscriberEvents == [TerminalExitObservation(tabID: tabID, exitStatus: nil)])
     }
+
+    @Test
+    func removeSnapshotsClearsOnlyMatchingStoredExits() throws {
+        let source = TerminalExitEventSource()
+        let removedTabID = UUID()
+        let retainedTabID = UUID()
+        source.publish(tabID: removedTabID, exitStatus: 1)
+        source.publish(tabID: retainedTabID, exitStatus: 2)
+
+        source.removeSnapshots(tabIDs: [removedTabID])
+
+        #expect(source.snapshot(tabID: removedTabID) == nil)
+        let retainedSnapshot = try #require(source.snapshot(tabID: retainedTabID))
+        #expect(retainedSnapshot == TerminalExitObservation(tabID: retainedTabID, exitStatus: 2))
+    }
+
+    @Test
+    func pruningSnapshotsRetainsOnlyCurrentTabs() throws {
+        let source = TerminalExitEventSource()
+        let retainedTabID = UUID()
+        let removedTabID = UUID()
+        source.publish(tabID: retainedTabID, exitStatus: 0)
+        source.publish(tabID: removedTabID, exitStatus: 9)
+
+        source.pruneSnapshots(retaining: [retainedTabID])
+
+        let retainedSnapshot = try #require(source.snapshot(tabID: retainedTabID))
+        #expect(retainedSnapshot == TerminalExitObservation(tabID: retainedTabID, exitStatus: 0))
+        #expect(source.snapshot(tabID: removedTabID) == nil)
+    }
 }
