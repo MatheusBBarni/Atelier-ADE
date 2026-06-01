@@ -17,11 +17,45 @@ import {
   withSiteBase
 } from "../../src/siteContent.ts";
 
+const productSurfaceAssetFixtures = [
+  [
+    "focusAndAppearance",
+    "atelier-app-focus-and-appearance.png",
+    "src/assets/atelier-app-focus-and-appearance.png",
+    "docs/images/app-focus-and-appearance.png",
+    "/Atelier-ADE/_astro/atelier-app-focus-and-appearance"
+  ],
+  [
+    "focusWorkspace",
+    "atelier-app-focus-workspace.png",
+    "src/assets/atelier-app-focus-workspace.png",
+    "docs/images/app-focus-workspace.png",
+    "/Atelier-ADE/_astro/atelier-app-focus-workspace"
+  ],
+  [
+    "settingsAgentProfiles",
+    "atelier-app-settings-agent-profiles.png",
+    "src/assets/atelier-app-settings-agent-profiles.png",
+    "docs/images/app-settings-agent-profiles.png",
+    "/Atelier-ADE/_astro/atelier-app-settings-agent-profiles"
+  ],
+  [
+    "settingsKeyboardShortcuts",
+    "atelier-app-settings-keyboard-shortcuts.png",
+    "src/assets/atelier-app-settings-keyboard-shortcuts.png",
+    "docs/images/app-settings-keyboard-shortcuts.png",
+    "/Atelier-ADE/_astro/atelier-app-settings-keyboard-shortcuts"
+  ]
+];
+
 describe("landing page asset metadata", () => {
   it("resolves expected Pages-aware asset URL prefixes and fixed public paths", () => {
     expect(getLandingPageAssetUrl("screenshot", "/Atelier-ADE/")).toBe(
       "/Atelier-ADE/_astro/atelier-app-screenshot"
     );
+    for (const [assetKey, , , , expectedUrlPrefix] of productSurfaceAssetFixtures) {
+      expect(getLandingPageAssetUrl(assetKey, "/Atelier-ADE/")).toBe(expectedUrlPrefix);
+    }
     expect(getLandingPageAssetUrl("favicon", "/Atelier-ADE/")).toBe(
       "/Atelier-ADE/favicon.png"
     );
@@ -42,6 +76,15 @@ describe("landing page asset metadata", () => {
       importPath: "src/assets/atelier-logo.png",
       sourcePath: "docs/images/atelier-logo.png"
     });
+    for (const [assetKey, fileName, importPath, sourcePath] of productSurfaceAssetFixtures) {
+      expect(getLandingPageAsset(assetKey)).toMatchObject({
+        kind: "astro-managed",
+        owner: "web/src/assets",
+        fileName,
+        importPath,
+        sourcePath
+      });
+    }
     expect(getLandingPageAsset("favicon")).toMatchObject({
       kind: "fixed-public",
       owner: "web/public",
@@ -87,7 +130,7 @@ describe("public landing page content", () => {
     expect(QUICKSTART_URL).toBe(`${REPOSITORY_URL}#build-test-and-run`);
   });
 
-  it("includes renderable hero, proof, capability, and trust data for the MVP route", () => {
+  it("includes renderable hero, proof, surface, capability, and trust data for the MVP route", () => {
     expect(siteContent.hero).toMatchObject({
       eyebrow: "Native macOS agent workspace",
       title: "Atelier"
@@ -96,6 +139,21 @@ describe("public landing page content", () => {
     expect(siteContent.hero.bullets).toHaveLength(3);
     expect(siteContent.proof.title).toMatch(/real workspace/i);
     expect(siteContent.proof.caption).toMatch(/Current Atelier macOS workspace/);
+    expect(siteContent.productSurfaces.title).toMatch(/Focus and settings/i);
+    expect(siteContent.productSurfaces.items.map((surface) => surface.title)).toEqual([
+      "Focus and appearance",
+      "Focus workspace",
+      "Agent profiles",
+      "Keyboard shortcuts"
+    ]);
+    expect(siteContent.productSurfaces.items.map((surface) => surface.assetKey)).toEqual(
+      productSurfaceAssetFixtures.map(([assetKey]) => assetKey)
+    );
+    expect(
+      siteContent.productSurfaces.items.every(
+        (surface) => getLandingPageAsset(surface.assetKey).kind === "astro-managed"
+      )
+    ).toBe(true);
 
     expect(siteContent.capabilities.map((capability) => capability.title)).toEqual(
       expect.arrayContaining([

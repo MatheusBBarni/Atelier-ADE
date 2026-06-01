@@ -22,7 +22,18 @@ const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const repositoryRoot = resolve(webRoot, "..");
 const indexPath = resolve(webRoot, "dist/index.html");
 const pagesWorkflowPath = resolve(repositoryRoot, ".github/workflows/deploy-pages.yml");
+const importedScreenshotAssetKeys = [
+  "screenshot",
+  "focusAndAppearance",
+  "focusWorkspace",
+  "settingsAgentProfiles",
+  "settingsKeyboardShortcuts"
+];
 let buildOutput;
+
+function escapeRegex(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 function run(command, args, cwd, timeout = 300_000) {
   return execFileSync(command, args, {
@@ -48,7 +59,7 @@ describe("Astro landing page integration", () => {
     expect(readFileSync(indexPath, "utf8")).toContain("<h1");
   });
 
-  it("renders the trust-first hero, proof, and capability summary", () => {
+  it("renders the trust-first hero, proof, surface gallery, and capability summary", () => {
     const indexHtml = readFileSync(indexPath, "utf8");
 
     expect(indexHtml).toMatch(new RegExp(`<h1 id="hero-title"[^>]*>${siteContent.productName}</h1>`));
@@ -56,6 +67,13 @@ describe("Astro landing page integration", () => {
     expect(indexHtml).toContain('id="proof"');
     expect(indexHtml).toContain(siteContent.proof.title);
     expect(indexHtml).toContain(siteContent.proof.caption);
+    expect(indexHtml).toContain('id="surfaces"');
+    expect(indexHtml).toContain(siteContent.productSurfaces.title);
+    expect(indexHtml).toContain(siteContent.productSurfaces.description);
+    for (const surface of siteContent.productSurfaces.items) {
+      expect(indexHtml).toContain(surface.title);
+      expect(indexHtml).toContain(surface.description);
+    }
     expect(indexHtml).toContain('id="capabilities"');
 
     for (const capability of siteContent.capabilities) {
@@ -180,6 +198,11 @@ describe("Astro landing page integration", () => {
 
     expect(document.querySelector("h1")?.textContent).toBe(siteContent.productName);
     expect(document.querySelector(`img[alt="${landingPageAssets.screenshot.alt}"]`)).toBeTruthy();
+    for (const surface of siteContent.productSurfaces.items) {
+      expect(
+        document.querySelector(`img[alt="${landingPageAssets[surface.assetKey].alt}"]`)
+      ).toBeTruthy();
+    }
     expect(document.querySelector("[data-repo-cta-link]")?.getAttribute("aria-label")).toBe(
       "Open the Atelier GitHub repository"
     );
@@ -216,19 +239,27 @@ describe("Astro landing page integration", () => {
     expect(runScript).toContain("Sources/NativeMacADE/Resources/AppIcon.png");
   });
 
-  it("resolves the copied MVP screenshot through the Astro-managed asset pipeline", () => {
+  it("resolves copied app screenshots through the Astro-managed asset pipeline", () => {
     const indexHtml = readFileSync(indexPath, "utf8");
-    const expectedScreenshotPrefix = getLandingPageAssetUrl("screenshot", "/Atelier-ADE");
-    const screenshotMatch = indexHtml.match(/src="([^"]*atelier-app-screenshot[^"]*)"/);
 
-    expect(indexHtml).toContain(`alt="${landingPageAssets.screenshot.alt}"`);
-    expect(indexHtml).not.toContain("docs/images/app-image.png");
+    for (const assetKey of importedScreenshotAssetKeys) {
+      const asset = landingPageAssets[assetKey];
+      const expectedScreenshotPrefix = getLandingPageAssetUrl(assetKey, "/Atelier-ADE");
+      const fileNameWithoutExtension = asset.fileName.replace(/\.png$/, "");
+      const screenshotMatch = indexHtml.match(
+        new RegExp(`src="([^"]*${escapeRegex(fileNameWithoutExtension)}[^"]*)"`)
+      );
+
+      expect(indexHtml).toContain(`alt="${asset.alt}"`);
+      expect(indexHtml).not.toContain(asset.sourcePath);
+      expect(screenshotMatch?.[1]).toContain(expectedScreenshotPrefix);
+
+      const emittedPath = screenshotMatch?.[1].replace(/^\/Atelier-ADE\//, "");
+      expect(emittedPath).toBeTruthy();
+      expect(existsSync(resolve(webRoot, "dist", emittedPath))).toBe(true);
+    }
+
     expect(indexHtml).not.toContain("Sources/NativeMacADE");
-    expect(screenshotMatch?.[1]).toContain(expectedScreenshotPrefix);
-
-    const emittedPath = screenshotMatch?.[1].replace(/^\/Atelier-ADE\//, "");
-    expect(emittedPath).toBeTruthy();
-    expect(existsSync(resolve(webRoot, "dist", emittedPath))).toBe(true);
   });
 
   it("serves public metadata files after build using the configured Pages base", () => {
@@ -277,12 +308,17 @@ describe("Astro landing page integration", () => {
     expect(() => run("npm", ["run", "validate:no-js-cta"], webRoot)).not.toThrow();
   });
 
-  it("preserves the README screenshot source path outside the site asset copy", () => {
+  it("preserves documentation screenshot source paths outside the site asset copies", () => {
     const readme = readFileSync(resolve(repositoryRoot, "README.md"), "utf8");
     const readmeScreenshot = readme.match(/!\[[^\]]*\]\((docs\/images\/app-image\.png)\)/)?.[1];
 
     expect(readmeScreenshot).toBe("docs/images/app-image.png");
     expect(existsSync(resolve(repositoryRoot, readmeScreenshot))).toBe(true);
-    expect(existsSync(resolve(webRoot, "src/assets/atelier-app-screenshot.png"))).toBe(true);
+    for (const assetKey of importedScreenshotAssetKeys) {
+      const asset = landingPageAssets[assetKey];
+
+      expect(existsSync(resolve(repositoryRoot, asset.sourcePath))).toBe(true);
+      expect(existsSync(resolve(webRoot, "src/assets", asset.fileName))).toBe(true);
+    }
   });
 });

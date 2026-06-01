@@ -1,5 +1,9 @@
 ---
+import focusAndAppearanceScreenshot from "../assets/atelier-app-focus-and-appearance.png";
+import focusWorkspaceScreenshot from "../assets/atelier-app-focus-workspace.png";
 import appScreenshot from "../assets/atelier-app-screenshot.png";
+import settingsAgentProfilesScreenshot from "../assets/atelier-app-settings-agent-profiles.png";
+import settingsKeyboardShortcutsScreenshot from "../assets/atelier-app-settings-keyboard-shortcuts.png";
 import logo from "../assets/atelier-logo.png";
 import RepoStarCTA from "../components/RepoStarCTA.astro";
 import { getAstroSiteConfig } from "../config/siteConfig.mjs";
@@ -21,6 +25,17 @@ const orderedCtas = getOrderedCtas();
 const primaryCta = getPrimaryCta();
 const secondaryCtas = getSecondaryEvaluationLinks();
 const pageTitle = `${siteContent.productName} | Native macOS agent workspace`;
+const productSurfaceImages = {
+  focusAndAppearance: focusAndAppearanceScreenshot,
+  focusWorkspace: focusWorkspaceScreenshot,
+  settingsAgentProfiles: settingsAgentProfilesScreenshot,
+  settingsKeyboardShortcuts: settingsKeyboardShortcutsScreenshot
+} as const;
+const productSurfaces = siteContent.productSurfaces.items.map((surface) => ({
+  ...surface,
+  asset: landingPageAssets[surface.assetKey],
+  image: productSurfaceImages[surface.assetKey]
+}));
 ---
 
 <!doctype html>
@@ -46,6 +61,7 @@ const pageTitle = `${siteContent.productName} | Native macOS agent workspace`;
       </a>
       <nav aria-label="Landing page sections">
         <a href="#proof">Proof</a>
+        <a href="#surfaces">Surfaces</a>
         <a href="#capabilities">Capabilities</a>
         <a href="#evaluate">Evaluate</a>
       </nav>
@@ -126,6 +142,46 @@ const pageTitle = `${siteContent.productName} | Native macOS agent workspace`;
             </div>
             <figcaption>{siteContent.proof.caption}</figcaption>
           </figure>
+        </div>
+      </section>
+
+      <section class="surfaces-section" id="surfaces" aria-labelledby="surfaces-title">
+        <div class="section-inner">
+          <div class="surface-heading">
+            <div>
+              <p class="eyebrow">{siteContent.productSurfaces.eyebrow}</p>
+              <h2 id="surfaces-title">{siteContent.productSurfaces.title}</h2>
+            </div>
+            <p>{siteContent.productSurfaces.description}</p>
+          </div>
+
+          <div class="surface-gallery" aria-label="Additional Atelier app screenshots">
+            {
+              productSurfaces.map((surface) => (
+                <article class="surface-card">
+                  <div class="surface-card-copy">
+                    <p class="eyebrow">{surface.eyebrow}</p>
+                    <h3>{surface.title}</h3>
+                    <p>{surface.description}</p>
+                  </div>
+                  <div class="screenshot-frame surface-screenshot">
+                    <div class="screenshot-label" aria-hidden="true">
+                      <span>{surface.title}</span>
+                      <span>Current app</span>
+                    </div>
+                    <img
+                      src={surface.image.src}
+                      width={surface.image.width}
+                      height={surface.image.height}
+                      alt={surface.asset.alt}
+                      loading="lazy"
+                      decoding="async"
+                    />
+                  </div>
+                </article>
+              ))
+            }
+          </div>
         </div>
       </section>
 
@@ -291,6 +347,8 @@ const pageTitle = `${siteContent.productName} | Native macOS agent workspace`;
   }
 
   .site-header nav {
+    flex-wrap: wrap;
+    justify-content: flex-end;
     gap: 1rem;
     color: var(--muted);
     font-size: 0.95rem;
@@ -573,6 +631,7 @@ const pageTitle = `${siteContent.productName} | Native macOS agent workspace`;
   }
 
   .proof-section,
+  .surfaces-section,
   .trust-section,
   .capabilities-section,
   .evaluation-section {
@@ -604,6 +663,138 @@ const pageTitle = `${siteContent.productName} | Native macOS agent workspace`;
 
   .product-proof .screenshot-frame {
     box-shadow: var(--shadow);
+  }
+
+  .surfaces-section {
+    position: relative;
+    overflow: hidden;
+    border-block: 1px solid var(--line);
+    background:
+      radial-gradient(circle at 16% 14%, rgb(183 128 47 / 16%), transparent 24rem),
+      radial-gradient(circle at 88% 82%, rgb(51 93 122 / 14%), transparent 26rem),
+      linear-gradient(180deg, #f6f1df 0%, #f2efe6 100%);
+  }
+
+  .surfaces-section::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background-image:
+      linear-gradient(rgb(23 25 22 / 5%) 1px, transparent 1px),
+      linear-gradient(90deg, rgb(23 25 22 / 5%) 1px, transparent 1px);
+    background-size: 3.25rem 3.25rem;
+    mask-image: linear-gradient(180deg, transparent, black 18%, black 82%, transparent);
+  }
+
+  .surfaces-section .section-inner {
+    position: relative;
+    z-index: 1;
+  }
+
+  .surface-heading {
+    display: grid;
+    grid-template-columns: minmax(0, 0.95fr) minmax(18rem, 0.75fr);
+    gap: clamp(1.25rem, 4vw, 4rem);
+    align-items: end;
+    margin-bottom: 2rem;
+  }
+
+  .surface-heading h2 {
+    margin-bottom: 0;
+  }
+
+  .surface-heading > p {
+    margin: 0;
+    color: var(--muted);
+    line-height: 1.7;
+  }
+
+  .surface-gallery {
+    display: grid;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    gap: 1.1rem;
+    align-items: start;
+  }
+
+  .surface-card {
+    position: relative;
+    overflow: hidden;
+    display: grid;
+    gap: 1rem;
+    padding: 1rem;
+    border: 1px solid rgb(23 25 22 / 16%);
+    border-radius: 0.85rem;
+    background: rgb(255 254 249 / 86%);
+    box-shadow: 0 1.25rem 3rem rgb(23 25 22 / 12%);
+  }
+
+  .surface-card:nth-child(1) {
+    grid-column: span 7;
+  }
+
+  .surface-card:nth-child(2) {
+    grid-column: span 5;
+    margin-top: 2.25rem;
+  }
+
+  .surface-card:nth-child(3) {
+    grid-column: span 5;
+  }
+
+  .surface-card:nth-child(4) {
+    grid-column: span 7;
+    margin-top: -1.15rem;
+  }
+
+  .surface-card::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto;
+    height: 0.28rem;
+    background: var(--moss);
+  }
+
+  .surface-card:nth-child(2)::before {
+    background: var(--blue);
+  }
+
+  .surface-card:nth-child(3)::before {
+    background: var(--rust);
+  }
+
+  .surface-card:nth-child(4)::before {
+    background: var(--gold);
+  }
+
+  .surface-card-copy {
+    padding: 0.35rem 0.25rem 0;
+  }
+
+  .surface-card h3 {
+    font-size: 1.18rem;
+  }
+
+  .surface-card-copy p:not(.eyebrow) {
+    margin: 0;
+    color: var(--muted);
+    line-height: 1.6;
+  }
+
+  .surface-screenshot {
+    padding: 0.5rem;
+    border-radius: 0.85rem;
+    background: #20222b;
+    box-shadow: none;
+  }
+
+  .surface-screenshot .screenshot-label {
+    padding: 0.18rem 0.25rem 0.5rem;
+    font-size: 0.62rem;
+  }
+
+  .surface-screenshot img {
+    border-radius: 0.55rem;
   }
 
   .trust-section {
@@ -769,6 +960,20 @@ const pageTitle = `${siteContent.productName} | Native macOS agent workspace`;
       grid-template-columns: 1fr;
     }
 
+    .surface-heading,
+    .surface-gallery {
+      grid-template-columns: 1fr;
+    }
+
+    .surface-card,
+    .surface-card:nth-child(1),
+    .surface-card:nth-child(2),
+    .surface-card:nth-child(3),
+    .surface-card:nth-child(4) {
+      grid-column: auto;
+      margin-top: 0;
+    }
+
     .hero-bullets li,
     .trust-note,
     .capability-card {
@@ -785,9 +990,13 @@ const pageTitle = `${siteContent.productName} | Native macOS agent workspace`;
 
     .site-header nav {
       width: 100%;
-      justify-content: space-between;
+      justify-content: flex-start;
       gap: 0.5rem;
       font-size: 0.9rem;
+    }
+
+    .site-header nav a {
+      min-height: 2.25rem;
     }
 
     .hero-inner,
@@ -843,6 +1052,7 @@ const pageTitle = `${siteContent.productName} | Native macOS agent workspace`;
     }
 
     .proof-section,
+    .surfaces-section,
     .trust-section,
     .capabilities-section,
     .evaluation-section {
