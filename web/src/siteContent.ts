@@ -1,5 +1,7 @@
+import { REPOSITORY_URL as CONFIG_REPOSITORY_URL } from "./config/repository.mjs";
+
 export const CANONICAL_PRODUCT_NAME = "Atelier";
-export const REPOSITORY_URL = "https://github.com/MatheusBBarni/Atelier-ADE";
+export const REPOSITORY_URL = CONFIG_REPOSITORY_URL;
 export const DOCS_URL = `${REPOSITORY_URL}#readme`;
 export const QUICKSTART_URL = `${REPOSITORY_URL}#build-test-and-run`;
 

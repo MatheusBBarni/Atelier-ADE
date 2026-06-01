@@ -13,10 +13,15 @@ import {
   landingPageAssets,
   siteContent
 } from "../../src/siteContent.ts";
+import {
+  collectMissingWorkflowCommands,
+  resolveWebValidationCommands
+} from "../../scripts/validation/ciCommands.mjs";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const repositoryRoot = resolve(webRoot, "..");
 const indexPath = resolve(webRoot, "dist/index.html");
+const pagesWorkflowPath = resolve(repositoryRoot, ".github/workflows/deploy-pages.yml");
 let buildOutput;
 
 function run(command, args, cwd, timeout = 300_000) {
@@ -197,6 +202,7 @@ describe("Astro landing page integration", () => {
     expect(swiftPackage).not.toMatch(/astro|npm|web\//i);
     expect(runScript).not.toMatch(/astro|npm|web\//i);
     expect(releaseWorkflow).not.toMatch(/astro|npm|web\//i);
+    expect(releaseWorkflow).not.toMatch(/github-pages|upload-pages-artifact|deploy-pages/i);
     expect(existsSync(resolve(repositoryRoot, "Sources/NativeMacADE/Resources/AppIcon.png"))).toBe(
       true
     );
@@ -234,6 +240,32 @@ describe("Astro landing page integration", () => {
       sizes: "512x512",
       type: "image/png"
     });
+  });
+
+  it("defines a dedicated GitHub Pages workflow for the web build and deployment", () => {
+    const workflow = readFileSync(pagesWorkflowPath, "utf8");
+    const packageJson = readFileSync(resolve(webRoot, "package.json"), "utf8");
+    const commands = resolveWebValidationCommands(packageJson);
+
+    expect(workflow).toContain("name: Deploy GitHub Pages");
+    expect(workflow).toContain("working-directory: web");
+    expect(workflow).toContain("cache-dependency-path: web/package-lock.json");
+    expect(workflow).toContain("actions/configure-pages@v5");
+    expect(workflow).toContain("actions/upload-pages-artifact@v5");
+    expect(workflow).toContain("path: web/dist");
+    expect(workflow).toContain("actions/deploy-pages@v5");
+    expect(workflow).toContain("contents: read");
+    expect(workflow).toContain("pages: write");
+    expect(workflow).toContain("id-token: write");
+    expect(collectMissingWorkflowCommands(workflow, commands)).toEqual([]);
+  });
+
+  it("passes the built-output validation suite against the configured Pages base path", () => {
+    expect(() => run("npm", ["run", "validate:built"], webRoot)).not.toThrow();
+  });
+
+  it("validates the fallback repository CTA without JavaScript enhancement", () => {
+    expect(() => run("npm", ["run", "validate:no-js-cta"], webRoot)).not.toThrow();
   });
 
   it("preserves the README screenshot source path outside the site asset copy", () => {

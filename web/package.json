@@ -9,7 +9,13 @@
     "preview": "ASTRO_TELEMETRY_DISABLED=1 astro preview",
     "test": "npm run test:unit && npm run test:integration",
     "test:unit": "vitest run tests/unit --coverage",
-    "test:integration": "vitest run tests/integration"
+    "test:integration": "vitest run tests/integration",
+    "validate": "npm run build && npm run validate:built",
+    "validate:built": "npm run validate:links && npm run validate:no-js-cta && npm run validate:a11y",
+    "validate:links": "node ./scripts/validate-built-site.mjs --check links",
+    "validate:no-js-cta": "node ./scripts/validate-built-site.mjs --check no-js-cta",
+    "validate:a11y": "node ./scripts/validate-built-site.mjs --check a11y",
+    "validate:ci": "npm run test:unit && npm run build && npm run validate:built"
   },
   "engines": {
     "node": ">=22.12.0"

@@ -1,10 +1,21 @@
 import { dirname, resolve, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const REPOSITORY_OWNER = "MatheusBBarni";
-export const REPOSITORY_NAME = "Atelier-ADE";
-export const DEFAULT_SITE_ORIGIN = `https://${REPOSITORY_OWNER.toLowerCase()}.github.io`;
-export const DEFAULT_PAGES_BASE = `/${REPOSITORY_NAME}`;
+import {
+  DEFAULT_PAGES_BASE,
+  DEFAULT_SITE_ORIGIN,
+  REPOSITORY_NAME,
+  REPOSITORY_OWNER,
+  REPOSITORY_URL
+} from "./repository.mjs";
+
+export {
+  DEFAULT_PAGES_BASE,
+  DEFAULT_SITE_ORIGIN,
+  REPOSITORY_NAME,
+  REPOSITORY_OWNER,
+  REPOSITORY_URL
+} from "./repository.mjs";
 
 export function normalizeOrigin(origin) {
   return origin.replace(/\/+$/, "");
