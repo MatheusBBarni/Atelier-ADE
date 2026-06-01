@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Gate shell affordances and map blocked-action UX"
 type: frontend
 complexity: high
@@ -32,12 +32,12 @@ Align the visible shell with Focus Workspace by hiding blocked terminal-tab affo
 </requirements>
 
 ## Subtasks
-- [ ] 5.1 Gate tab-bar terminal creation affordances and row-visibility rules against the shared Focus Workspace policy.
-- [ ] 5.2 Gate app-menu terminal-tab commands and any related shortcut-backed creation affordances.
-- [ ] 5.3 Align agent-tab palette and placeholder entry points with the same Focus Workspace affordance rules.
-- [ ] 5.4 Map focus-policy command rejections to calm `UserMessage` alert titles and details.
-- [ ] 5.5 Preserve allowed first-surface and same-file flows while rejecting blocked different-file opens with clear feedback.
-- [ ] 5.6 Add focused automated assertions and manual shell verification for menus, alerts, placeholder flows, and tab-row visibility.
+- [x] 5.1 Gate tab-bar terminal creation affordances and row-visibility rules against the shared Focus Workspace policy.
+- [x] 5.2 Gate app-menu terminal-tab commands and any related shortcut-backed creation affordances.
+- [x] 5.3 Align agent-tab palette and placeholder entry points with the same Focus Workspace affordance rules.
+- [x] 5.4 Map focus-policy command rejections to calm `UserMessage` alert titles and details.
+- [x] 5.5 Preserve allowed first-surface and same-file flows while rejecting blocked different-file opens with clear feedback.
+- [x] 5.6 Add focused automated assertions and manual shell verification for menus, alerts, placeholder flows, and tab-row visibility.
 
 ## Implementation Details
 Use the TechSpec **"Shell/UI behavior"**, **"Known Risks"**, and **"Development Sequencing"** sections as the implementation guide. Keep UI gating secondary to command enforcement, and reuse the shared focus policy/helper rather than duplicating terminal/file count logic in every SwiftUI surface.
@@ -73,17 +73,29 @@ Use the TechSpec **"Shell/UI behavior"**, **"Known Risks"**, and **"Development 
 
 ## Tests
 - Unit tests:
-  - [ ] Focus-policy error mapping returns a specific title/detail pair for blocked terminal-tab creation.
-  - [ ] Focus-policy error mapping returns a specific title/detail pair for blocked second different-file opens.
-  - [ ] Tab-row visibility logic hides the row only when the selected session has exactly one visible tab under Focus Workspace.
+  - [x] Focus-policy error mapping returns a specific title/detail pair for blocked terminal-tab creation.
+  - [x] Focus-policy error mapping returns a specific title/detail pair for blocked second different-file opens.
+  - [x] Tab-row visibility logic hides the row only when the selected session has exactly one visible tab under Focus Workspace.
 - Integration tests:
-  - [ ] With Focus Workspace enabled and one terminal tab, the tab-bar plus affordance and app-menu terminal-tab creation actions are hidden.
-  - [ ] With Focus Workspace enabled and an empty or first-surface state, allowed placeholder and first-tab actions remain available.
-  - [ ] With Focus Workspace enabled and a terminal+file session, the tab row remains visible for navigation while blocked terminal-tab creation affordances stay hidden.
-  - [ ] With Focus Workspace enabled, a blocked different-file open from both the file tree and search surfaces shows calm Focus Workspace alert copy.
-  - [ ] A restored legacy multi-tab session remains visible and navigable, and a new blocked terminal-tab attempt shows the friendly Focus Workspace alert.
+  - [x] With Focus Workspace enabled and one terminal tab, the tab-bar plus affordance and app-menu terminal-tab creation actions are hidden.
+  - [x] With Focus Workspace enabled and an empty or first-surface state, allowed placeholder and first-tab actions remain available.
+  - [x] With Focus Workspace enabled and a terminal+file session, the tab row remains visible for navigation while blocked terminal-tab creation affordances stay hidden.
+  - [x] With Focus Workspace enabled, a blocked different-file open from both the file tree and search surfaces shows calm Focus Workspace alert copy.
+  - [x] A restored legacy multi-tab session remains visible and navigable, and a new blocked terminal-tab attempt shows the friendly Focus Workspace alert.
 - Test coverage target: >=80%
 - All tests must pass
+
+## Verification Evidence
+- `swift test --filter FocusWorkspace` passed 26 focused tests.
+- `swift test --enable-code-coverage` passed the full suite: 299 tests, 0 failures.
+- `xcrun llvm-cov report .build/arm64-apple-macosx/debug/NativeMacADEPackageTests.xctest/Contents/MacOS/NativeMacADEPackageTests -instr-profile .build/arm64-apple-macosx/debug/codecov/default.profdata -ignore-filename-regex='(^|/)\\.build/|(^|/)Tests/'` reported 82.90% region coverage and 89.73% line coverage.
+
+## Manual Shell Verification
+- Enable Focus Workspace, select an empty session, and confirm the first-tab placeholder CTAs plus app-menu terminal commands remain available.
+- In a one-terminal session, confirm the tab row is visually collapsed, tab/menu terminal creation affordances are hidden, and any direct blocked agent/tab action shows the Focus Workspace terminal message.
+- In a terminal+file session, confirm the tab row remains visible for navigation while terminal creation affordances stay hidden.
+- Reopen the same file and confirm the existing file tab is selected; open a different file from both the file tree and search results and confirm the Focus Workspace file-slot message appears.
+- Restore or seed a legacy multi-tab session, confirm all existing tabs remain visible and navigable, then attempt a new terminal tab and confirm the friendly Focus Workspace message appears.
 
 ## Success Criteria
 - All tests passing

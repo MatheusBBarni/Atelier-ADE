@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Session disclosure UI and direct tab jump"
 type: frontend
 complexity: medium
@@ -29,12 +29,12 @@ Extend the sidebar session rows so users can expand a session, inspect terminal-
 </requirements>
 
 ## Subtasks
-- [ ] 4.1 Add session-local disclosure state to the sidebar surface.
-- [ ] 4.2 Render terminal child rows from the approved summary pipeline only when a session is expanded.
-- [ ] 4.3 Highlight the selected terminal tab when the current session selection matches a rendered child row.
-- [ ] 4.4 Route child-row selection through the command service so project, session, and tab selection stay synchronized.
-- [ ] 4.5 Preserve collapsed restore behavior and ensure non-primary `SessionRowView` call sites remain valid.
-- [ ] 4.6 Add automated coverage for disclosure behavior, terminal-only rendering, direct jump behavior, and restore-default collapse.
+- [x] 4.1 Add session-local disclosure state to the sidebar surface.
+- [x] 4.2 Render terminal child rows from the approved summary pipeline only when a session is expanded.
+- [x] 4.3 Highlight the selected terminal tab when the current session selection matches a rendered child row.
+- [x] 4.4 Route child-row selection through the command service so project, session, and tab selection stay synchronized.
+- [x] 4.5 Preserve collapsed restore behavior and ensure non-primary `SessionRowView` call sites remain valid.
+- [x] 4.6 Add automated coverage for disclosure behavior, terminal-only rendering, direct jump behavior, and restore-default collapse.
 
 ## Implementation Details
 Implement the visible sidebar experience using the summary pipeline from task 03 and the direct-jump path described in the TechSpec "User Experience" and "Development Sequencing" sections. Do not expand this task into file rows, global monitor UI, or stored expansion-state persistence.
@@ -67,14 +67,14 @@ Implement the visible sidebar experience using the summary pipeline from task 03
 
 ## Tests
 - Unit tests:
-  - [ ] Expanded session renders only terminal child rows even when the session contains file tabs.
-  - [ ] The currently selected terminal tab is the only child row marked selected.
-  - [ ] If a mixed session currently has a file tab selected, no terminal child row is falsely highlighted.
-  - [ ] Duplicate terminal labels still map child-row taps to the correct `tabID`.
+  - [x] Expanded session renders only terminal child rows even when the session contains file tabs.
+  - [x] The currently selected terminal tab is the only child row marked selected.
+  - [x] If a mixed session currently has a file tab selected, no terminal child row is falsely highlighted.
+  - [x] Duplicate terminal labels still map child-row taps to the correct `tabID`.
 - Integration tests:
-  - [ ] Clicking a terminal child row updates selected project, session, and tab through the command-service selection path.
-  - [ ] Restored workspaces keep session rows collapsed by default until the user expands them.
-  - [ ] Session-row signature changes do not break the secondary `SessionListView` path.
+  - [x] Clicking a terminal child row updates selected project, session, and tab through the command-service selection path.
+  - [x] Restored workspaces keep session rows collapsed by default until the user expands them.
+  - [x] Session-row signature changes do not break the secondary `SessionListView` path.
 - Test coverage target: >=80%
 - All tests must pass
 

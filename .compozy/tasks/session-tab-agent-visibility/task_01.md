@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Shared terminal presentation resolver"
 type: refactor
 complexity: medium
@@ -28,11 +28,11 @@ Extract the terminal title, agent label, and icon fallback logic from the curren
 </requirements>
 
 ## Subtasks
-- [ ] 1.1 Define the shared terminal presentation contract used by AppShell consumers.
-- [ ] 1.2 Move terminal title, agent label, and icon fallback behavior out of inline view-specific logic.
-- [ ] 1.3 Update the existing tab strip to use the shared resolver for terminal identity.
-- [ ] 1.4 Update rename-placeholder behavior to use the same terminal fallback contract.
-- [ ] 1.5 Add automated coverage proving terminal identity resolution stays aligned across current consumers.
+- [x] 1.1 Define the shared terminal presentation contract used by AppShell consumers.
+- [x] 1.2 Move terminal title, agent label, and icon fallback behavior out of inline view-specific logic.
+- [x] 1.3 Update the existing tab strip to use the shared resolver for terminal identity.
+- [x] 1.4 Update rename-placeholder behavior to use the same terminal fallback contract.
+- [x] 1.5 Add automated coverage proving terminal identity resolution stays aligned across current consumers.
 
 ## Implementation Details
 Create the shared resolver in AppShell and use the TechSpec "Core Interfaces" and "Data Models" sections as the contract reference. Keep file-tab naming logic unchanged. Avoid promoting this resolver into `NativeMacADECore`; ADR-003 fixes the boundary in AppShell.
@@ -64,14 +64,14 @@ Create the shared resolver in AppShell and use the TechSpec "Core Interfaces" an
 
 ## Tests
 - Unit tests:
-  - [ ] Custom tab title overrides shortcut and launch-command fallback.
-  - [ ] `shortcutID` resolves the expected label and icon inputs for built-in and custom profile fixtures.
-  - [ ] Unknown launch commands are humanized and fall back to terminal identity correctly.
-  - [ ] Plain shell tabs with no title or command resolve to `Terminal` and the generic terminal icon path.
-  - [ ] File tabs do not route through terminal presentation logic.
+  - [x] Custom tab title overrides shortcut and launch-command fallback.
+  - [x] `shortcutID` resolves the expected label and icon inputs for built-in and custom profile fixtures.
+  - [x] Unknown launch commands are humanized and fall back to terminal identity correctly.
+  - [x] Plain shell tabs with no title or command resolve to `Terminal` and the generic terminal icon path.
+  - [x] File tabs do not route through terminal presentation logic.
 - Integration tests:
-  - [ ] `TabItemView` and `TabRenameDraft` produce matching terminal fallback output for the same tab fixture.
-  - [ ] Legacy restored terminal tabs with missing `shortcutID` still resolve stable fallback identity.
+  - [x] `TabItemView` and `TabRenameDraft` produce matching terminal fallback output for the same tab fixture.
+  - [x] Legacy restored terminal tabs with missing `shortcutID` still resolve stable fallback identity.
 - Test coverage target: >=80%
 - All tests must pass
 
