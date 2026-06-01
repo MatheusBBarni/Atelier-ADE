@@ -11,6 +11,7 @@ MIN_MACOS_VERSION="15.0"
 ICON_SOURCE="$ROOT_DIR/Sources/NativeMacADE/Resources/AppIcon.png"
 APP_VERSION="${APP_VERSION:-0.1.1}"
 APP_BUILD="${APP_BUILD:-1}"
+CODESIGN_IDENTITY="${CODESIGN_IDENTITY:--}"
 MODE="${1:-run}"
 
 if [[ $# -gt 0 ]]; then
@@ -42,6 +43,18 @@ create_icns() {
 
   iconutil -c icns "$iconset_dir" -o "$output_icns"
   rm -rf "$temp_dir"
+}
+
+sign_app_bundle() {
+  local app_bundle="$1"
+  local codesign_args=(--force --sign "$CODESIGN_IDENTITY")
+
+  if [[ "$CODESIGN_IDENTITY" != "-" ]]; then
+    codesign_args+=(--options runtime)
+  fi
+
+  codesign "${codesign_args[@]}" "$app_bundle" >&2
+  codesign --verify --deep --strict --verbose=2 "$app_bundle" >&2
 }
 
 build_app_bundle() {
@@ -117,6 +130,8 @@ build_app_bundle() {
 </dict>
 </plist>
 EOF
+
+  sign_app_bundle "$app_bundle"
 
   echo "$app_bundle"
 }
