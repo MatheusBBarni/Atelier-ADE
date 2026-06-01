@@ -1,6 +1,7 @@
 import Foundation
 import SQLite3
 import Testing
+@testable import NativeMacADE
 @testable import NativeMacADECore
 
 // Suite: Default workspace command service persistence integration
@@ -867,6 +868,32 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
         #expect(snapshotAfterClose.tabOrder == [terminalTab.id])
         #expect(restoredTerminal.closeRequests.isEmpty)
         #expect(restoredTerminal.releasedTabIDs.isEmpty)
+    }
+
+    @Test
+    func sidebarTerminalChildSelectionUpdatesProjectSessionAndTab() async throws {
+        let harness = try makeHarness()
+        let firstProjectPath = try makeTemporaryProjectDirectory(named: "first-project")
+        let secondProjectPath = try makeTemporaryProjectDirectory(named: "second-project")
+        let firstProject = try await harness.service.openProject(path: firstProjectPath)
+        let firstSession = try await harness.service.createSession(projectID: firstProject.id, shortcutID: nil)
+        let targetTab = try await harness.service.createTab(sessionID: firstSession.id)
+        let secondProject = try await harness.service.openProject(path: secondProjectPath)
+        let secondSession = try await harness.service.createSession(projectID: secondProject.id, shortcutID: nil)
+        let secondSessionTab = try #require(harness.store.tabs.first { $0.sessionID == secondSession.id })
+
+        #expect(harness.store.selectedProjectID == secondProject.id)
+        #expect(harness.store.selectedSessionID == secondSession.id)
+        #expect(harness.store.selectedTabID == secondSessionTab.id)
+
+        try await SessionTerminalChildSelection.select(tabID: targetTab.id, commandService: harness.service)
+
+        #expect(harness.store.selectedProjectID == firstProject.id)
+        #expect(harness.store.selectedSessionID == firstSession.id)
+        #expect(harness.store.selectedTabID == targetTab.id)
+        #expect(try await harness.persistence.loadRestoreSnapshot()?.selectedProjectID == firstProject.id)
+        #expect(try await harness.persistence.loadRestoreSnapshot()?.selectedSessionID == firstSession.id)
+        #expect(try await harness.persistence.loadRestoreSnapshot()?.selectedTabID == targetTab.id)
     }
 
     @Test

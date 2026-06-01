@@ -122,6 +122,36 @@ struct SessionTerminalSummaryBuilderTests {
     }
 
     @Test
+    func selectedTerminalTabIsOnlySelectedSummary() throws {
+        let fixture = SummaryFixture()
+        let first = fixture.terminalTab(ordinal: 0, launchCommand: "codex")
+        let selected = fixture.terminalTab(ordinal: 1, launchCommand: "claude")
+        let third = fixture.terminalTab(ordinal: 2)
+        let store = fixture.store(tabs: [first, selected, third], selectedTabID: selected.id)
+
+        let summaries = SessionTerminalSummaryBuilder(store: store).summaries(for: fixture.session)
+
+        #expect(summaries.map(\.tabID) == [first.id, selected.id, third.id])
+        #expect(summaries.filter(\.isSelected).map(\.tabID) == [selected.id])
+    }
+
+    @Test
+    func duplicateTerminalLabelsKeepStableTabIDs() throws {
+        let fixture = SummaryFixture()
+        let firstID = UUID(uuidString: "11111111-1111-4111-8111-111111111111")!
+        let secondID = UUID(uuidString: "22222222-2222-4222-8222-222222222222")!
+        let first = fixture.terminalTab(id: firstID, ordinal: 0, title: "Review", launchCommand: "codex")
+        let second = fixture.terminalTab(id: secondID, ordinal: 1, title: "Review", launchCommand: "codex")
+        let store = fixture.store(tabs: [first, second], selectedTabID: second.id)
+
+        let summaries = SessionTerminalSummaryBuilder(store: store).summaries(for: fixture.session)
+
+        #expect(summaries.map(\.title) == ["Review", "Review"])
+        #expect(summaries.map(\.tabID) == [firstID, secondID])
+        #expect(summaries.filter(\.isSelected).map(\.tabID) == [secondID])
+    }
+
+    @Test
     func summaryRenderConvenienceFieldsExposeStableFactualValues() throws {
         let fixture = SummaryFixture()
         let codex = try #require(SessionShortcut.builtInDefaults.first { $0.label == "Codex" })

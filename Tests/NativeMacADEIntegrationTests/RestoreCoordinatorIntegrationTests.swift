@@ -1,6 +1,7 @@
 import Foundation
 import SQLite3
 import Testing
+@testable import NativeMacADE
 @testable import NativeMacADECore
 
 @Suite(.serialized)
@@ -143,6 +144,49 @@ struct RestoreCoordinatorIntegrationTests {
                 event.fields["reason"] == "missing_or_unreadable_file" &&
                 event.fields.values.contains(missingFile.path) == false
         })
+    }
+
+    @Test
+    func restoredWorkspaceKeepsSessionTerminalRowsCollapsedUntilExpanded() async throws {
+        let harness = try makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+        let readableFile = try makeTemporaryProjectFile(in: projectPath, relativePath: "Sources/App.swift")
+        let projectID = UUID()
+        let sessionID = UUID()
+        let terminalTabID = UUID()
+        let fileTabID = UUID()
+        let project = WorkspaceProject(id: projectID, path: projectPath, displayName: "restore")
+        let session = WorkspaceSession(id: sessionID, projectID: projectID, title: "Collapsed")
+        let terminalTab = WorkspaceTab(id: terminalTabID, sessionID: sessionID, workingDirectory: projectPath, ordinal: 0)
+        let fileTab = WorkspaceTab(
+            id: fileTabID,
+            sessionID: sessionID,
+            kind: .file,
+            workingDirectory: projectPath,
+            fileReference: WorkspaceFileReference(path: readableFile.path, projectRoot: projectPath),
+            ordinal: 1
+        )
+        try await harness.persistence.save(project: project)
+        try await harness.persistence.save(session: session)
+        try await harness.persistence.save(tab: terminalTab)
+        try await harness.persistence.save(tab: fileTab)
+        try await harness.persistence.save(snapshot: RestoreSnapshot(
+            selectedProjectID: projectID,
+            selectedSessionID: sessionID,
+            selectedTabID: fileTabID,
+            tabOrder: [terminalTabID, fileTabID]
+        ))
+
+        try await harness.service.restoreWorkspace()
+        let summaries = SessionTerminalSummaryBuilder(store: harness.store).summaries(for: session)
+        var disclosure = SessionSidebarDisclosureState()
+
+        #expect(harness.store.tabsForSelectedSession.map(\.kind) == [.terminal, .file])
+        #expect(disclosure.visibleSummaries(for: sessionID, summaries: summaries).isEmpty)
+
+        disclosure.toggle(sessionID)
+
+        #expect(disclosure.visibleSummaries(for: sessionID, summaries: summaries).map(\.tabID) == [terminalTabID])
     }
 
     @Test

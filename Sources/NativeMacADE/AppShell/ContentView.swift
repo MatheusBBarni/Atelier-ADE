@@ -761,6 +761,7 @@ struct ProjectSidebarView: View {
     @State private var pendingRemoval: WorkspaceProject?
     @State private var renameDraft: SessionRenameDraft?
     @State private var expandedProjectIDs: Set<UUID> = []
+    @State private var sessionDisclosure = SessionSidebarDisclosureState()
     @State private var hoveredSessionID: UUID?
     @State private var shortcutCatalog = SessionShortcutCatalog()
     @State private var terminalExitSnapshotsByTabID: [UUID: TerminalExitObservation] = [:]
@@ -826,13 +827,21 @@ struct ProjectSidebarView: View {
                                         } else {
                                             VStack(alignment: .leading, spacing: 8) {
                                                 ForEach(projectSessions) { session in
+                                                    let summaries = terminalSummaries(for: session)
                                                     SessionRowView(
                                                         session: session,
-                                                        terminalSummaries: terminalSummaries(for: session),
+                                                        terminalSummaries: summaries,
+                                                        isExpanded: sessionDisclosure.isExpanded(session.id),
                                                         isActive: session.id == store.selectedSessionID,
                                                         showsMenu: hoveredSessionID == session.id || session.id == store.selectedSessionID,
+                                                        onToggleDisclosure: summaries.isEmpty ? nil : {
+                                                            sessionDisclosure.toggle(session.id)
+                                                        },
                                                         onSelect: {
                                                             selectSession(session.id)
+                                                        },
+                                                        onSelectTerminal: { tabID in
+                                                            selectTerminalTab(tabID)
                                                         },
                                                         onRename: {
                                                             renameDraft = SessionRenameDraft(session: session)
@@ -933,6 +942,9 @@ struct ProjectSidebarView: View {
         .task {
             await reloadShortcutCatalog(reason: .initialLoad)
         }
+        .onChange(of: store.sessions.map(\.id)) { _, sessionIDs in
+            sessionDisclosure.keepOnly(sessionIDs)
+        }
         .onAppear(perform: startTerminalExitObservation)
         .onDisappear(perform: endDraggingProject)
         .onDisappear(perform: stopTerminalExitObservation)
@@ -1007,10 +1019,21 @@ struct ProjectSidebarView: View {
         }
     }
 
+    private func selectTerminalTab(_ id: UUID) {
+        Task {
+            do {
+                try await SessionTerminalChildSelection.select(tabID: id, commandService: commandService)
+            } catch {
+                userMessage = UserMessage(title: "Tab selection could not be saved", detail: String(describing: error))
+            }
+        }
+    }
+
     private func removeSession(_ id: UUID) {
         Task {
             do {
                 try await commandService.removeSession(id: id)
+                sessionDisclosure.collapse(id)
             } catch WorkspaceCommandError.dirtyFileTabCloseRejected {
                 userMessage = UserMessage(
                     title: "Session has unsaved file tabs",
@@ -2100,48 +2123,70 @@ struct SessionSearchPaletteRow: View {
 struct SessionRowView: View {
     let session: WorkspaceSession
     var terminalSummaries: [SessionTerminalSummary] = []
+    var isExpanded = false
     let isActive: Bool
     let showsMenu: Bool
+    var onToggleDisclosure: (() -> Void)?
     let onSelect: () -> Void
+    var onSelectTerminal: (UUID) -> Void = { _ in }
     let onRename: () -> Void
     let onDelete: () -> Void
     @Environment(\.shellThemePalette) private var theme
     @Environment(\.shellUIFontSize) private var uiFontSize
 
     var body: some View {
-        HStack(spacing: 10) {
-            Button(action: onSelect) {
-                HStack(spacing: 10) {
-                    Image(systemName: isActive ? "rectangle.stack.fill" : "rectangle.stack")
-                        .foregroundStyle(isActive ? theme.selectedText.color : theme.secondaryAccent.color)
-                        .frame(width: 20)
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text(session.title)
-                            .font(.system(size: uiFontSize, weight: .semibold))
-                            .foregroundStyle(theme.primaryText.color)
-                            .lineLimit(1)
-                    }
-                    Spacer(minLength: 8)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                disclosureButton
 
-            if showsMenu {
-                Menu {
-                    Button("Rename", systemImage: "pencil", action: onRename)
-                    Button("Delete", systemImage: "trash", role: .destructive, action: onDelete)
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .font(.callout.weight(.semibold))
-                        .frame(width: 28, height: 28)
-                        .background(theme.shellBackground.color.opacity(0.85), in: Circle())
+                Button(action: onSelect) {
+                    HStack(spacing: 10) {
+                        Image(systemName: isActive ? "rectangle.stack.fill" : "rectangle.stack")
+                            .foregroundStyle(isActive ? theme.selectedText.color : theme.secondaryAccent.color)
+                            .frame(width: 20)
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text(session.title)
+                                .font(.system(size: uiFontSize, weight: .semibold))
+                                .foregroundStyle(theme.primaryText.color)
+                                .lineLimit(1)
+                        }
+                        Spacer(minLength: 8)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .help("Session actions")
+                .buttonStyle(.plain)
+                .accessibilityLabel(session.title)
+                .accessibilityValue(accessibilityValue)
+
+                if showsMenu {
+                    Menu {
+                        Button("Rename", systemImage: "pencil", action: onRename)
+                        Button("Delete", systemImage: "trash", role: .destructive, action: onDelete)
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .font(.callout.weight(.semibold))
+                            .frame(width: 28, height: 28)
+                            .background(theme.shellBackground.color.opacity(0.85), in: Circle())
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .help("Session actions")
+                }
+            }
+
+            if isExpanded, !terminalSummaries.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(terminalSummaries) { summary in
+                        SessionTerminalChildRowView(
+                            summary: summary,
+                            onSelect: onSelectTerminal
+                        )
+                    }
+                }
+                .padding(.leading, 30)
+                .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
         .padding(.vertical, 8)
@@ -2152,18 +2197,137 @@ struct SessionRowView: View {
                 .stroke(isActive ? theme.activeBorder.color : Color.clear, lineWidth: 1)
         }
         .contentShape(Rectangle())
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(session.title)
-        .accessibilityValue(accessibilityValue)
+        .accessibilityElement(children: .contain)
+        .animation(.easeInOut(duration: 0.12), value: isExpanded)
+    }
+
+    @ViewBuilder
+    private var disclosureButton: some View {
+        if let onToggleDisclosure {
+            Button(action: onToggleDisclosure) {
+                Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(theme.mutedText.color)
+                    .frame(width: 18, height: 24)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(isExpanded ? "Collapse session terminals" : "Expand session terminals")
+            .accessibilityLabel(isExpanded ? "Collapse \(session.title)" : "Expand \(session.title)")
+            .accessibilityValue("\(terminalSummaries.count) terminal tab\(terminalSummaries.count == 1 ? "" : "s")")
+        } else {
+            Color.clear
+                .frame(width: 18, height: 24)
+                .accessibilityHidden(true)
+        }
     }
 
     private var accessibilityValue: String {
-        let sessionState = isActive ? "Active session" : "Session"
+        let sessionState: String
+        switch (isActive, isExpanded) {
+        case (true, true):
+            sessionState = "Active session, expanded"
+        case (true, false):
+            sessionState = "Active session, collapsed"
+        case (false, true):
+            sessionState = "Session, expanded"
+        case (false, false):
+            sessionState = "Session, collapsed"
+        }
         guard !terminalSummaries.isEmpty else {
             return sessionState
         }
 
         return "\(sessionState), \(terminalSummaries.count) terminal tab\(terminalSummaries.count == 1 ? "" : "s")"
+    }
+}
+
+struct SessionTerminalChildRowView: View {
+    let summary: SessionTerminalSummary
+    let onSelect: (UUID) -> Void
+    @Environment(\.shellThemePalette) private var theme
+    @Environment(\.shellUIFontSize) private var uiFontSize
+
+    var selectionTabID: UUID {
+        summary.tabID
+    }
+
+    var body: some View {
+        Button {
+            onSelect(selectionTabID)
+        } label: {
+            HStack(spacing: 8) {
+                AgentProfileIconView(
+                    shortcut: summary.iconShortcut,
+                    fallbackSystemImage: summary.fallbackSystemImage(isActive: summary.isSelected),
+                    size: 16
+                )
+                .frame(width: 18, height: 18)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(summary.title)
+                        .font(.system(size: max(uiFontSize - 1, 11), weight: .medium))
+                        .foregroundStyle(summary.isSelected ? theme.selectedText.color : theme.primaryText.color)
+                        .lineLimit(1)
+                    Text(secondaryLabel)
+                        .font(.system(size: max(uiFontSize - 3, 10)))
+                        .foregroundStyle(summary.isSelected ? theme.selectedText.color.opacity(0.82) : theme.secondaryText.color)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 6)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .frame(maxWidth: .infinity, minHeight: 34, alignment: .leading)
+            .background(childBackground, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .stroke(summary.isSelected ? theme.activeBorder.color.opacity(0.78) : Color.clear, lineWidth: 1)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(summary.title)
+        .accessibilityValue(accessibilityValue)
+        .help(summary.title)
+    }
+
+    private var childBackground: Color {
+        if summary.isSelected {
+            return theme.activeBackground.color.opacity(0.45)
+        }
+
+        return theme.shellBackground.color.opacity(0.36)
+    }
+
+    private var secondaryLabel: String {
+        let base = summary.title == summary.agentLabel ? "Terminal tab" : summary.agentLabel
+        guard let exitLabel else {
+            return base
+        }
+
+        return "\(base), \(exitLabel)"
+    }
+
+    private var accessibilityValue: String {
+        var values = [secondaryLabel]
+        if summary.isSelected {
+            values.append("Selected")
+        }
+        return values.joined(separator: ", ")
+    }
+
+    private var exitLabel: String? {
+        guard summary.hasExitObservation else {
+            return nil
+        }
+
+        if let status = summary.exitStatus {
+            return "Exited with status \(status)"
+        }
+
+        return "Exited"
     }
 }
 
