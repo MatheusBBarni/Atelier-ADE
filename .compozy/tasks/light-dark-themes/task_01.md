@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Theme selection model and catalog updates
 type: backend
 complexity: medium
@@ -28,11 +28,11 @@ This task establishes the core theme-domain contract that all later work depends
 </requirements>
 
 ## Subtasks
-- [ ] 1.1 Add the reserved System-selection constants and supported-selection helpers in the existing theme domain.
-- [ ] 1.2 Add the effective-theme resolver that maps persisted selection plus runtime light/dark scheme to a concrete `AppTheme`.
-- [ ] 1.3 Freeze and document the curated preset ordering contract, including the first-light and first-dark fallback behavior.
-- [ ] 1.4 Expand the curated `AppTheme.catalog` with the approved V1 presets while preserving stable identifiers.
-- [ ] 1.5 Add focused model-level test coverage for resolver behavior, supported selection IDs, and catalog-order guarantees.
+- [x] 1.1 Add the reserved System-selection constants and supported-selection helpers in the existing theme domain.
+- [x] 1.2 Add the effective-theme resolver that maps persisted selection plus runtime light/dark scheme to a concrete `AppTheme`.
+- [x] 1.3 Freeze and document the curated preset ordering contract, including the first-light and first-dark fallback behavior.
+- [x] 1.4 Expand the curated `AppTheme.catalog` with the approved V1 presets while preserving stable identifiers.
+- [x] 1.5 Add focused model-level test coverage for resolver behavior, supported selection IDs, and catalog-order guarantees.
 
 ## Implementation Details
 
@@ -67,15 +67,15 @@ Keep all theme-selection logic inside the existing theme domain and model layer 
 
 ## Tests
 - Unit tests:
-  - [ ] `AppTheme.resolveEffective(selectionID:systemScheme:)` returns the selected concrete light preset when a light preset ID is provided.
-  - [ ] `AppTheme.resolveEffective(selectionID:systemScheme:)` returns the selected concrete dark preset when a dark preset ID is provided.
-  - [ ] `AppTheme.resolveEffective(selectionID:systemScheme:)` returns the first light preset when `selectionID = system` and runtime scheme is light.
-  - [ ] `AppTheme.resolveEffective(selectionID:systemScheme:)` returns the first dark preset when `selectionID = system` and runtime scheme is dark.
-  - [ ] `AppTheme.supportedSelectionIDs` includes `system` and all concrete preset IDs without duplicates.
-  - [ ] `AppPreferences` selection-model helpers accept `system` and preserve stable value semantics.
+  - [x] `AppTheme.resolveEffective(selectionID:systemScheme:)` returns the selected concrete light preset when a light preset ID is provided.
+  - [x] `AppTheme.resolveEffective(selectionID:systemScheme:)` returns the selected concrete dark preset when a dark preset ID is provided.
+  - [x] `AppTheme.resolveEffective(selectionID:systemScheme:)` returns the first light preset when `selectionID = system` and runtime scheme is light.
+  - [x] `AppTheme.resolveEffective(selectionID:systemScheme:)` returns the first dark preset when `selectionID = system` and runtime scheme is dark.
+  - [x] `AppTheme.supportedSelectionIDs` includes `system` and all concrete preset IDs without duplicates.
+  - [x] `AppPreferences` selection-model helpers accept `system` and preserve stable value semantics.
 - Integration tests:
-  - [ ] Existing concrete preset IDs still resolve to the same `AppTheme` instances after catalog expansion.
-  - [ ] The curated catalog order keeps the intended first light and first dark presets used by System mode.
+  - [x] Existing concrete preset IDs still resolve to the same `AppTheme` instances after catalog expansion.
+  - [x] The curated catalog order keeps the intended first light and first dark presets used by System mode.
 - Test coverage target: >=80%
 - All tests must pass
 

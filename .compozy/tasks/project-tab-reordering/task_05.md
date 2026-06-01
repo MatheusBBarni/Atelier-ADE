@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Restore-order hardening and reorder observability"
 type: backend
 complexity: high
@@ -29,11 +29,11 @@ This task hardens the trust-critical edge cases around reorder durability. It en
 </requirements>
 
 ## Subtasks
-- [ ] 5.1 Harden degraded-restore ordering so filtered items do not cause later reorder drift.
-- [ ] 5.2 Keep hidden persisted tabs and derived snapshot order aligned after visible reorder operations.
-- [ ] 5.3 Add reorder diagnostics and structured events to the existing observability surfaces.
-- [ ] 5.4 Extend restore-focused unit and integration coverage for mismatch and relaunch edge cases.
-- [ ] 5.5 Define release-gate style success checks for reorder persistence and restore alignment.
+- [x] 5.1 Harden degraded-restore ordering so filtered items do not cause later reorder drift.
+- [x] 5.2 Keep hidden persisted tabs and derived snapshot order aligned after visible reorder operations.
+- [x] 5.3 Add reorder diagnostics and structured events to the existing observability surfaces.
+- [x] 5.4 Extend restore-focused unit and integration coverage for mismatch and relaunch edge cases.
+- [x] 5.5 Define release-gate style success checks for reorder persistence and restore alignment.
 
 ## Implementation Details
 Use the TechSpec sections **System Architecture → Restore compatibility boundary**, **Monitoring and Observability**, and **Technical Considerations → Known Risks**. Keep this work anchored in existing restore, command, persistence, and pilot-diagnostics seams rather than inventing a separate monitoring system.
@@ -71,13 +71,13 @@ Use the TechSpec sections **System Architecture → Restore compatibility bounda
 
 ## Tests
 - Unit tests:
-  - [ ] After filtered restore removes one file tab, the next visible-tab reorder keeps hidden persisted tabs in a stable tail order.
-  - [ ] Snapshot regeneration after reorder matches the runtime canonical order used for restore.
-  - [ ] Reorder persistence or restore-alignment failures increment the expected pilot diagnostics counters or flags.
+  - [x] After filtered restore removes one file tab, the next visible-tab reorder keeps hidden persisted tabs in a stable tail order.
+  - [x] Snapshot regeneration after reorder matches the runtime canonical order used for restore.
+  - [x] Reorder persistence or restore-alignment failures increment the expected pilot diagnostics counters or flags.
 - Integration tests:
-  - [ ] Reordering tabs after degraded restore persists a deterministic visible order across the next relaunch.
-  - [ ] A restore-order mismatch path emits the expected structured diagnostics and does not silently succeed.
-  - [ ] Reordered project or tab state remains aligned after relaunch even when one restored file tab is inaccessible.
+  - [x] Reordering tabs after degraded restore persists a deterministic visible order across the next relaunch.
+  - [x] A restore-order mismatch path emits the expected structured diagnostics and does not silently succeed.
+  - [x] Reordered project or tab state remains aligned after relaunch even when one restored file tab is inaccessible.
 - Test coverage target: >=80%
 - All tests must pass
 

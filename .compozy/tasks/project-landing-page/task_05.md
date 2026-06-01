@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Add GitHub Pages deployment and basic web validation"
 type: infra
 complexity: medium
@@ -32,11 +32,11 @@ This task makes the landing page publishable and verifiable. It adds a dedicated
 </requirements>
 
 ## Subtasks
-- [ ] 5.1 Add the GitHub Actions workflow that builds the Astro site from `web/`.
-- [ ] 5.2 Configure the workflow to publish to GitHub Pages using repository-supported permissions.
-- [ ] 5.3 Add the required build and link/path validation commands to the workflow.
-- [ ] 5.4 Add a lightweight accessibility and no-JavaScript CTA smoke validation step.
-- [ ] 5.5 Keep the new workflow isolated from the existing macOS release automation.
+- [x] 5.1 Add the GitHub Actions workflow that builds the Astro site from `web/`.
+- [x] 5.2 Configure the workflow to publish to GitHub Pages using repository-supported permissions.
+- [x] 5.3 Add the required build and link/path validation commands to the workflow.
+- [x] 5.4 Add a lightweight accessibility and no-JavaScript CTA smoke validation step.
+- [x] 5.5 Keep the new workflow isolated from the existing macOS release automation.
 
 ## Implementation Details
 Use TechSpec “Integration Points”, “Testing Approach”, “Development Sequencing”, and “Monitoring and Observability”. This task owns publishability and CI validation, not page content or README alignment.

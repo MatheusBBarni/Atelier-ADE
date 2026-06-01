@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Mixed selected-session tab strip reorder interaction"
 type: frontend
 complexity: high
@@ -30,11 +30,11 @@ This task delivers tab reordering in the shipped tab surface rather than inventi
 </requirements>
 
 ## Subtasks
-- [ ] 4.1 Add drag/drop reorder interaction to the existing horizontal selected-session tab strip.
-- [ ] 4.2 Keep terminal and file tabs under one visible ordering rule in the strip.
-- [ ] 4.3 Connect drop completion to the tab reorder command path.
-- [ ] 4.4 Preserve selected-tab state and adjacent-tab navigation semantics after reorder.
-- [ ] 4.5 Add mixed-tab persistence and relaunch regressions plus lightweight manual smoke guidance.
+- [x] 4.1 Add drag/drop reorder interaction to the existing horizontal selected-session tab strip.
+- [x] 4.2 Keep terminal and file tabs under one visible ordering rule in the strip.
+- [x] 4.3 Connect drop completion to the tab reorder command path.
+- [x] 4.4 Preserve selected-tab state and adjacent-tab navigation semantics after reorder.
+- [x] 4.5 Add mixed-tab persistence and relaunch regressions plus lightweight manual smoke guidance.
 
 ## Implementation Details
 Use the TechSpec sections **System Architecture → Tab strip reorder surface**, **Implementation Design → Data Models**, and **Technical Considerations → Key Decisions**. Stay inside the existing selected-session tab strip and interpret the PRD’s tab-order promise through the shipped surface rather than creating a new vertical experience.
@@ -72,15 +72,20 @@ Use the TechSpec sections **System Architecture → Tab strip reorder surface**,
 
 ## Tests
 - Unit tests:
-  - [ ] Reordering a mixed visible tab set produces the expected ordered visible tab ID payload for the command layer.
-  - [ ] Reordering the currently selected tab keeps the same tab selected after the move completes.
-  - [ ] Reordering tabs does not break adjacent-tab traversal order used by previous/next tab commands.
+  - [x] Reordering a mixed visible tab set produces the expected ordered visible tab ID payload for the command layer.
+  - [x] Reordering the currently selected tab keeps the same tab selected after the move completes.
+  - [x] Reordering tabs does not break adjacent-tab traversal order used by previous/next tab commands.
 - Integration tests:
-  - [ ] Reordering a session that contains both terminal and file tabs persists the mixed order across relaunch.
-  - [ ] Reordering tabs after adding a file tab still restores the selected tab and visible order correctly.
-  - [ ] First-to-last and last-to-first tab moves survive reload without ordinal drift.
+  - [x] Reordering a session that contains both terminal and file tabs persists the mixed order across relaunch.
+  - [x] Reordering tabs after adding a file tab still restores the selected tab and visible order correctly.
+  - [x] First-to-last and last-to-first tab moves survive reload without ordinal drift.
 - Test coverage target: >=80%
 - All tests must pass
+
+## Manual Smoke Guidance
+- Open a workspace with one selected session containing at least one terminal tab and one file tab.
+- Drag a tab left or right within the existing horizontal tab strip until the insertion marker appears, then drop it.
+- Confirm the visual order changes, Previous/Next Tab follows that order, the selected tab remains selected, and the same mixed order is restored after relaunch.
 
 ## Success Criteria
 - All tests passing

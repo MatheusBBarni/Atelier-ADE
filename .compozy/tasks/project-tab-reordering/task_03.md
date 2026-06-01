@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Project sidebar reorder interaction"
 type: frontend
 complexity: medium
@@ -30,11 +30,11 @@ This task delivers the visible project-ordering interaction in the existing side
 </requirements>
 
 ## Subtasks
-- [ ] 3.1 Add project-row reorder interaction to the existing sidebar surface.
-- [ ] 3.2 Show clear insertion and movement feedback during project drag/drop.
-- [ ] 3.3 Connect the completed drop action to the project reorder command path.
-- [ ] 3.4 Preserve current selection, error messaging, and sidebar readability after reordering.
-- [ ] 3.5 Add regression coverage and a short manual smoke path for the user-visible interaction.
+- [x] 3.1 Add project-row reorder interaction to the existing sidebar surface.
+- [x] 3.2 Show clear insertion and movement feedback during project drag/drop.
+- [x] 3.3 Connect the completed drop action to the project reorder command path.
+- [x] 3.4 Preserve current selection, error messaging, and sidebar readability after reordering.
+- [x] 3.5 Add regression coverage and a short manual smoke path for the user-visible interaction.
 
 ## Implementation Details
 Use the TechSpec sections **System Architecture → Project sidebar reorder surface** and **User Experience** as the design boundary. Keep the feature inside the current `ContentView.swift` project sidebar, and reuse the existing async command invocation and user-message patterns instead of introducing a new view model or management surface unless required for testability.
@@ -68,12 +68,12 @@ Use the TechSpec sections **System Architecture → Project sidebar reorder surf
 
 ## Tests
 - Unit tests:
-  - [ ] A project move from the bottom of the sidebar to the top yields the expected ordered project ID payload for the command layer.
-  - [ ] Dropping a project back into its original position avoids changing canonical order.
-  - [ ] Reordering a selected project keeps that project selected after the command completes.
+  - [x] A project move from the bottom of the sidebar to the top yields the expected ordered project ID payload for the command layer.
+  - [x] Dropping a project back into its original position avoids changing canonical order.
+  - [x] Reordering a selected project keeps that project selected after the command completes.
 - Integration tests:
-  - [ ] After project reorder completes, reloading persisted workspace metadata returns the new project order.
-  - [ ] After relaunch, the sidebar shows the same project order and selected project as before shutdown.
+  - [x] After project reorder completes, reloading persisted workspace metadata returns the new project order.
+  - [x] After relaunch, the sidebar shows the same project order and selected project as before shutdown.
 - Test coverage target: >=80%
 - All tests must pass
 

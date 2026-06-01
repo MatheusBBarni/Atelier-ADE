@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Canonical reorder persistence APIs"
 type: backend
 complexity: high
@@ -28,11 +28,11 @@ This task establishes the persistence foundation for manual ordering. It extends
 </requirements>
 
 ## Subtasks
-- [ ] 1.1 Add persistence protocol methods for canonical project-order saves and session-tab-order saves.
-- [ ] 1.2 Update the in-memory persistence conformer so tests can exercise batch reorder semantics.
-- [ ] 1.3 Implement atomic SQLite reorder writes for projects, tabs, and derived snapshot state.
-- [ ] 1.4 Preserve dense, unique persisted ordering after every successful batch write.
-- [ ] 1.5 Add unit and integration coverage for reorder persistence success and failure cases.
+- [x] 1.1 Add persistence protocol methods for canonical project-order saves and session-tab-order saves.
+- [x] 1.2 Update the in-memory persistence conformer so tests can exercise batch reorder semantics.
+- [x] 1.3 Implement atomic SQLite reorder writes for projects, tabs, and derived snapshot state.
+- [x] 1.4 Preserve dense, unique persisted ordering after every successful batch write.
+- [x] 1.5 Add unit and integration coverage for reorder persistence success and failure cases.
 
 ## Implementation Details
 Modify the persistence boundary described in the TechSpec sections **System Architecture → Batch persistence path** and **Implementation Design → Storage strategy**. Keep the work scoped to canonical ordering fields and transaction-safe rewrites; do not introduce a separate priority model or schema concept.
@@ -67,13 +67,13 @@ Modify the persistence boundary described in the TechSpec sections **System Arch
 
 ## Tests
 - Unit tests:
-  - [ ] Saving reordered project IDs rewrites `sortIndex` into a dense sequence starting at zero.
-  - [ ] Saving reordered visible tab IDs rewrites session ordinals into a dense sequence while leaving hidden persisted tabs in a stable relative tail.
-  - [ ] Saving tab order also updates `RestoreSnapshot.tabOrder` to match the canonical post-save order.
+  - [x] Saving reordered project IDs rewrites `sortIndex` into a dense sequence starting at zero.
+  - [x] Saving reordered visible tab IDs rewrites session ordinals into a dense sequence while leaving hidden persisted tabs in a stable relative tail.
+  - [x] Saving tab order also updates `RestoreSnapshot.tabOrder` to match the canonical post-save order.
 - Integration tests:
-  - [ ] Adjacent tab swap in SQLite succeeds without triggering a `UNIQUE(session_id, ordinal)` failure.
-  - [ ] Moving the first tab to the end and the last tab to the beginning persists correctly across reload.
-  - [ ] A failed reorder transaction rolls back both row updates and snapshot changes.
+  - [x] Adjacent tab swap in SQLite succeeds without triggering a `UNIQUE(session_id, ordinal)` failure.
+  - [x] Moving the first tab to the end and the last tab to the beginning persists correctly across reload.
+  - [x] A failed reorder transaction rolls back both row updates and snapshot changes.
 - Test coverage target: >=80%
 - All tests must pass
 

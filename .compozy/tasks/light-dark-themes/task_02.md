@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Preference validation, repair, and persistence behavior
 type: backend
 complexity: high
@@ -29,11 +29,11 @@ This task makes the new appearance-selection contract durable and safe across lo
 </requirements>
 
 ## Subtasks
-- [ ] 2.1 Update preference validation to recognize `system` as a supported persisted selection.
-- [ ] 2.2 Update stale-theme repair behavior so invalid selections recover to `system` instead of a fixed preset.
-- [ ] 2.3 Align default preference seeding and raw persistence round-trip behavior with the new selection model.
-- [ ] 2.4 Update metrics and logging fields or event handling affected by the new reserved selection and repair flow.
-- [ ] 2.5 Add focused unit and integration coverage for validation, repair, round-trip persistence, and startup normalization.
+- [x] 2.1 Update preference validation to recognize `system` as a supported persisted selection.
+- [x] 2.2 Update stale-theme repair behavior so invalid selections recover to `system` instead of a fixed preset.
+- [x] 2.3 Align default preference seeding and raw persistence round-trip behavior with the new selection model.
+- [x] 2.4 Update metrics and logging fields or event handling affected by the new reserved selection and repair flow.
+- [x] 2.5 Add focused unit and integration coverage for validation, repair, round-trip persistence, and startup normalization.
 
 ## Implementation Details
 
@@ -70,16 +70,16 @@ Keep all validation, repair, persistence, and observability changes inside the e
 
 ## Tests
 - Unit tests:
-  - [ ] Saving `AppPreferences` with `themeID = system` succeeds and updates store state without validation failure.
-  - [ ] Saving `AppPreferences` with an unknown `themeID` still returns a validation error.
-  - [ ] Loading preferences with an invalid persisted theme ID repairs the selection to `system`.
-  - [ ] Default preference construction used by service startup seeds `themeID = system`.
-  - [ ] Theme save and repair paths emit the expected metrics or log events for the new selection contract.
+  - [x] Saving `AppPreferences` with `themeID = system` succeeds and updates store state without validation failure.
+  - [x] Saving `AppPreferences` with an unknown `themeID` still returns a validation error.
+  - [x] Loading preferences with an invalid persisted theme ID repairs the selection to `system`.
+  - [x] Default preference construction used by service startup seeds `themeID = system`.
+  - [x] Theme save and repair paths emit the expected metrics or log events for the new selection contract.
 - Integration tests:
-  - [ ] SQLite round-trip preserves `theme_id = system` through save and reload.
-  - [ ] Startup load repairs a raw stale `theme_id` to `system` without mutating unrelated preference fields.
-  - [ ] Existing concrete preset IDs still round-trip unchanged after the new repair rules are introduced.
-  - [ ] Fresh `app_preferences` seeding uses `system` without requiring a schema migration.
+  - [x] SQLite round-trip preserves `theme_id = system` through save and reload.
+  - [x] Startup load repairs a raw stale `theme_id` to `system` without mutating unrelated preference fields.
+  - [x] Existing concrete preset IDs still round-trip unchanged after the new repair rules are introduced.
+  - [x] Fresh `app_preferences` seeding uses `system` without requiring a schema migration.
 - Test coverage target: >=80%
 - All tests must pass
 

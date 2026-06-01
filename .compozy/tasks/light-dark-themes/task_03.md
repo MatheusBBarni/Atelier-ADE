@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Settings UI and runtime appearance application
 type: frontend
 complexity: high
@@ -30,11 +30,11 @@ This task turns the new appearance-selection model into visible product behavior
 </requirements>
 
 ## Subtasks
-- [ ] 3.1 Update the appearance selector UI to render a synthetic System option first and preserve the approved preset ordering after it.
-- [ ] 3.2 Update runtime shell appearance application to use the effective-theme resolver instead of concrete-only direct lookup.
-- [ ] 3.3 Ensure terminal appearance updates stay synchronized for startup, explicit theme changes, and System-driven light/dark changes.
-- [ ] 3.4 Keep the editor on generic light/dark syntax mapping and verify that V1 does not introduce preset-specific editor theming.
-- [ ] 3.5 Add integration coverage and manual verification notes for startup, selection changes, and live macOS appearance switching.
+- [x] 3.1 Update the appearance selector UI to render a synthetic System option first and preserve the approved preset ordering after it.
+- [x] 3.2 Update runtime shell appearance application to use the effective-theme resolver instead of concrete-only direct lookup.
+- [x] 3.3 Ensure terminal appearance updates stay synchronized for startup, explicit theme changes, and System-driven light/dark changes.
+- [x] 3.4 Keep the editor on generic light/dark syntax mapping and verify that V1 does not introduce preset-specific editor theming.
+- [x] 3.5 Add integration coverage and manual verification notes for startup, selection changes, and live macOS appearance switching.
 
 ## Implementation Details
 
@@ -71,17 +71,27 @@ Follow the TechSpec sections **System Architecture → Settings Appearance UI**,
 
 ## Tests
 - Unit tests:
-  - [ ] The appearance-option ordering helper returns System first, followed by the curated preset list in the approved order.
-  - [ ] Runtime theme selection uses the effective-theme resolver instead of direct concrete-only preset lookup where selection-based behavior is involved.
-  - [ ] `FileEditorHostView` continues to map editor syntax theme from light/dark environment state rather than preset-specific IDs.
+  - [x] The appearance-option ordering helper returns System first, followed by the curated preset list in the approved order.
+  - [x] Runtime theme selection uses the effective-theme resolver instead of direct concrete-only preset lookup where selection-based behavior is involved.
+  - [x] `FileEditorHostView` continues to map editor syntax theme from light/dark environment state rather than preset-specific IDs.
 - Integration tests:
-  - [ ] Launching with persisted `themeID = system` applies terminal appearance matching the current runtime light/dark scheme before restored terminal surfaces appear.
-  - [ ] Changing appearance from System to a concrete preset updates terminal appearance immediately without breaking the Settings autosave flow.
-  - [ ] Changing appearance from a concrete preset back to System preserves `themeID = system` while applying the correct resolved concrete terminal appearance.
-  - [ ] If the harness supports runtime scheme changes, switching macOS light/dark while `themeID = system` updates existing terminal surfaces without requiring relaunch.
-  - [ ] If live runtime scheme flipping is not fully automatable, manual QA verifies System-mode behavior during macOS light/dark switching.
+  - [x] Launching with persisted `themeID = system` applies terminal appearance matching the current runtime light/dark scheme before restored terminal surfaces appear.
+  - [x] Changing appearance from System to a concrete preset updates terminal appearance immediately without breaking the Settings autosave flow.
+  - [x] Changing appearance from a concrete preset back to System preserves `themeID = system` while applying the correct resolved concrete terminal appearance.
+  - [x] If the harness supports runtime scheme changes, switching macOS light/dark while `themeID = system` updates existing terminal surfaces without requiring relaunch.
+  - [x] If live runtime scheme flipping is not fully automatable, manual QA verifies System-mode behavior during macOS light/dark switching.
 - Test coverage target: >=80%
 - All tests must pass
+
+## Verification Notes
+
+- `swift test --filter AppThemeTests`: 11 tests passed.
+- `swift test --filter TerminalHostIntegrationTests`: 20 tests passed.
+- `swift test --filter DefaultWorkspaceCommandServiceIntegrationTests`: 35 tests passed.
+- `swift test`: 232 tests passed.
+- `swift test --enable-code-coverage`: 232 tests passed.
+- `xcrun llvm-cov report ... -ignore-filename-regex='(/\\.build/|/Tests/)'`: 80.72% region coverage and 88.02% line coverage.
+- Runtime System-mode switching is automated through the test seam that supplies `ThemeColorScheme`; direct manual macOS System Settings toggling was not performed in this CLI run because the package does not expose executable-app UI automation.
 
 ## Success Criteria
 - All tests passing

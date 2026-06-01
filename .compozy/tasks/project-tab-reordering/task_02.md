@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Reorder command orchestration and snapshot alignment"
 type: backend
 complexity: high
@@ -30,11 +30,11 @@ This task makes reorder behavior an authoritative workspace command instead of a
 </requirements>
 
 ## Subtasks
-- [ ] 2.1 Extend the command surface with project and tab reorder operations.
-- [ ] 2.2 Add command-layer validation for malformed, duplicate, incomplete, or out-of-scope reorder payloads.
-- [ ] 2.3 Normalize canonical order and preserve selection before persisting changes.
-- [ ] 2.4 Regenerate derived snapshot order after successful tab reorders.
-- [ ] 2.5 Add command/store tests for invalid payloads, hidden persisted tabs, and stable selection behavior.
+- [x] 2.1 Extend the command surface with project and tab reorder operations.
+- [x] 2.2 Add command-layer validation for malformed, duplicate, incomplete, or out-of-scope reorder payloads.
+- [x] 2.3 Normalize canonical order and preserve selection before persisting changes.
+- [x] 2.4 Regenerate derived snapshot order after successful tab reorders.
+- [x] 2.5 Add command/store tests for invalid payloads, hidden persisted tabs, and stable selection behavior.
 
 ## Implementation Details
 Implement this task using the TechSpec sections **System Architecture → Command-layer reorder boundary**, **Implementation Design → API Endpoints**, and **Technical Considerations → Key Decisions**. Keep the command layer as the only owner of reorder semantics; SwiftUI surfaces should only submit ordered identifiers.
@@ -70,15 +70,15 @@ Implement this task using the TechSpec sections **System Architecture → Comman
 
 ## Tests
 - Unit tests:
-  - [ ] `reorderProjects` rejects duplicate or missing project IDs instead of mutating state.
-  - [ ] `reorderTabs` rejects visible-tab payloads that include out-of-session or unknown tab IDs.
-  - [ ] Reordering projects or tabs preserves the selected ID when it still exists after the move.
-  - [ ] Successful tab reorder regenerates `RestoreSnapshot.tabOrder` from canonical post-reorder state.
-  - [ ] Reorder after degraded restore appends hidden persisted tabs after the visible reordered set without changing hidden relative order.
+  - [x] `reorderProjects` rejects duplicate or missing project IDs instead of mutating state.
+  - [x] `reorderTabs` rejects visible-tab payloads that include out-of-session or unknown tab IDs.
+  - [x] Reordering projects or tabs preserves the selected ID when it still exists after the move.
+  - [x] Successful tab reorder regenerates `RestoreSnapshot.tabOrder` from canonical post-reorder state.
+  - [x] Reorder after degraded restore appends hidden persisted tabs after the visible reordered set without changing hidden relative order.
 - Integration tests:
-  - [ ] Reordering tabs in a mixed terminal/file session persists the new order and reloads it correctly after relaunch.
-  - [ ] Reordering projects persists the new sidebar order and keeps selection stable after restore.
-  - [ ] Reordering after a filtered restore keeps visible order deterministic and snapshot-aligned on the next launch.
+  - [x] Reordering tabs in a mixed terminal/file session persists the new order and reloads it correctly after relaunch.
+  - [x] Reordering projects persists the new sidebar order and keeps selection stable after restore.
+  - [x] Reordering after a filtered restore keeps visible order deterministic and snapshot-aligned on the next launch.
 - Test coverage target: >=80%
 - All tests must pass
 
