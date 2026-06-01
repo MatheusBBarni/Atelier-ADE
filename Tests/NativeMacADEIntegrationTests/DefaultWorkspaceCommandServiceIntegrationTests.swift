@@ -805,6 +805,91 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
     }
 
     @Test
+    func reorderingAfterAddingFileTabRestoresSelectedTabAndVisibleOrder() async throws {
+        let harness = try makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+        let fileURL = try makeTemporaryProjectFile(in: projectPath, relativePath: "Sources/File.swift")
+        let project = try await harness.service.openProject(path: projectPath)
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let initialTerminalTab = try #require(harness.store.tabs.first)
+        let secondTerminalTab = try await harness.service.createTab(sessionID: session.id)
+        let fileTab = try await harness.service.openFileTab(sessionID: session.id, path: fileURL.path)
+
+        try await harness.service.reorderTabs(
+            sessionID: session.id,
+            orderedVisibleTabIDs: [secondTerminalTab.id, fileTab.id, initialTerminalTab.id]
+        )
+
+        #expect(harness.store.selectedTabID == fileTab.id)
+        #expect(harness.store.tabsForSelectedSession.map(\.id) == [secondTerminalTab.id, fileTab.id, initialTerminalTab.id])
+
+        let reloadedStore = WorkspaceStore()
+        let reloadedService = DefaultWorkspaceCommandService(
+            store: reloadedStore,
+            persistenceStore: harness.persistence,
+            restoreCoordinator: RestoreCoordinator(persistenceStore: harness.persistence),
+            terminalSurfaceManager: FakeIntegrationTerminalSurfaceManager()
+        )
+
+        try await reloadedService.restoreWorkspace()
+
+        #expect(reloadedStore.selectedTabID == fileTab.id)
+        #expect(reloadedStore.tabsForSelectedSession.map(\.id) == [secondTerminalTab.id, fileTab.id, initialTerminalTab.id])
+        #expect(reloadedStore.tabsForSelectedSession.map(\.kind) == [.terminal, .file, .terminal])
+    }
+
+    @Test
+    func edgeTabMovesSurviveReloadWithoutOrdinalDrift() async throws {
+        let harness = try makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+        let fileURL = try makeTemporaryProjectFile(in: projectPath, relativePath: "Sources/File.swift")
+        let project = try await harness.service.openProject(path: projectPath)
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let firstTerminalTab = try #require(harness.store.tabs.first)
+        let fileTab = try await harness.service.openFileTab(sessionID: session.id, path: fileURL.path)
+        let secondTerminalTab = try await harness.service.createTab(sessionID: session.id)
+        let thirdTerminalTab = try await harness.service.createTab(sessionID: session.id)
+
+        try await harness.service.reorderTabs(
+            sessionID: session.id,
+            orderedVisibleTabIDs: [fileTab.id, secondTerminalTab.id, thirdTerminalTab.id, firstTerminalTab.id]
+        )
+
+        let firstReloadStore = WorkspaceStore()
+        let firstReloadService = DefaultWorkspaceCommandService(
+            store: firstReloadStore,
+            persistenceStore: harness.persistence,
+            restoreCoordinator: RestoreCoordinator(persistenceStore: harness.persistence),
+            terminalSurfaceManager: FakeIntegrationTerminalSurfaceManager()
+        )
+
+        try await firstReloadService.restoreWorkspace()
+
+        #expect(firstReloadStore.tabsForSelectedSession.map(\.id) == [fileTab.id, secondTerminalTab.id, thirdTerminalTab.id, firstTerminalTab.id])
+        #expect(firstReloadStore.tabsForSelectedSession.map(\.ordinal) == [0, 1, 2, 3])
+
+        try await firstReloadService.reorderTabs(
+            sessionID: session.id,
+            orderedVisibleTabIDs: [firstTerminalTab.id, fileTab.id, secondTerminalTab.id, thirdTerminalTab.id]
+        )
+
+        let secondReloadStore = WorkspaceStore()
+        let secondReloadService = DefaultWorkspaceCommandService(
+            store: secondReloadStore,
+            persistenceStore: harness.persistence,
+            restoreCoordinator: RestoreCoordinator(persistenceStore: harness.persistence),
+            terminalSurfaceManager: FakeIntegrationTerminalSurfaceManager()
+        )
+
+        try await secondReloadService.restoreWorkspace()
+
+        #expect(secondReloadStore.tabsForSelectedSession.map(\.id) == [firstTerminalTab.id, fileTab.id, secondTerminalTab.id, thirdTerminalTab.id])
+        #expect(secondReloadStore.tabsForSelectedSession.map(\.ordinal) == [0, 1, 2, 3])
+        #expect(try await harness.persistence.loadTabs().map(\.id) == [firstTerminalTab.id, fileTab.id, secondTerminalTab.id, thirdTerminalTab.id])
+        #expect(try await harness.persistence.loadTabs().map(\.ordinal) == [0, 1, 2, 3])
+    }
+
+    @Test
     func projectReorderPersistsAndKeepsSelectionStableAfterRestore() async throws {
         let harness = try makeHarness()
         let firstProject = try await harness.service.openProject(path: makeTemporaryProjectDirectory(named: "first"))

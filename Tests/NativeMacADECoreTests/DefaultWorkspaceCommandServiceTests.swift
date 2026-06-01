@@ -1736,6 +1736,29 @@ struct DefaultWorkspaceCommandServiceTests {
     }
 
     @Test
+    func reorderingSelectedMixedTabKeepsItSelectedAfterCommandCompletes() async throws {
+        let harness = makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+        let fileURL = try makeTemporaryProjectFile(in: projectPath, relativePath: "Sources/File.swift")
+        let project = try await harness.service.openProject(path: projectPath)
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let terminalTab = try #require(harness.store.tabs.first)
+        let fileTab = try await harness.service.openFileTab(sessionID: session.id, path: fileURL.path)
+        let secondTerminalTab = try await harness.service.createTab(sessionID: session.id)
+        try await harness.service.selectTab(id: fileTab.id)
+
+        try await harness.service.reorderTabs(
+            sessionID: session.id,
+            orderedVisibleTabIDs: [secondTerminalTab.id, terminalTab.id, fileTab.id]
+        )
+
+        #expect(harness.store.tabsForSelectedSession.map(\.id) == [secondTerminalTab.id, terminalTab.id, fileTab.id])
+        #expect(harness.store.tabsForSelectedSession.map(\.kind) == [.terminal, .terminal, .file])
+        #expect(harness.store.selectedTabID == fileTab.id)
+        #expect(try await harness.persistence.loadRestoreSnapshot()?.selectedTabID == fileTab.id)
+    }
+
+    @Test
     func reorderTabsRegeneratesRestoreSnapshotFromCanonicalOrder() async throws {
         let harness = makeHarness()
         let projectPath = try makeTemporaryProjectDirectory()

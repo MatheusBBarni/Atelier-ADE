@@ -2169,17 +2169,21 @@ struct TabChromeView: View {
     @State private var dirtyRefreshToken = 0
     @State private var pendingCloseConfirmation: TabCloseConfirmation?
     @State private var renameDraft: TabRenameDraft?
+    @State private var draggedTabID: UUID?
+    @State private var activeTabInsertion: TabOrderInsertion?
 
     var body: some View {
         let _ = dirtyRefreshToken
+        let visibleTabs = store.tabsForSelectedSession
+        let visibleTabIDs = visibleTabs.map(\.id)
         ScrollView(.horizontal) {
             HStack(spacing: 1) {
-                if store.tabsForSelectedSession.isEmpty {
+                if visibleTabs.isEmpty {
                     Text(store.selectedSessionID == nil ? "Select a session to see tabs" : "No tabs in this session yet")
                         .font(.callout)
                         .foregroundStyle(theme.mutedText.color)
                 } else {
-                    ForEach(store.tabsForSelectedSession) { tab in
+                    ForEach(visibleTabs) { tab in
                         TabItemView(
                             tab: tab,
                             legacySessionShortcutID: store.selectedSession?.shortcutID,
@@ -2189,6 +2193,25 @@ struct TabChromeView: View {
                             onRename: { renameDraft = TabRenameDraft(tab: tab) },
                             onClose: { closeTab(tab.id) }
                         )
+                        .onDrag {
+                            beginDraggingTab(tab.id)
+                        }
+                        .modifier(TabChromeDropTargetModifier(
+                            targetTabID: tab.id,
+                            currentTabIDs: visibleTabIDs,
+                            draggedTabID: $draggedTabID,
+                            activeInsertion: $activeTabInsertion,
+                            onCommit: submitTabReorder
+                        ))
+                        .overlay(alignment: .leading) {
+                            tabInsertionIndicator(for: tab.id, edge: .before)
+                        }
+                        .overlay(alignment: .trailing) {
+                            tabInsertionIndicator(for: tab.id, edge: .after)
+                        }
+                        .opacity(draggedTabID == tab.id ? 0.62 : 1)
+                        .animation(.easeInOut(duration: 0.12), value: draggedTabID)
+                        .animation(.easeInOut(duration: 0.12), value: activeTabInsertion)
                     }
                 }
 
@@ -2243,6 +2266,14 @@ struct TabChromeView: View {
         .onReceive(NotificationCenter.default.publisher(for: .renameSelectedTab)) { _ in
             guard let selectedTab = store.selectedTab else { return }
             renameDraft = TabRenameDraft(tab: selectedTab)
+        }
+        .onChange(of: visibleTabIDs) { _, updatedTabIDs in
+            if let draggedTabID, !updatedTabIDs.contains(draggedTabID) {
+                self.draggedTabID = nil
+            }
+            if let activeTabInsertion, !updatedTabIDs.contains(activeTabInsertion.targetTabID) {
+                self.activeTabInsertion = nil
+            }
         }
         .sheet(item: $renameDraft) { draft in
             TabRenameView(draft: draft) { tabID, title in
@@ -2331,6 +2362,42 @@ struct TabChromeView: View {
         closeTab(selectedTabID)
     }
 
+    private func beginDraggingTab(_ id: UUID) -> NSItemProvider {
+        draggedTabID = id
+        activeTabInsertion = nil
+        return TabChromeDrag.itemProvider(for: id)
+    }
+
+    private func submitTabReorder(moving movedTabID: UUID, to insertion: TabOrderInsertion) {
+        guard let selectedSessionID = store.selectedSessionID,
+              let orderedVisibleTabIDs = TabReorderPayload.orderedVisibleTabIDs(
+                moving: movedTabID,
+                to: insertion,
+                in: store.tabsForSelectedSession.map(\.id)
+              )
+        else {
+            return
+        }
+
+        Task {
+            do {
+                try await commandService.reorderTabs(
+                    sessionID: selectedSessionID,
+                    orderedVisibleTabIDs: orderedVisibleTabIDs
+                )
+            } catch {
+                userMessage = UserMessage(title: "Tab order could not be saved", detail: String(describing: error))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func tabInsertionIndicator(for tabID: UUID, edge: TabOrderInsertionEdge) -> some View {
+        if activeTabInsertion == TabOrderInsertion(targetTabID: tabID, edge: edge) {
+            TabInsertionIndicator(edge: edge)
+        }
+    }
+
     private var closeConfirmationPresented: Binding<Bool> {
         Binding(
             get: { pendingCloseConfirmation != nil },
@@ -2340,6 +2407,154 @@ struct TabChromeView: View {
                 }
             }
         )
+    }
+}
+
+private struct TabChromeDropTargetModifier: ViewModifier {
+    let targetTabID: UUID
+    let currentTabIDs: [UUID]
+    @Binding var draggedTabID: UUID?
+    @Binding var activeInsertion: TabOrderInsertion?
+    let onCommit: (UUID, TabOrderInsertion) -> Void
+    @State private var targetWidth: CGFloat = 1
+
+    func body(content: Content) -> some View {
+        content
+            .background {
+                GeometryReader { proxy in
+                    Color.clear.preference(
+                        key: TabDropTargetWidthPreferenceKey.self,
+                        value: max(proxy.size.width, 1)
+                    )
+                }
+            }
+            .onPreferenceChange(TabDropTargetWidthPreferenceKey.self) { width in
+                targetWidth = max(width, 1)
+            }
+            .onDrop(
+                of: [TabChromeDrag.tabIDType],
+                delegate: TabChromeDropDelegate(
+                    targetTabID: targetTabID,
+                    targetWidth: targetWidth,
+                    currentTabIDs: currentTabIDs,
+                    draggedTabID: $draggedTabID,
+                    activeInsertion: $activeInsertion,
+                    onCommit: onCommit
+                )
+            )
+    }
+}
+
+private enum TabChromeDrag {
+    static let tabIDType = UTType(exportedAs: "com.native-mac-ade.tab-id")
+
+    static func itemProvider(for tabID: UUID) -> NSItemProvider {
+        let provider = NSItemProvider()
+        provider.registerDataRepresentation(forTypeIdentifier: tabIDType.identifier, visibility: .ownProcess) { completion in
+            completion(tabID.uuidString.data(using: .utf8), nil)
+            return nil
+        }
+        return provider
+    }
+}
+
+private struct TabDropTargetWidthPreferenceKey: PreferenceKey {
+    static let defaultValue: CGFloat = 1
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+private struct TabChromeDropDelegate: DropDelegate {
+    let targetTabID: UUID
+    let targetWidth: CGFloat
+    let currentTabIDs: [UUID]
+    @Binding var draggedTabID: UUID?
+    @Binding var activeInsertion: TabOrderInsertion?
+    let onCommit: (UUID, TabOrderInsertion) -> Void
+
+    func validateDrop(info: DropInfo) -> Bool {
+        proposedInsertion(for: info) != nil
+    }
+
+    func dropEntered(info: DropInfo) {
+        updateActiveInsertion(for: info)
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        guard updateActiveInsertion(for: info) else {
+            return DropProposal(operation: .cancel)
+        }
+        return DropProposal(operation: .move)
+    }
+
+    func dropExited(info: DropInfo) {
+        if activeInsertion?.targetTabID == targetTabID {
+            activeInsertion = nil
+        }
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        defer {
+            draggedTabID = nil
+            activeInsertion = nil
+        }
+
+        guard let movedTabID = draggedTabID,
+              let insertion = proposedInsertion(for: info)
+        else {
+            return false
+        }
+
+        onCommit(movedTabID, insertion)
+        return true
+    }
+
+    @discardableResult
+    private func updateActiveInsertion(for info: DropInfo) -> Bool {
+        guard let insertion = proposedInsertion(for: info) else {
+            if activeInsertion?.targetTabID == targetTabID {
+                activeInsertion = nil
+            }
+            return false
+        }
+
+        activeInsertion = insertion
+        return true
+    }
+
+    private func proposedInsertion(for info: DropInfo) -> TabOrderInsertion? {
+        guard let draggedTabID,
+              draggedTabID != targetTabID,
+              currentTabIDs.contains(draggedTabID),
+              currentTabIDs.contains(targetTabID)
+        else {
+            return nil
+        }
+
+        let edge: TabOrderInsertionEdge = info.location.x < targetWidth / 2 ? .before : .after
+        return TabOrderInsertion(targetTabID: targetTabID, edge: edge)
+    }
+}
+
+private struct TabInsertionIndicator: View {
+    let edge: TabOrderInsertionEdge
+    @Environment(\.shellThemePalette) private var theme
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Circle()
+                .fill(theme.accent.color)
+                .frame(width: 7, height: 7)
+            Rectangle()
+                .fill(theme.accent.color)
+                .frame(width: 2, height: 30)
+        }
+        .shadow(color: theme.accent.color.opacity(0.32), radius: 3, y: 1)
+        .offset(x: edge == .before ? -5 : 5)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
 

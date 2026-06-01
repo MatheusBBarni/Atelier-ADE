@@ -209,13 +209,13 @@ struct AtelierApp: App {
     }
 
     private func selectAdjacentTab(direction: Int) {
-        let tabs = workspaceStore.tabsForSelectedSession
-        guard tabs.count > 1 else { return }
-        let currentIndex = workspaceStore.selectedTabID.flatMap { selectedTabID in
-            tabs.firstIndex { $0.id == selectedTabID }
-        } ?? 0
-        let nextIndex = wrappedIndex(currentIndex + direction, count: tabs.count)
-        let nextTabID = tabs[nextIndex].id
+        guard let nextTabID = WorkspaceTabNavigation.adjacentTabID(
+            in: workspaceStore.tabsForSelectedSession,
+            selectedTabID: workspaceStore.selectedTabID,
+            direction: direction
+        ) else {
+            return
+        }
         Task { try? await commandService.selectTab(id: nextTabID) }
     }
 
