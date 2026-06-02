@@ -91,6 +91,156 @@ struct PortableSettingsConfigTests {
     }
 
     @Test
+    func invalidAppearanceSectionDoesNotBlockValidBehaviorProjection() {
+        let basePreferences = AppPreferences(
+            themeID: "cursor",
+            terminalFontSize: 13,
+            focusWorkspaceEnabled: false
+        )
+        let config = PortableSettingsConfig(
+            appearance: PortableAppearanceConfig(themeID: "missing-theme", terminalFontSize: 18),
+            behavior: PortableBehaviorConfig(focusWorkspaceEnabled: true)
+        )
+
+        let projection = config.projectedPreferences(from: basePreferences)
+
+        #expect(projection.preferences.themeID == "cursor")
+        #expect(projection.preferences.terminalFontSize == 13)
+        #expect(projection.preferences.focusWorkspaceEnabled)
+        #expect(projection.result.appliedSections == [.behavior])
+        #expect(projection.result.rejectedSections["appearance"] == "unknown_theme_id:missing-theme")
+        #expect(projection.result.skippedSections == [.defaultProfile, .keybindings])
+    }
+
+    @Test
+    func outOfRangePortableTerminalFontSizeRejectsAppearanceSectionInCore() {
+        let basePreferences = AppPreferences(themeID: "cursor", terminalFontSize: 13)
+        let config = PortableSettingsConfig(
+            appearance: PortableAppearanceConfig(themeID: "dracula", terminalFontSize: 30),
+            behavior: PortableBehaviorConfig(focusWorkspaceEnabled: true)
+        )
+
+        let projection = config.projectedPreferences(from: basePreferences)
+
+        #expect(projection.preferences.themeID == "cursor")
+        #expect(projection.preferences.terminalFontSize == 13)
+        #expect(projection.preferences.focusWorkspaceEnabled)
+        #expect(projection.result.appliedSections == [.behavior])
+        #expect(projection.result.rejectedSections["appearance"]?.contains("terminal_font_size_out_of_range:30.0") == true)
+    }
+
+    @Test
+    func invalidPortableKeybindingSectionsDoNotMutateExistingRuntimeOverrides() {
+        let existingOverride = KeybindingOverride(
+            commandID: .openSettings,
+            keyEquivalent: ".",
+            modifiers: [.command, .shift]
+        )
+        let basePreferences = AppPreferences(keybindings: [.openSettings: existingOverride])
+        let duplicateCommandConfig = PortableSettingsConfig(
+            keybindings: [
+                PortableKeybindingOverride(commandID: AppCommandID.openSettings.rawValue, keyEquivalent: "a"),
+                PortableKeybindingOverride(commandID: AppCommandID.openSettings.rawValue, keyEquivalent: "b")
+            ],
+            keybindingsSectionPresent: true
+        )
+        let emptyKeyConfig = PortableSettingsConfig(
+            keybindings: [
+                PortableKeybindingOverride(commandID: AppCommandID.searchSessions.rawValue, keyEquivalent: "  ")
+            ],
+            keybindingsSectionPresent: true
+        )
+
+        let duplicateProjection = duplicateCommandConfig.projectedPreferences(from: basePreferences)
+        let emptyProjection = emptyKeyConfig.projectedPreferences(from: basePreferences)
+
+        #expect(duplicateProjection.preferences.keybindings == [.openSettings: existingOverride])
+        #expect(duplicateProjection.result.rejectedSections["keybindings"] == "duplicate_command_id:openSettings")
+        #expect(emptyProjection.preferences.keybindings == [.openSettings: existingOverride])
+        #expect(emptyProjection.result.rejectedSections["keybindings"] == "empty_keybinding:searchSessions")
+    }
+
+    @Test
+    func portableDefaultProfileProjectionMapsBuiltInsAndRejectsCustomIdentifiers() throws {
+        let codex = try #require(PortableDefaultProfileIdentifier.codex.runtimeDefaultSessionShortcutID)
+        let basePreferences = AppPreferences(defaultSessionShortcutID: codex)
+
+        let expected: [(PortableDefaultProfileIdentifier, UUID?)] = [
+            (.plain, nil),
+            (.codex, PortableDefaultProfileIdentifier.codex.runtimeDefaultSessionShortcutID),
+            (.claude, PortableDefaultProfileIdentifier.claude.runtimeDefaultSessionShortcutID),
+            (.opencode, PortableDefaultProfileIdentifier.opencode.runtimeDefaultSessionShortcutID)
+        ]
+
+        for (identifier, shortcutID) in expected {
+            let projection = PortableSettingsConfig(defaultProfile: identifier)
+                .projectedPreferences(from: basePreferences)
+
+            #expect(projection.preferences.defaultSessionShortcutID == shortcutID)
+            #expect(projection.result.appliedSections == [.defaultProfile])
+        }
+
+        let customProjection = PortableSettingsConfig(defaultProfile: PortableDefaultProfileIdentifier(rawValue: "local-reviewer"))
+            .projectedPreferences(from: basePreferences)
+
+        #expect(customProjection.preferences.defaultSessionShortcutID == codex)
+        #expect(customProjection.result.rejectedSections["defaultProfile"] == "unsupported_default_profile:local-reviewer")
+    }
+
+    @Test
+    func portableExportOmitsCustomDefaultProfileAndLocalOnlyCommandState() throws {
+        let customDefaultProfileID = UUID()
+        let preferences = AppPreferences(
+            themeID: "dracula",
+            defaultSessionShortcutID: customDefaultProfileID,
+            terminalFontSize: 16,
+            focusWorkspaceEnabled: true,
+            keybindings: [
+                .openSettings: KeybindingOverride(commandID: .openSettings, keyEquivalent: ".", modifiers: [.command])
+            ]
+        )
+
+        let config = preferences.portableSettingsConfig
+        let json = String(decoding: try JSONEncoder().encode(config), as: UTF8.self)
+
+        #expect(config.appearance == PortableAppearanceConfig(themeID: "dracula", terminalFontSize: 16))
+        #expect(config.behavior == PortableBehaviorConfig(focusWorkspaceEnabled: true))
+        #expect(config.defaultProfile == nil)
+        #expect(config.keybindingsSectionPresent)
+        #expect(config.keybindings == [
+            PortableKeybindingOverride(commandID: AppCommandID.openSettings.rawValue, keyEquivalent: ".", modifiers: [.command])
+        ])
+        #expect(json.contains("defaultProfile") == false)
+        #expect(json.contains(customDefaultProfileID.uuidString) == false)
+        #expect(json.contains("launchCommand") == false)
+        #expect(json.contains("launchArgumentsJSON") == false)
+        #expect(json.contains("secretRef") == false)
+    }
+
+    @Test
+    func workspaceSettingsValidationFailuresExposeStableDiagnosticReasons() {
+        let shortcutID = UUID(uuidString: "99999999-9999-4999-8999-999999999999")!
+
+        #expect(WorkspaceSettingsValidationFailure.unknownThemeID("missing").diagnosticReason == "unknown_theme_id:missing")
+        #expect(WorkspaceSettingsValidationFailure.terminalFontSizeOutOfBounds(
+            value: 30,
+            minimum: AppPreferences.minimumTerminalFontSize,
+            maximum: AppPreferences.maximumTerminalFontSize
+        ).diagnosticReason == "terminal_font_size_out_of_range:30.0:min:11.0:max:24.0")
+        #expect(WorkspaceSettingsValidationFailure.unknownDefaultSessionShortcut(shortcutID).diagnosticReason == "unknown_default_profile:\(shortcutID.uuidString)")
+        #expect(WorkspaceSettingsValidationFailure.duplicateManagedKeybinding(
+            commandID: .nextTab,
+            conflictingCommandID: .previousTab
+        ).diagnosticReason == "duplicate_managed_keybinding:nextTab:previousTab")
+        #expect(WorkspaceSettingsValidationFailure.mismatchedKeybindingCommandID(
+            expected: .openSettings,
+            actual: .searchSessions
+        ).diagnosticReason == "mismatched_keybinding_command_id:openSettings:searchSessions")
+        #expect(WorkspaceSettingsValidationFailure.emptyKeybinding(.openSettings).diagnosticReason == "empty_keybinding:openSettings")
+        #expect(WorkspaceSettingsValidationFailure.malformedLaunchArgumentsJSON(shortcutID).diagnosticReason == "malformed_launch_arguments_json:\(shortcutID.uuidString)")
+    }
+
+    @Test
     func runtimeOnlyAndLocalOnlyFieldsStayOutOfPortableJSONContract() throws {
         let config = PortableSettingsConfig(
             appearance: PortableAppearanceConfig(themeID: AppTheme.systemSelectionID, terminalFontSize: 13),

@@ -358,6 +358,33 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
         }
     }
 
+    @discardableResult
+    public func applyPortableSettingsConfig(_ config: PortableSettingsConfig) async throws -> PortableSettingsApplyResult {
+        let basePreferences = try await loadNormalizedAppPreferences(healStaleReferences: true)
+        let projection = config.projectedPreferences(from: basePreferences)
+
+        guard !projection.result.appliedSections.isEmpty else {
+            store.updateAppPreferences(basePreferences)
+            return projection.result
+        }
+
+        var updatedPreferences = projection.preferences
+        updatedPreferences.id = AppPreferences.fixedID
+        updatedPreferences.updatedAt = now()
+
+        try await persistBuiltInDefaultShortcutIfNeeded(for: updatedPreferences)
+        try await persist { try await persistenceStore.save(appPreferences: updatedPreferences) }
+        store.updateAppPreferences(updatedPreferences)
+
+        recordFocusWorkspacePreferenceChange(
+            from: basePreferences,
+            to: updatedPreferences,
+            source: "portable_settings"
+        )
+
+        return projection.result
+    }
+
     public func availableSessionShortcuts() async throws -> [SessionShortcut] {
         try await loadSessionShortcutsIncludingBuiltIns()
     }
@@ -1029,6 +1056,14 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
             throw WorkspaceCommandError.settingsValidationFailed(.unknownThemeID(preferences.themeID))
         }
 
+        guard AppPreferences.isSupportedTerminalFontSize(preferences.terminalFontSize) else {
+            throw WorkspaceCommandError.settingsValidationFailed(.terminalFontSizeOutOfBounds(
+                value: preferences.terminalFontSize,
+                minimum: AppPreferences.minimumTerminalFontSize,
+                maximum: AppPreferences.maximumTerminalFontSize
+            ))
+        }
+
         try validateManagedKeybindings(preferences.keybindings)
 
         if let defaultShortcutID = preferences.defaultSessionShortcutID {
@@ -1100,6 +1135,11 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
             return [
                 "reason": "unknown_theme_id:\(themeID)",
                 "field": "theme_id"
+            ]
+        case .terminalFontSizeOutOfBounds(let value, let minimum, let maximum):
+            return [
+                "reason": "terminal_font_size_out_of_range:\(value):min:\(minimum):max:\(maximum)",
+                "field": "terminal_font_size"
             ]
         case .unknownDefaultSessionShortcut(let shortcutID):
             return [

@@ -443,6 +443,28 @@ struct DefaultWorkspaceCommandServiceTests {
     }
 
     @Test
+    func savingPreferencesRejectsOutOfRangeTerminalFontSizeAndLeavesPersistenceUnchanged() async throws {
+        let harness = makeHarness()
+        let originalPreferences = AppPreferences(themeID: "cursor", terminalFontSize: 16)
+        try await harness.persistence.save(appPreferences: originalPreferences)
+
+        await #expect(throws: WorkspaceCommandError.settingsValidationFailed(.terminalFontSizeOutOfBounds(
+            value: 30,
+            minimum: AppPreferences.minimumTerminalFontSize,
+            maximum: AppPreferences.maximumTerminalFontSize
+        ))) {
+            try await harness.service.saveAppPreferences(AppPreferences(themeID: "cursor", terminalFontSize: 30))
+        }
+
+        #expect(try await harness.persistence.loadAppPreferences() == originalPreferences)
+        #expect(harness.service.logger.events.contains { event in
+            event.name == "settings_save_failed" &&
+                event.fields["field"] == "terminal_font_size" &&
+                event.fields["reason"]?.contains("terminal_font_size_out_of_range:30.0") == true
+        })
+    }
+
+    @Test
     func savingAndReloadingPreferencesPreservesFocusWorkspaceAndUnrelatedFields() async throws {
         let now = Date(timeIntervalSince1970: 1_717_394_000)
         let harness = makeHarness(now: { now })

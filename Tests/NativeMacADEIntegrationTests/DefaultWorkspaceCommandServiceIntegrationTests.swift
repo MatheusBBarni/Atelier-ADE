@@ -424,6 +424,118 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
     }
 
     @Test
+    func mixedValidityPortableConfigAppliesValidSectionsAndReportsRejectedSections() async throws {
+        let harness = try makeHarness()
+        let customDefault = try await harness.service.saveSessionShortcut(SessionShortcut(
+            label: "Local Reviewer",
+            launchCommand: "local-review",
+            launchArgumentsJSON: "[]"
+        ))
+        let existingOverride = KeybindingOverride(
+            commandID: .openSettings,
+            keyEquivalent: ".",
+            modifiers: [.command, .shift]
+        )
+        try await harness.service.saveAppPreferences(AppPreferences(
+            themeID: "cursor",
+            defaultSessionShortcutID: customDefault.id,
+            terminalFontSize: 13,
+            focusWorkspaceEnabled: false,
+            keybindings: [.openSettings: existingOverride]
+        ))
+
+        let result = try await harness.service.applyPortableSettingsConfig(PortableSettingsConfig(
+            appearance: PortableAppearanceConfig(themeID: "dracula", terminalFontSize: 18),
+            behavior: PortableBehaviorConfig(focusWorkspaceEnabled: true),
+            defaultProfile: PortableDefaultProfileIdentifier(rawValue: "local-reviewer"),
+            keybindings: [
+                PortableKeybindingOverride(commandID: AppCommandID.nextTab.rawValue, keyEquivalent: "[")
+            ],
+            keybindingsSectionPresent: true
+        ))
+        let persistedPreferences = try await harness.persistence.loadAppPreferences()
+
+        #expect(result.appliedSections == [.appearance, .behavior])
+        #expect(result.rejectedSections["defaultProfile"] == "unsupported_default_profile:local-reviewer")
+        #expect(result.rejectedSections["keybindings"]?.contains("duplicate_managed_keybinding:nextTab:previousTab") == true)
+        #expect(persistedPreferences.themeID == "dracula")
+        #expect(persistedPreferences.terminalFontSize == 18)
+        #expect(persistedPreferences.focusWorkspaceEnabled)
+        #expect(persistedPreferences.defaultSessionShortcutID == customDefault.id)
+        #expect(persistedPreferences.keybindings == [.openSettings: existingOverride])
+        #expect(harness.store.appPreferences.themeID == persistedPreferences.themeID)
+        #expect(harness.store.appPreferences.terminalFontSize == persistedPreferences.terminalFontSize)
+        #expect(harness.store.appPreferences.focusWorkspaceEnabled == persistedPreferences.focusWorkspaceEnabled)
+        #expect(harness.store.appPreferences.defaultSessionShortcutID == persistedPreferences.defaultSessionShortcutID)
+        #expect(harness.store.appPreferences.keybindings == persistedPreferences.keybindings)
+    }
+
+    @Test
+    func portableProjectionPersistsWithoutClobberingUnrelatedLocalOnlySettings() async throws {
+        let harness = try makeHarness()
+        let customDefault = try await harness.service.saveSessionShortcut(SessionShortcut(
+            label: "Machine Local",
+            launchCommand: "machine-local-agent",
+            launchArgumentsJSON: "[\"run\"]",
+            secretRef: "keychain://atelier/local"
+        ))
+        let existingOverride = KeybindingOverride(
+            commandID: .searchSessions,
+            keyEquivalent: "k",
+            modifiers: [.command, .option]
+        )
+        try await harness.service.saveAppPreferences(AppPreferences(
+            themeID: "cursor",
+            defaultSessionShortcutID: customDefault.id,
+            terminalFontSize: 13,
+            focusWorkspaceEnabled: false,
+            keybindings: [.searchSessions: existingOverride]
+        ))
+
+        let result = try await harness.service.applyPortableSettingsConfig(PortableSettingsConfig(
+            appearance: PortableAppearanceConfig(themeID: "catppuccin", terminalFontSize: 17),
+            behavior: PortableBehaviorConfig(focusWorkspaceEnabled: true)
+        ))
+        let persistedPreferences = try await harness.persistence.loadAppPreferences()
+        let persistedShortcuts = try await harness.persistence.loadSessionShortcuts()
+
+        #expect(result.appliedSections == [.appearance, .behavior])
+        #expect(result.skippedSections == [.defaultProfile, .keybindings])
+        #expect(persistedPreferences.themeID == "catppuccin")
+        #expect(persistedPreferences.terminalFontSize == 17)
+        #expect(persistedPreferences.focusWorkspaceEnabled)
+        #expect(persistedPreferences.defaultSessionShortcutID == customDefault.id)
+        #expect(persistedPreferences.keybindings == [.searchSessions: existingOverride])
+        #expect(persistedShortcuts.contains(customDefault))
+    }
+
+    @Test
+    func portableKeybindingProjectionFeedsManagedCommandRuntimeResolution() async throws {
+        let harness = try makeHarness()
+        let portableOverride = PortableKeybindingOverride(
+            commandID: AppCommandID.openSettings.rawValue,
+            keyEquivalent: "m",
+            modifiers: [.command, .option]
+        )
+
+        let result = try await harness.service.applyPortableSettingsConfig(PortableSettingsConfig(
+            keybindings: [portableOverride],
+            keybindingsSectionPresent: true
+        ))
+        let persistedPreferences = try await harness.persistence.loadAppPreferences()
+        let expectedOverride = KeybindingOverride(
+            commandID: .openSettings,
+            keyEquivalent: "m",
+            modifiers: [.command, .option]
+        )
+
+        #expect(result.appliedSections == [.keybindings])
+        #expect(persistedPreferences.keybindings == [.openSettings: expectedOverride])
+        #expect(AppCommandRegistry.resolvedKeybinding(for: .openSettings, preferences: persistedPreferences) == expectedOverride)
+        #expect(AppCommandRegistry.resolvedKeybinding(for: .searchSessions, preferences: persistedPreferences) == AppCommandRegistry.defaultKeybinding(for: .searchSessions))
+    }
+
+    @Test
     func loadingPersistedStaleDefaultSelfHealsAndPlainSessionCreationSucceeds() async throws {
         let harness = try makeHarness()
         let staleShortcutID = UUID()

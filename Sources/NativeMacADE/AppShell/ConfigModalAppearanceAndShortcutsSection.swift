@@ -67,7 +67,7 @@ struct ConfigModalAppearanceAndShortcutsSection: View {
                         .frame(width: 72)
                         .disabled(isSavingAppearance)
 
-                        Stepper("", value: $terminalFontSizeDraft, in: 11 ... 24, step: 1)
+                        Stepper("", value: $terminalFontSizeDraft, in: AppPreferences.terminalFontSizeRange, step: 1)
                             .labelsHidden()
                             .disabled(isSavingAppearance)
 
@@ -200,7 +200,7 @@ struct ConfigModalAppearanceAndShortcutsSection: View {
     private func persistAppearanceIfNeeded() {
         guard !isSyncingAppearanceDrafts else { return }
 
-        let roundedFontSize = min(max(terminalFontSizeDraft.rounded(), 11), 24)
+        let roundedFontSize = AppPreferences.normalizedTerminalFontSize(terminalFontSizeDraft)
         if roundedFontSize != terminalFontSizeDraft {
             terminalFontSizeDraft = roundedFontSize
             return
@@ -304,6 +304,8 @@ struct ConfigModalAppearanceAndShortcutsSection: View {
             switch failure {
             case .unknownThemeID:
                 return "The selected theme is no longer available."
+            case .terminalFontSizeOutOfBounds:
+                return "Choose a font size between \(Int(AppPreferences.minimumTerminalFontSize)) and \(Int(AppPreferences.maximumTerminalFontSize))."
             case .unknownDefaultSessionShortcut:
                 return "The selected Agent Profile is no longer available."
             case .duplicateManagedKeybinding:

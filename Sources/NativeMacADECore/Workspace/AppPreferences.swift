@@ -4,6 +4,9 @@ public struct AppPreferences: Equatable, Sendable {
     public static let fixedID = 1
     public static let defaultThemeID = AppTheme.defaultSelectionID
     public static let defaultTerminalFontSize: Double = 13
+    public static let minimumTerminalFontSize: Double = 11
+    public static let maximumTerminalFontSize: Double = 24
+    public static let terminalFontSizeRange: ClosedRange<Double> = minimumTerminalFontSize ... maximumTerminalFontSize
     public static let supportedSelectionIDs: Set<String> = AppTheme.supportedSelectionIDs
     public static let supportedThemeIDs = supportedSelectionIDs
 
@@ -39,6 +42,14 @@ public struct AppPreferences: Equatable, Sendable {
 
     public static func isSupportedThemeSelectionID(_ themeID: String) -> Bool {
         AppTheme.isSupportedSelectionID(themeID)
+    }
+
+    public static func isSupportedTerminalFontSize(_ terminalFontSize: Double) -> Bool {
+        terminalFontSize.isFinite && terminalFontSizeRange.contains(terminalFontSize)
+    }
+
+    public static func normalizedTerminalFontSize(_ terminalFontSize: Double) -> Double {
+        min(max(terminalFontSize.rounded(), minimumTerminalFontSize), maximumTerminalFontSize)
     }
 
     public var keybindingsJSON: String {

@@ -31,19 +31,22 @@ public struct PortableSettingsConfig: Codable, Equatable, Sendable {
     public var behavior: PortableBehaviorConfig?
     public var defaultProfile: PortableDefaultProfileIdentifier?
     public var keybindings: [PortableKeybindingOverride]
+    public var keybindingsSectionPresent: Bool
 
     public init(
         version: Int = Self.currentVersion,
         appearance: PortableAppearanceConfig? = nil,
         behavior: PortableBehaviorConfig? = nil,
         defaultProfile: PortableDefaultProfileIdentifier? = nil,
-        keybindings: [PortableKeybindingOverride] = []
+        keybindings: [PortableKeybindingOverride] = [],
+        keybindingsSectionPresent: Bool? = nil
     ) {
         self.version = version
         self.appearance = appearance
         self.behavior = behavior
         self.defaultProfile = defaultProfile
         self.keybindings = keybindings
+        self.keybindingsSectionPresent = keybindingsSectionPresent ?? !keybindings.isEmpty
     }
 
     public init(from decoder: Decoder) throws {
@@ -52,7 +55,12 @@ public struct PortableSettingsConfig: Codable, Equatable, Sendable {
         appearance = try container.decodeIfPresent(PortableAppearanceConfig.self, forKey: .appearance)
         behavior = try container.decodeIfPresent(PortableBehaviorConfig.self, forKey: .behavior)
         defaultProfile = try container.decodeIfPresent(PortableDefaultProfileIdentifier.self, forKey: .defaultProfile)
-        keybindings = try container.decodeIfPresent([PortableKeybindingOverride].self, forKey: .keybindings) ?? []
+        keybindingsSectionPresent = container.contains(.keybindings)
+        keybindings = if keybindingsSectionPresent {
+            try container.decode([PortableKeybindingOverride].self, forKey: .keybindings)
+        } else {
+            []
+        }
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -61,7 +69,9 @@ public struct PortableSettingsConfig: Codable, Equatable, Sendable {
         try container.encodeIfPresent(appearance, forKey: .appearance)
         try container.encodeIfPresent(behavior, forKey: .behavior)
         try container.encodeIfPresent(defaultProfile, forKey: .defaultProfile)
-        try container.encode(keybindings, forKey: .keybindings)
+        if keybindingsSectionPresent {
+            try container.encode(keybindings, forKey: .keybindings)
+        }
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -70,6 +80,173 @@ public struct PortableSettingsConfig: Codable, Equatable, Sendable {
         case behavior
         case defaultProfile
         case keybindings
+    }
+}
+
+public struct PortableSettingsProjection: Equatable, Sendable {
+    public var preferences: AppPreferences
+    public var result: PortableSettingsApplyResult
+
+    public init(preferences: AppPreferences, result: PortableSettingsApplyResult) {
+        self.preferences = preferences
+        self.result = result
+    }
+}
+
+public extension PortableSettingsConfig {
+    var presentSections: [PortableSettingsSection] {
+        Self.supportedTopLevelSections.filter { section in
+            switch section {
+            case .appearance:
+                return appearance != nil
+            case .behavior:
+                return behavior != nil
+            case .defaultProfile:
+                return defaultProfile != nil
+            case .keybindings:
+                return keybindingsSectionPresent
+            }
+        }
+    }
+
+    func projectedPreferences(from basePreferences: AppPreferences) -> PortableSettingsProjection {
+        var preferences = basePreferences
+        var result = PortableSettingsApplyResult()
+
+        guard Self.supportedVersions.contains(version) else {
+            recordUnsupportedVersionDiagnostics(into: &result)
+            return PortableSettingsProjection(preferences: preferences, result: result)
+        }
+
+        if let appearance {
+            do {
+                try Self.validateAppearance(appearance)
+                preferences.themeID = appearance.themeID
+                preferences.terminalFontSize = appearance.terminalFontSize
+                result.recordApplied(.appearance)
+            } catch {
+                result.recordRejected(.appearance, reason: Self.diagnosticReason(for: error))
+            }
+        } else {
+            result.recordSkipped(.appearance)
+        }
+
+        if let behavior {
+            preferences.focusWorkspaceEnabled = behavior.focusWorkspaceEnabled
+            result.recordApplied(.behavior)
+        } else {
+            result.recordSkipped(.behavior)
+        }
+
+        if let defaultProfile {
+            do {
+                preferences.defaultSessionShortcutID = try Self.defaultSessionShortcutID(for: defaultProfile)
+                result.recordApplied(.defaultProfile)
+            } catch {
+                result.recordRejected(.defaultProfile, reason: Self.diagnosticReason(for: error))
+            }
+        } else {
+            result.recordSkipped(.defaultProfile)
+        }
+
+        if keybindingsSectionPresent {
+            do {
+                preferences.keybindings = try PortableKeybindingOverride.runtimeOverrides(from: keybindings)
+                result.recordApplied(.keybindings)
+            } catch {
+                result.recordRejected(.keybindings, reason: Self.diagnosticReason(for: error))
+            }
+        } else {
+            result.recordSkipped(.keybindings)
+        }
+
+        return PortableSettingsProjection(preferences: preferences, result: result)
+    }
+
+    static func exported(from preferences: AppPreferences) -> PortableSettingsConfig {
+        PortableSettingsConfig(
+            appearance: PortableAppearanceConfig(
+                themeID: preferences.themeID,
+                terminalFontSize: preferences.terminalFontSize
+            ),
+            behavior: PortableBehaviorConfig(
+                focusWorkspaceEnabled: preferences.focusWorkspaceEnabled
+            ),
+            defaultProfile: PortableDefaultProfileIdentifier.identifier(
+                forDefaultSessionShortcutID: preferences.defaultSessionShortcutID
+            ),
+            keybindings: portableKeybindings(from: preferences),
+            keybindingsSectionPresent: true
+        )
+    }
+
+    static func validateAppearance(_ appearance: PortableAppearanceConfig) throws {
+        guard AppPreferences.isSupportedThemeSelectionID(appearance.themeID) else {
+            throw PortableSettingsValidationError.unsupportedThemeID(appearance.themeID)
+        }
+
+        guard AppPreferences.isSupportedTerminalFontSize(appearance.terminalFontSize) else {
+            throw PortableSettingsValidationError.terminalFontSizeOutOfBounds(
+                value: appearance.terminalFontSize,
+                minimum: AppPreferences.minimumTerminalFontSize,
+                maximum: AppPreferences.maximumTerminalFontSize
+            )
+        }
+    }
+
+    static func defaultSessionShortcutID(for identifier: PortableDefaultProfileIdentifier) throws -> UUID? {
+        switch identifier {
+        case .plain:
+            return nil
+        case .codex, .claude, .opencode:
+            guard let shortcutID = identifier.runtimeDefaultSessionShortcutID else {
+                throw PortableSettingsValidationError.missingBuiltInDefaultProfile(identifier)
+            }
+            return shortcutID
+        case .unsupported(let rawValue):
+            throw PortableSettingsValidationError.unsupportedDefaultProfile(rawValue)
+        }
+    }
+
+    static func diagnosticReason(for error: Error) -> String {
+        if let validationError = error as? PortableSettingsValidationError {
+            return validationError.diagnosticReason
+        }
+
+        if case let WorkspaceCommandError.settingsValidationFailed(failure) = error {
+            return failure.diagnosticReason
+        }
+
+        return String(describing: error)
+    }
+
+    private static func portableKeybindings(from preferences: AppPreferences) -> [PortableKeybindingOverride] {
+        AppCommandRegistry.managedCommandIDs.compactMap { commandID in
+            guard let override = preferences.keybindings[commandID] else {
+                return nil
+            }
+            return PortableKeybindingOverride(KeybindingOverride(
+                commandID: commandID,
+                keyEquivalent: override.keyEquivalent,
+                modifiers: override.modifiers
+            ))
+        }
+    }
+
+    private func recordUnsupportedVersionDiagnostics(into result: inout PortableSettingsApplyResult) {
+        for section in Self.supportedTopLevelSections {
+            if presentSections.contains(section) {
+                result.recordRejected(section, reason: PortableSettingsValidationError.unsupportedVersion(version).diagnosticReason)
+            } else {
+                result.recordSkipped(section)
+            }
+        }
+    }
+}
+
+public extension AppPreferences {
+    var portableSettingsConfig: PortableSettingsConfig {
+        PortableSettingsConfig.exported(from: self)
     }
 }
 
@@ -115,17 +292,48 @@ public struct PortableBehaviorConfig: Codable, Equatable, Sendable {
     }
 }
 
-public enum PortableDefaultProfileIdentifier: String, CaseIterable, Codable, Equatable, Hashable, Sendable {
+public enum PortableDefaultProfileIdentifier: Equatable, Hashable, Sendable {
     case plain
     case codex
     case claude
     case opencode
+    case unsupported(String)
 
     public static let builtInIdentifiers: [PortableDefaultProfileIdentifier] = [
         .codex,
         .claude,
         .opencode
     ]
+
+    public init(rawValue: String) {
+        switch rawValue {
+        case Self.plain.rawValue:
+            self = .plain
+        case Self.codex.rawValue:
+            self = .codex
+        case Self.claude.rawValue:
+            self = .claude
+        case Self.opencode.rawValue:
+            self = .opencode
+        default:
+            self = .unsupported(rawValue)
+        }
+    }
+
+    public var rawValue: String {
+        switch self {
+        case .plain:
+            return "plain"
+        case .codex:
+            return "codex"
+        case .claude:
+            return "claude"
+        case .opencode:
+            return "opencode"
+        case .unsupported(let rawValue):
+            return rawValue
+        }
+    }
 
     public var runtimeTarget: PortableDefaultProfileRuntimeTarget {
         switch self {
@@ -136,6 +344,8 @@ public enum PortableDefaultProfileIdentifier: String, CaseIterable, Codable, Equ
                 return .missingBuiltIn(identifier: self)
             }
             return .builtIn(shortcut)
+        case .unsupported(let rawValue):
+            return .unsupported(rawValue: rawValue)
         }
     }
 
@@ -153,6 +363,8 @@ public enum PortableDefaultProfileIdentifier: String, CaseIterable, Codable, Equ
             return SessionShortcut.builtInDefaults.first { $0.launchCommand == "claude" }
         case .opencode:
             return SessionShortcut.builtInDefaults.first { $0.launchCommand == "opencode" }
+        case .unsupported:
+            return nil
         }
     }
 
@@ -172,14 +384,27 @@ public enum PortableDefaultProfileIdentifier: String, CaseIterable, Codable, Equ
     }
 }
 
+extension PortableDefaultProfileIdentifier: Codable {
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        self = Self(rawValue: try container.decode(String.self))
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+}
+
 public enum PortableDefaultProfileRuntimeTarget: Equatable, Sendable {
     case plain
     case builtIn(SessionShortcut)
     case missingBuiltIn(identifier: PortableDefaultProfileIdentifier)
+    case unsupported(rawValue: String)
 
     public var shortcutID: UUID? {
         switch self {
-        case .plain, .missingBuiltIn:
+        case .plain, .missingBuiltIn, .unsupported:
             return nil
         case .builtIn(let shortcut):
             return shortcut.id
@@ -188,7 +413,7 @@ public enum PortableDefaultProfileRuntimeTarget: Equatable, Sendable {
 
     public var shortcut: SessionShortcut? {
         switch self {
-        case .plain, .missingBuiltIn:
+        case .plain, .missingBuiltIn, .unsupported:
             return nil
         case .builtIn(let shortcut):
             return shortcut
@@ -285,6 +510,32 @@ public struct PortableKeybindingOverride: Codable, Equatable, Sendable {
 public enum PortableSettingsValidationError: Error, Equatable, Sendable {
     case unsupportedCommandID(String)
     case duplicateCommandID(AppCommandID)
+    case unsupportedThemeID(String)
+    case terminalFontSizeOutOfBounds(value: Double, minimum: Double, maximum: Double)
+    case unsupportedDefaultProfile(String)
+    case missingBuiltInDefaultProfile(PortableDefaultProfileIdentifier)
+    case unsupportedVersion(Int)
+}
+
+public extension PortableSettingsValidationError {
+    var diagnosticReason: String {
+        switch self {
+        case .unsupportedCommandID(let commandID):
+            return "unsupported_command_id:\(commandID)"
+        case .duplicateCommandID(let commandID):
+            return "duplicate_command_id:\(commandID.rawValue)"
+        case .unsupportedThemeID(let themeID):
+            return "unknown_theme_id:\(themeID)"
+        case .terminalFontSizeOutOfBounds(let value, let minimum, let maximum):
+            return "terminal_font_size_out_of_range:\(value):min:\(minimum):max:\(maximum)"
+        case .unsupportedDefaultProfile(let rawValue):
+            return "unsupported_default_profile:\(rawValue)"
+        case .missingBuiltInDefaultProfile(let identifier):
+            return "missing_builtin_default_profile:\(identifier.rawValue)"
+        case .unsupportedVersion(let version):
+            return "unsupported_version:\(version)"
+        }
+    }
 }
 
 public struct PortableSettingsApplyResult: Codable, Equatable, Sendable {

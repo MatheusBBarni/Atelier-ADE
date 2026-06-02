@@ -360,6 +360,8 @@ struct ConfigModalAgentProfilesSection: View {
                 return "The selected Agent Profile is no longer available. Choose another default or Plain Shell."
             case .unknownThemeID:
                 return "Settings could not be saved because the current theme is no longer available."
+            case .terminalFontSizeOutOfBounds:
+                return "Settings could not be saved because the font size is outside the supported range."
             case .duplicateManagedKeybinding, .mismatchedKeybindingCommandID, .emptyKeybinding:
                 return "Settings could not be saved because a keyboard binding needs attention."
             }
