@@ -376,7 +376,7 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
     }
 
     public func deleteSessionShortcut(id: UUID) async throws {
-        if Self.canonicalBuiltInShortcut(id: id) != nil {
+        if SessionShortcut.canonicalBuiltInShortcut(id: id) != nil {
             throw WorkspaceCommandError.builtInShortcutDeletionRejected(id)
         }
 
@@ -409,7 +409,7 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
     }
 
     public func resetBuiltInSessionShortcut(id: UUID) async throws -> SessionShortcut {
-        guard let canonicalShortcut = Self.canonicalBuiltInShortcut(id: id) else {
+        guard let canonicalShortcut = SessionShortcut.canonicalBuiltInShortcut(id: id) else {
             let shortcuts = try await loadSessionShortcutsIncludingBuiltIns(seedMissingBuiltIns: false)
             if shortcuts.contains(where: { $0.id == id }) {
                 throw WorkspaceCommandError.customShortcutResetRejected(id)
@@ -1041,7 +1041,7 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
 
     private func persistBuiltInDefaultShortcutIfNeeded(for preferences: AppPreferences) async throws {
         guard let defaultShortcutID = preferences.defaultSessionShortcutID,
-              let canonicalShortcut = Self.canonicalBuiltInShortcut(id: defaultShortcutID)
+              let canonicalShortcut = SessionShortcut.canonicalBuiltInShortcut(id: defaultShortcutID)
         else { return }
 
         let persistedShortcuts = try await persist { try await persistenceStore.loadSessionShortcuts() }
@@ -1141,7 +1141,7 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
     }
 
     private func normalizedShortcutForSave(_ shortcut: SessionShortcut) -> SessionShortcut {
-        guard let canonicalShortcut = Self.canonicalBuiltInShortcut(id: shortcut.id) else {
+        guard let canonicalShortcut = SessionShortcut.canonicalBuiltInShortcut(id: shortcut.id) else {
             var customShortcut = shortcut
             customShortcut.isBuiltIn = false
             customShortcut.hasUserOverride = false
@@ -1896,10 +1896,6 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
             }
             return $0.label < $1.label
         }
-    }
-
-    private static func canonicalBuiltInShortcut(id: UUID) -> SessionShortcut? {
-        SessionShortcut.builtInDefaults.first { $0.id == id }
     }
 
     private static func profileFieldsMatch(_ lhs: SessionShortcut, _ rhs: SessionShortcut) -> Bool {

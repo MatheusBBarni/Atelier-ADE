@@ -360,6 +360,70 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
     }
 
     @Test
+    func portableBuiltInDefaultProfileSelectionResolvesCanonicalRuntimeTargetForSessionBootstrap() async throws {
+        let harness = try makeHarness()
+        let project = try await harness.service.openProject(path: makeTemporaryProjectDirectory())
+        let portableShortcut = try #require(PortableDefaultProfileIdentifier.claude.runtimeTarget.shortcut)
+
+        try await harness.service.saveAppPreferences(AppPreferences(defaultSessionShortcutID: portableShortcut.id))
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let tab = try #require(harness.terminal.createdTabs.first { $0.sessionID == session.id })
+
+        #expect(session.shortcutID == portableShortcut.id)
+        #expect(tab.shortcutID == portableShortcut.id)
+        #expect(tab.launchCommand == portableShortcut.launchCommand)
+        #expect(tab.launchArgumentsJSON == portableShortcut.launchArgumentsJSON)
+        #expect(try await harness.persistence.loadSessionShortcuts().contains(portableShortcut))
+    }
+
+    @Test
+    func portablePlainDefaultProfilePreservesNoDefaultPlainShellBehavior() async throws {
+        let harness = try makeHarness()
+        let project = try await harness.service.openProject(path: makeTemporaryProjectDirectory())
+        let portableTarget = PortableDefaultProfileIdentifier.plain.runtimeTarget
+
+        try await harness.service.saveAppPreferences(AppPreferences(defaultSessionShortcutID: portableTarget.shortcutID))
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let tab = try #require(harness.terminal.createdTabs.first { $0.sessionID == session.id })
+
+        #expect(portableTarget == .plain)
+        #expect(portableTarget.shortcutID == nil)
+        #expect(session.shortcutID == nil)
+        #expect(tab.shortcutID == nil)
+        #expect(tab.launchCommand == nil)
+        #expect(tab.launchArgumentsJSON == nil)
+        #expect(try await harness.persistence.loadSessionShortcuts().isEmpty)
+    }
+
+    @Test
+    func portableBuiltInMappingStaysConsistentWithServiceAndPresentationCatalogs() async throws {
+        let harness = try makeHarness()
+        let serviceShortcuts = try await harness.service.availableSessionShortcuts()
+        let portableBuiltInIDs = Set(PortableDefaultProfileIdentifier.builtInIdentifiers.compactMap(\.runtimeDefaultSessionShortcutID))
+
+        #expect(portableBuiltInIDs == Set(SessionShortcut.builtInDefaults.map(\.id)))
+
+        for identifier in PortableDefaultProfileIdentifier.builtInIdentifiers {
+            let shortcut = try #require(identifier.canonicalBuiltInShortcut)
+            let serviceShortcut = try #require(serviceShortcuts.first { $0.id == shortcut.id })
+            let tab = WorkspaceTab(
+                sessionID: UUID(),
+                kind: .terminal,
+                workingDirectory: "/tmp/project",
+                shortcutID: shortcut.id,
+                launchCommand: shortcut.launchCommand,
+                ordinal: 0
+            )
+            let presentation = try #require(SessionTerminalPresentationResolver().resolve(tab: tab))
+
+            #expect(serviceShortcut == shortcut)
+            #expect(SessionShortcut.canonicalBuiltInShortcut(portableIdentifier: identifier) == shortcut)
+            #expect(presentation.shortcutID == shortcut.id)
+            #expect(presentation.agentLabel == shortcut.label)
+        }
+    }
+
+    @Test
     func loadingPersistedStaleDefaultSelfHealsAndPlainSessionCreationSucceeds() async throws {
         let harness = try makeHarness()
         let staleShortcutID = UUID()
