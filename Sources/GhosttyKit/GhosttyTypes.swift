@@ -143,6 +143,7 @@ public protocol GhosttySurfaceRuntime {
     func nativeView(for surface: GhosttySurfaceHandle) -> NSView?
     func focus(surface: GhosttySurfaceHandle)
     func resize(surface: GhosttySurfaceHandle, columns: Int, rows: Int)
+    func updateAppearance(surface: GhosttySurfaceHandle, appearance: TerminalAppearance)
     func canClose(surface: GhosttySurfaceHandle) async -> Bool
     func hasExited(surface: GhosttySurfaceHandle) async -> Bool
     func exitStatus(surface: GhosttySurfaceHandle) async -> Int32?

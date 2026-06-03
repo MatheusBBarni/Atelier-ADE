@@ -94,6 +94,15 @@ public final class LiveGhosttySurfaceRuntime: GhosttySurfaceRuntime {
         surfaces[surface.id] = record
     }
 
+    public func updateAppearance(surface: GhosttySurfaceHandle, appearance: TerminalAppearance) {
+        guard var record = surfaces[surface.id] else { return }
+        record.configuration.appearance = appearance
+        if let view = record.nativeView as? GhosttySurfaceAppearanceUpdating {
+            view.updateAppearance(appearance)
+        }
+        surfaces[surface.id] = record
+    }
+
     public func canClose(surface: GhosttySurfaceHandle) async -> Bool {
         guard let record = surfaces[surface.id] else { return true }
         return cRuntime.canClose(surface: record.rawSurface)
@@ -191,17 +200,19 @@ private struct SurfaceRecord {
 }
 
 @MainActor
-private final class GhosttySurfaceRenderView: NSView {
+private protocol GhosttySurfaceAppearanceUpdating: AnyObject {
+    func updateAppearance(_ appearance: TerminalAppearance)
+}
+
+@MainActor
+private final class GhosttySurfaceRenderView: NSView, GhosttySurfaceAppearanceUpdating {
     var onFocusRequested: (() -> Void)?
     var onKeyEvent: ((NSEvent, CGhosttyRuntime.KeyAction) -> Bool)?
 
     init(configuration: GhosttyLaunchConfiguration) {
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.backgroundColor = NSColor.ghosttyKitColor(
-            hex: configuration.appearance.backgroundHex,
-            fallback: .black
-        ).cgColor
+        updateAppearance(configuration.appearance)
         setAccessibilityLabel("Ghostty native surface")
     }
 
@@ -233,6 +244,13 @@ private final class GhosttySurfaceRenderView: NSView {
     override func keyUp(with event: NSEvent) {
         if onKeyEvent?(event, .release) == true { return }
         super.keyUp(with: event)
+    }
+
+    func updateAppearance(_ appearance: TerminalAppearance) {
+        layer?.backgroundColor = NSColor.ghosttyKitColor(
+            hex: appearance.backgroundHex,
+            fallback: .black
+        ).cgColor
     }
 }
 
@@ -290,16 +308,13 @@ private extension NSEvent {
 }
 
 @MainActor
-private final class GhosttySurfaceDiagnosticView: NSView {
+private final class GhosttySurfaceDiagnosticView: NSView, GhosttySurfaceAppearanceUpdating {
     private static let accessibilityLabel = "Ghostty bridge diagnostic surface"
 
     init(configuration: GhosttyLaunchConfiguration, rawSurface: CGhosttyRuntime.Surface) {
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.backgroundColor = NSColor.ghosttyKitColor(
-            hex: configuration.appearance.backgroundHex,
-            fallback: .black
-        ).cgColor
+        updateAppearance(configuration.appearance)
 
         setAccessibilityLabel(Self.accessibilityLabel)
 
@@ -351,6 +366,13 @@ private final class GhosttySurfaceDiagnosticView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         nil
+    }
+
+    func updateAppearance(_ appearance: TerminalAppearance) {
+        layer?.backgroundColor = NSColor.ghosttyKitColor(
+            hex: appearance.backgroundHex,
+            fallback: .black
+        ).cgColor
     }
 
     private static func makeLabel(_ text: String, color: NSColor, font: NSFont) -> NSTextField {

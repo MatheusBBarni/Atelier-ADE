@@ -72,6 +72,9 @@ struct TerminalHostIntegrationTests {
         #expect(surface == reusedSurface)
         #expect(adapter.createdConfigurations.count == 1)
         #expect(controller.surface(for: tab.id) == surface)
+        #expect(adapter.appearanceUpdates == [
+            AppearanceUpdateRequest(surface: surface, appearance: AppTheme.catppuccin.terminalAppearance)
+        ])
         #expect(view.terminalAppearance == AppTheme.catppuccin.terminalAppearance)
         #expect(view.layer?.backgroundColor == NSColor(hex: AppTheme.catppuccin.terminalAppearance.backgroundHex).cgColor)
     }
@@ -392,6 +395,7 @@ struct TerminalHostIntegrationTests {
 
         #expect(view.terminalAppearance == AppTheme.dracula.terminalAppearance)
         #expect(view.layer?.backgroundColor == NSColor(hex: AppTheme.dracula.terminalAppearance.backgroundHex).cgColor)
+        #expect(adapter.appearanceUpdates.count == 1)
 
         controller.releaseSurface(for: tab.id)
     }
@@ -414,6 +418,7 @@ private final class RecordingGhosttyAdapter: GhosttyAdapter {
     private(set) var createdConfigurations: [GhosttyLaunchConfiguration] = []
     private(set) var focusedSurfaces: [GhosttySurfaceHandle] = []
     private(set) var resizeRequests: [ResizeRequest] = []
+    private(set) var appearanceUpdates: [AppearanceUpdateRequest] = []
     private(set) var destroyedSurfaces: [GhosttySurfaceHandle] = []
     private(set) var nativeViewRequests: [GhosttySurfaceHandle] = []
     private(set) var nativeViewsBySurface: [GhosttySurfaceHandle: NSView] = [:]
@@ -457,6 +462,10 @@ private final class RecordingGhosttyAdapter: GhosttyAdapter {
         resizeRequests.append(ResizeRequest(surface: surface, columns: columns, rows: rows))
     }
 
+    func updateAppearance(surface: GhosttySurfaceHandle, appearance: TerminalAppearance) {
+        appearanceUpdates.append(AppearanceUpdateRequest(surface: surface, appearance: appearance))
+    }
+
     func canClose(surface: GhosttySurfaceHandle) async -> Bool {
         canCloseResult
     }
@@ -484,6 +493,11 @@ private struct ResizeRequest: Equatable {
     let surface: GhosttySurfaceHandle
     let columns: Int
     let rows: Int
+}
+
+private struct AppearanceUpdateRequest: Equatable {
+    let surface: GhosttySurfaceHandle
+    let appearance: TerminalAppearance
 }
 
 private func makeTemporaryDirectory() throws -> String {

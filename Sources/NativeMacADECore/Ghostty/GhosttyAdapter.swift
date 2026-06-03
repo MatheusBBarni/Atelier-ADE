@@ -28,6 +28,7 @@ public protocol GhosttyAdapter {
     func nativeView(for surface: GhosttySurfaceHandle) -> NSView?
     func focus(surface: GhosttySurfaceHandle)
     func resize(surface: GhosttySurfaceHandle, columns: Int, rows: Int)
+    func updateAppearance(surface: GhosttySurfaceHandle, appearance: TerminalAppearance)
     func canClose(surface: GhosttySurfaceHandle) async -> Bool
     func hasExited(surface: GhosttySurfaceHandle) async -> Bool
     func exitStatus(surface: GhosttySurfaceHandle) async -> Int32?
@@ -101,6 +102,10 @@ public final class LiveGhosttyAdapter: GhosttyAdapter {
 
     public func resize(surface: GhosttySurfaceHandle, columns: Int, rows: Int) {
         runtime.resize(surface: surface, columns: columns, rows: rows)
+    }
+
+    public func updateAppearance(surface: GhosttySurfaceHandle, appearance: TerminalAppearance) {
+        runtime.updateAppearance(surface: surface, appearance: appearance)
     }
 
     public func canClose(surface: GhosttySurfaceHandle) async -> Bool {

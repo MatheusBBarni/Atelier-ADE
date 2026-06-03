@@ -48,6 +48,26 @@ struct TerminalHostControllerTests {
     }
 
     @Test
+    func updateAppearancePropagatesToExistingGhosttySurfaces() async throws {
+        let adapter = RecordingTerminalHostAdapter()
+        let controller = TerminalHostController(adapter: adapter)
+        let firstTab = WorkspaceTab(sessionID: UUID(), workingDirectory: "/tmp/native-mac-ade-unit-theme-one", ordinal: 0)
+        let secondTab = WorkspaceTab(sessionID: firstTab.sessionID, workingDirectory: "/tmp/native-mac-ade-unit-theme-two", ordinal: 1)
+        let firstSurface = try await controller.createSurface(for: firstTab)
+        let secondSurface = try await controller.createSurface(for: secondTab)
+
+        controller.updateAppearance(AppTheme.dracula.terminalAppearance)
+
+        #expect(adapter.appearanceUpdates.count == 2)
+        #expect(adapter.appearanceUpdates.contains(
+            AppearanceUpdateRequest(surface: firstSurface, appearance: AppTheme.dracula.terminalAppearance)
+        ))
+        #expect(adapter.appearanceUpdates.contains(
+            AppearanceUpdateRequest(surface: secondSurface, appearance: AppTheme.dracula.terminalAppearance)
+        ))
+    }
+
+    @Test
     func canCloseUsesGhosttyAdapterRuntimeState() async throws {
         let adapter = RecordingTerminalHostAdapter()
         adapter.canCloseResult = false
@@ -129,6 +149,7 @@ private final class RecordingTerminalHostAdapter: GhosttyAdapter {
     private(set) var nativeViewsBySurface: [GhosttySurfaceHandle: NSView] = [:]
     private(set) var focusedSurfaces: [GhosttySurfaceHandle] = []
     private(set) var resizeRequests: [ResizeRequest] = []
+    private(set) var appearanceUpdates: [AppearanceUpdateRequest] = []
     private(set) var canCloseSurfaces: [GhosttySurfaceHandle] = []
     private(set) var destroyedSurfaces: [GhosttySurfaceHandle] = []
     var canCloseResult = true
@@ -168,6 +189,10 @@ private final class RecordingTerminalHostAdapter: GhosttyAdapter {
         resizeRequests.append(ResizeRequest(surface: surface, columns: columns, rows: rows))
     }
 
+    func updateAppearance(surface: GhosttySurfaceHandle, appearance: TerminalAppearance) {
+        appearanceUpdates.append(AppearanceUpdateRequest(surface: surface, appearance: appearance))
+    }
+
     func canClose(surface: GhosttySurfaceHandle) async -> Bool {
         canCloseSurfaces.append(surface)
         return canCloseResult
@@ -190,4 +215,9 @@ private struct ResizeRequest: Equatable {
     let surface: GhosttySurfaceHandle
     let columns: Int
     let rows: Int
+}
+
+private struct AppearanceUpdateRequest: Equatable {
+    let surface: GhosttySurfaceHandle
+    let appearance: TerminalAppearance
 }

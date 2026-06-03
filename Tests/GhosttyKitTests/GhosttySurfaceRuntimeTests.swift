@@ -119,6 +119,24 @@ struct GhosttySurfaceRuntimeTests {
     }
 
     @Test
+    func appearanceUpdatesReachExistingSurfaceConfigurationAndNativeView() async throws {
+        LiveGhosttySurfaceRuntime.resetForTesting()
+        let runtime = LiveGhosttySurfaceRuntime()
+        let surface = try await runtime.createSurface(
+            configuration: GhosttyLaunchConfiguration(
+                workingDirectory: "/tmp/ade-ghostty-appearance",
+                appearance: .cursorDefault
+            )
+        )
+        let nativeView = try #require(runtime.nativeView(for: surface))
+
+        runtime.updateAppearance(surface: surface, appearance: .nordDefault)
+
+        #expect(runtime.configuration(for: surface)?.appearance == .nordDefault)
+        #expect(nativeView.layer?.backgroundColor == NSColor.ghosttyKitTestColor(hex: TerminalAppearance.nordDefault.backgroundHex).cgColor)
+    }
+
+    @Test
     func forcedInitializationFailureMapsToUserVisibleGhosttyError() async {
         LiveGhosttySurfaceRuntime.resetForTesting()
         let runtime = LiveGhosttySurfaceRuntime(
@@ -142,5 +160,19 @@ struct GhosttySurfaceRuntimeTests {
                 configuration: GhosttyLaunchConfiguration(workingDirectory: "/tmp/ade-ghostty-failure")
             )
         }
+    }
+}
+
+private extension NSColor {
+    static func ghosttyKitTestColor(hex: String) -> NSColor {
+        let normalized = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+        var value: UInt64 = 0
+        Scanner(string: normalized).scanHexInt64(&value)
+        return NSColor(
+            red: CGFloat((value >> 16) & 0xFF) / 255,
+            green: CGFloat((value >> 8) & 0xFF) / 255,
+            blue: CGFloat(value & 0xFF) / 255,
+            alpha: 1
+        )
     }
 }

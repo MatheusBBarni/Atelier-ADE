@@ -70,6 +70,7 @@ struct GhosttyAdapterTests {
         )
         adapter.focus(surface: surface)
         adapter.resize(surface: surface, columns: 132, rows: 43)
+        adapter.updateAppearance(surface: surface, appearance: AppTheme.dracula.terminalAppearance)
         let resolvedView = try #require(adapter.nativeView(for: surface))
         let canClose = await adapter.canClose(surface: surface)
         let hasExited = await adapter.hasExited(surface: surface)
@@ -82,6 +83,9 @@ struct GhosttyAdapterTests {
         #expect(exitStatus == 37)
         #expect(runtime.focusedSurfaces == [surface])
         #expect(runtime.resizeRequests == [ResizeRequest(surface: surface, columns: 132, rows: 43)])
+        #expect(runtime.appearanceUpdates == [
+            AppearanceUpdateRequest(surface: surface, appearance: AppTheme.dracula.terminalAppearance)
+        ])
         #expect(runtime.nativeViewRequests == [surface])
         #expect(runtime.canCloseRequests == [surface])
         #expect(runtime.hasExitedRequests == [surface])
@@ -211,6 +215,7 @@ private final class RecordingGhosttySurfaceRuntime: GhosttySurfaceRuntime {
     private(set) var nativeViewRequests: [GhosttySurfaceHandle] = []
     private(set) var focusedSurfaces: [GhosttySurfaceHandle] = []
     private(set) var resizeRequests: [ResizeRequest] = []
+    private(set) var appearanceUpdates: [AppearanceUpdateRequest] = []
     private(set) var canCloseRequests: [GhosttySurfaceHandle] = []
     private(set) var hasExitedRequests: [GhosttySurfaceHandle] = []
     private(set) var exitStatusRequests: [GhosttySurfaceHandle] = []
@@ -257,6 +262,10 @@ private final class RecordingGhosttySurfaceRuntime: GhosttySurfaceRuntime {
         resizeRequests.append(ResizeRequest(surface: surface, columns: columns, rows: rows))
     }
 
+    func updateAppearance(surface: GhosttySurfaceHandle, appearance: TerminalAppearance) {
+        appearanceUpdates.append(AppearanceUpdateRequest(surface: surface, appearance: appearance))
+    }
+
     func canClose(surface: GhosttySurfaceHandle) async -> Bool {
         canCloseRequests.append(surface)
         return canCloseResult
@@ -281,4 +290,9 @@ private struct ResizeRequest: Equatable {
     let surface: GhosttySurfaceHandle
     let columns: Int
     let rows: Int
+}
+
+private struct AppearanceUpdateRequest: Equatable {
+    let surface: GhosttySurfaceHandle
+    let appearance: TerminalAppearance
 }

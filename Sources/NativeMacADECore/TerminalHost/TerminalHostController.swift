@@ -50,6 +50,10 @@ public final class TerminalHostController: WorkspaceTerminalSurfaceManaging {
         guard currentAppearance != appearance else { return }
         currentAppearance = appearance
 
+        for surface in surfacesByTabID.values {
+            adapter.updateAppearance(surface: surface, appearance: appearance)
+        }
+
         for hostView in hostViewsByTabID.values {
             hostView.updateAppearance(appearance)
         }
