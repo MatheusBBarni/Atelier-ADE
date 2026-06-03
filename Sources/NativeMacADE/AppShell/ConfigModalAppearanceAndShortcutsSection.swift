@@ -48,7 +48,8 @@ struct ConfigModalAppearanceAndShortcutsSection: View {
             sectionHeader(
                 title: "Appearance",
                 systemImage: "paintpalette",
-                detail: "Theme updates the app shell and terminal surfaces immediately. Font size updates the app shell and file editor immediately."
+                detail: "Theme updates the app shell and terminal surfaces immediately. Font size updates the app shell and file editor immediately.",
+                scopeLabel: .appearance
             )
 
             VStack(alignment: .leading, spacing: 14) {
@@ -109,7 +110,8 @@ struct ConfigModalAppearanceAndShortcutsSection: View {
                 sectionHeader(
                     title: "Keyboard Shortcuts",
                     systemImage: "keyboard",
-                    detail: "Managed app commands for projects, sessions, tabs, terminal zoom, sidebars, files, and settings."
+                    detail: "Managed app commands for projects, sessions, tabs, terminal zoom, sidebars, files, and settings.",
+                    scopeLabel: .managedShortcuts
                 )
                 Spacer(minLength: 12)
                 HStack(spacing: 8) {
@@ -149,7 +151,12 @@ struct ConfigModalAppearanceAndShortcutsSection: View {
         }
     }
 
-    private func sectionHeader(title: String, systemImage: String, detail: String) -> some View {
+    private func sectionHeader(
+        title: String,
+        systemImage: String,
+        detail: String,
+        scopeLabel: PortableSettingsScopeLabel
+    ) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Label(title, systemImage: systemImage)
                 .font(.title3.weight(.semibold))
@@ -158,6 +165,7 @@ struct ConfigModalAppearanceAndShortcutsSection: View {
                 .font(.callout)
                 .foregroundStyle(theme.secondaryText.color)
                 .fixedSize(horizontal: false, vertical: true)
+            PortableSettingsScopeBadgeView(label: scopeLabel)
         }
     }
 

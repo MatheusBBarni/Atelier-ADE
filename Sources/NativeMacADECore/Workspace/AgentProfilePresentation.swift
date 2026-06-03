@@ -27,6 +27,23 @@ public struct AgentProfileRowState: Identifiable, Equatable, Sendable {
     public var canReset: Bool { profile.isBuiltIn }
     public var canDelete: Bool { !profile.isBuiltIn }
     public var canMakeDefault: Bool { !isDefault }
+    public var defaultSelectionScopeLabel: PortableSettingsScopeLabel {
+        profile.portableDefaultProfileIdentifier == nil
+            ? .customDefaultProfileSelection
+            : .builtInDefaultProfileSelection
+    }
+
+    public var commandDetailsScopeLabel: PortableSettingsScopeLabel {
+        .agentProfileCommandDetails
+    }
+
+    public var portabilitySummary: String {
+        if profile.portableDefaultProfileIdentifier == nil {
+            return "Custom profile definitions, custom defaults, and command details stay local-only in V1."
+        }
+
+        return "Built-in default selection is portable; edited command details stay local-only in V1."
+    }
 
     public init(profile: SessionShortcut, defaultSessionShortcutID: UUID?) {
         self.profile = profile

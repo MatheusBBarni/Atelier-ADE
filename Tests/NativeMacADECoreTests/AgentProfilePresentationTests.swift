@@ -67,4 +67,26 @@ struct AgentProfilePresentationTests {
         ) == nil)
         #expect(AgentProfileSectionState.staleDefaultID(in: .defaults, profiles: [presentProfile]) == nil)
     }
+
+    @Test
+    func rowStatesExposeAgentProfilePortableAndLocalOnlyScopeLabels() throws {
+        let builtIn = try #require(PortableDefaultProfileIdentifier.codex.canonicalBuiltInShortcut)
+        let custom = SessionShortcut(label: "Local Tool", launchCommand: "local-agent")
+
+        let rows = AgentProfileSectionState.rows(
+            for: [builtIn, custom],
+            defaultSessionShortcutID: builtIn.id
+        )
+
+        #expect(rows[0].defaultSelectionScopeLabel == .builtInDefaultProfileSelection)
+        #expect(rows[0].defaultSelectionScopeLabel.kind == .portableV1)
+        #expect(rows[0].commandDetailsScopeLabel == .agentProfileCommandDetails)
+        #expect(rows[0].commandDetailsScopeLabel.kind == .localOnlyV1)
+        #expect(rows[0].portabilitySummary.contains("Built-in default selection is portable"))
+
+        #expect(rows[1].defaultSelectionScopeLabel == .customDefaultProfileSelection)
+        #expect(rows[1].defaultSelectionScopeLabel.kind == .localOnlyV1)
+        #expect(rows[1].commandDetailsScopeLabel == .agentProfileCommandDetails)
+        #expect(rows[1].portabilitySummary.contains("Custom profile definitions"))
+    }
 }

@@ -287,6 +287,83 @@ struct PortableSettingsConfigTests {
         #expect(decoded.fileMissing == false)
         #expect(decoded.hasRejectedSections)
     }
+
+    @Test
+    func portableScopeLabelsIdentifyV1AppearanceBehaviorAndManagedShortcuts() {
+        #expect(PortableSettingsScopeKind.portableV1.badgeTitle == "Portable V1")
+        #expect(PortableSettingsScopeKind.localOnlyV1.badgeTitle == "Local-only V1")
+        #expect(PortableSettingsScopeKind.mixedV1.badgeTitle == "Mixed scope")
+        #expect(PortableSettingsScopeLabel.appearance.kind == .portableV1)
+        #expect(PortableSettingsScopeLabel.appearance.detail.contains("Theme"))
+        #expect(PortableSettingsScopeLabel.focusWorkspace.kind == .portableV1)
+        #expect(PortableSettingsScopeLabel.focusWorkspace.detail.contains("Focus Workspace"))
+        #expect(PortableSettingsScopeLabel.managedShortcuts.kind == .portableV1)
+        #expect(PortableSettingsScopeLabel.managedShortcuts.detail.contains("Managed app-command keyboard shortcuts"))
+        #expect(PortableSettingsScopeLabel.agentProfilesMixed.kind == .mixedV1)
+        #expect(PortableSettingsScopeLabel.agentProfileCommandDetails.kind == .localOnlyV1)
+        #expect(PortableSettingsScopeLabel.builtInDefaultProfileSelection.kind == .portableV1)
+        #expect(PortableSettingsScopeLabel.customDefaultProfileSelection.kind == .localOnlyV1)
+        #expect(PortableSettingsSection.appearance.displayTitle == "Appearance")
+        #expect(PortableSettingsSection.behavior.displayTitle == "Focus Workspace")
+        #expect(PortableSettingsSection.defaultProfile.displayTitle == "Built-in default profile")
+        #expect(PortableSettingsSection.keybindings.displayTitle == "Keyboard Shortcuts")
+    }
+
+    @Test
+    func portableReloadStatusFormattingSurfacesRejectedSectionDetails() {
+        let result = PortableSettingsApplyResult(
+            appliedSections: [.appearance, .behavior],
+            rejectedSections: [
+                "defaultProfile": "unsupported_default_profile:local-reviewer",
+                "keybindings": "duplicate_command_id:openSettings"
+            ]
+        )
+
+        let presentation = PortableSettingsApplyStatusPresentation(result: result)
+
+        #expect(presentation.kind == .partial)
+        #expect(presentation.title == "Partial reload applied")
+        #expect(presentation.appliedSectionDetails == ["Appearance", "Focus Workspace"])
+        #expect(presentation.rejectedSectionDetails == [
+            "Built-in default profile: unsupported_default_profile:local-reviewer",
+            "Keyboard Shortcuts: duplicate_command_id:openSettings"
+        ])
+    }
+
+    @Test
+    func portableReloadStatusFormattingDistinguishesMissingFileAndExplicitFailures() {
+        let idle = PortableSettingsApplyStatusPresentation.idle
+        let success = PortableSettingsApplyStatusPresentation(result: PortableSettingsApplyResult(
+            appliedSections: [.keybindings]
+        ))
+        let emptySuccess = PortableSettingsApplyStatusPresentation(result: PortableSettingsApplyResult())
+        let seeded = PortableSettingsApplyStatusPresentation(result: PortableSettingsApplyResult(
+            appliedSections: [.appearance],
+            seededFromSQLite: true
+        ))
+        let missingFile = PortableSettingsApplyStatusPresentation(result: PortableSettingsApplyResult(
+            skippedSections: PortableSettingsConfig.supportedTopLevelSections,
+            fileMissing: true
+        ))
+        let unknownRejectedSection = PortableSettingsApplyResult(
+            rejectedSections: ["futureSection": "unsupported_section"]
+        )
+        let failure = PortableSettingsApplyStatusPresentation.failure(message: "decode_failed")
+
+        #expect(idle.kind == .idle)
+        #expect(idle.title == "No reload run")
+        #expect(success.kind == .success)
+        #expect(success.summary == "Applied Keyboard Shortcuts.")
+        #expect(emptySuccess.kind == .success)
+        #expect(emptySuccess.summary == "Reload finished with no portable sections to apply.")
+        #expect(seeded.title == "Portable file seeded")
+        #expect(missingFile.kind == .missingFile)
+        #expect(missingFile.title == "Portable file not found")
+        #expect(missingFile.summary.contains("No portable settings file exists yet"))
+        #expect(unknownRejectedSection.rejectedSectionDetails == ["futureSection: unsupported_section"])
+        #expect(failure.kind == .failure)
+        #expect(failure.rejectedSectionDetails == ["decode_failed"])
+    }
 }
 
 private func jsonContainsKeys(_ keys: [String], in json: String) -> Bool {

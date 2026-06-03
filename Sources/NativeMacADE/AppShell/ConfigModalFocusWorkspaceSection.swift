@@ -96,6 +96,7 @@ struct ConfigModalFocusWorkspaceSection: View {
                 .font(.callout)
                 .foregroundStyle(theme.secondaryText.color)
                 .fixedSize(horizontal: false, vertical: true)
+            PortableSettingsScopeBadgeView(label: .focusWorkspace)
         }
     }
 
