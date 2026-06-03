@@ -19,6 +19,10 @@ public struct PilotDiagnostics: Equatable, Sendable {
     public var focusWorkspaceDisableCount: Int = 0
     public var focusWorkspaceBlockedTerminalTabCount: Int = 0
     public var focusWorkspaceBlockedFileTabCount: Int = 0
+    public var focusWorkspaceContinuityRestoreAppliedCount: Int = 0
+    public var focusWorkspaceContinuityRestoreDisabledCount: Int = 0
+    public var focusWorkspaceContinuityRestoreFallbackSnapshotCount: Int = 0
+    public var focusWorkspaceContinuityRestoreNoTerminalCandidateCount: Int = 0
     public var portableSettingsSeededCount: Int = 0
     public var portableSettingsSeedFailureCount: Int = 0
     public var portableSettingsLoadFailureCount: Int = 0
@@ -29,6 +33,13 @@ public struct PilotDiagnostics: Equatable, Sendable {
     public var portableSettingsPartialApplyCount: Int = 0
     public var portableSettingsSectionRejectedCount: Int = 0
     public var releaseBlockingReasons: [String]
+}
+
+public enum FocusWorkspaceContinuityRestoreResolution: String, Equatable, Sendable {
+    case applied
+    case disabled
+    case fallbackSnapshot = "fallback_snapshot"
+    case noTerminalCandidate = "no_terminal_candidate"
 }
 
 @MainActor
@@ -72,6 +83,10 @@ public final class PerformanceMetrics {
     public private(set) var focusWorkspaceDisableCount = 0
     public private(set) var focusWorkspaceBlockedTerminalTabCount = 0
     public private(set) var focusWorkspaceBlockedFileTabCount = 0
+    public private(set) var focusWorkspaceContinuityRestoreAppliedCount = 0
+    public private(set) var focusWorkspaceContinuityRestoreDisabledCount = 0
+    public private(set) var focusWorkspaceContinuityRestoreFallbackSnapshotCount = 0
+    public private(set) var focusWorkspaceContinuityRestoreNoTerminalCandidateCount = 0
     public private(set) var portableSettingsSeededCount = 0
     public private(set) var portableSettingsSeedFailureCount = 0
     public private(set) var portableSettingsLoadFailureCount = 0
@@ -229,6 +244,19 @@ public final class PerformanceMetrics {
         }
     }
 
+    public func recordFocusWorkspaceContinuityRestore(_ resolution: FocusWorkspaceContinuityRestoreResolution) {
+        switch resolution {
+        case .applied:
+            focusWorkspaceContinuityRestoreAppliedCount += 1
+        case .disabled:
+            focusWorkspaceContinuityRestoreDisabledCount += 1
+        case .fallbackSnapshot:
+            focusWorkspaceContinuityRestoreFallbackSnapshotCount += 1
+        case .noTerminalCandidate:
+            focusWorkspaceContinuityRestoreNoTerminalCandidateCount += 1
+        }
+    }
+
     public func recordPortableSettingsSeeded() {
         portableSettingsSeededCount += 1
     }
@@ -308,6 +336,10 @@ public final class PerformanceMetrics {
             focusWorkspaceDisableCount: focusWorkspaceDisableCount,
             focusWorkspaceBlockedTerminalTabCount: focusWorkspaceBlockedTerminalTabCount,
             focusWorkspaceBlockedFileTabCount: focusWorkspaceBlockedFileTabCount,
+            focusWorkspaceContinuityRestoreAppliedCount: focusWorkspaceContinuityRestoreAppliedCount,
+            focusWorkspaceContinuityRestoreDisabledCount: focusWorkspaceContinuityRestoreDisabledCount,
+            focusWorkspaceContinuityRestoreFallbackSnapshotCount: focusWorkspaceContinuityRestoreFallbackSnapshotCount,
+            focusWorkspaceContinuityRestoreNoTerminalCandidateCount: focusWorkspaceContinuityRestoreNoTerminalCandidateCount,
             portableSettingsSeededCount: portableSettingsSeededCount,
             portableSettingsSeedFailureCount: portableSettingsSeedFailureCount,
             portableSettingsLoadFailureCount: portableSettingsLoadFailureCount,

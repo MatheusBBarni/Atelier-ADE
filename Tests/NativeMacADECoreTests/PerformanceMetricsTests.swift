@@ -94,6 +94,27 @@ struct PerformanceMetricsTests {
     }
 
     @Test
+    func focusWorkspaceContinuityRestoreCountersRollIntoPilotDiagnostics() {
+        let metrics = PerformanceMetrics()
+
+        metrics.recordFocusWorkspaceContinuityRestore(.applied)
+        metrics.recordFocusWorkspaceContinuityRestore(.disabled)
+        metrics.recordFocusWorkspaceContinuityRestore(.fallbackSnapshot)
+        metrics.recordFocusWorkspaceContinuityRestore(.noTerminalCandidate)
+
+        let diagnostics = metrics.diagnostics()
+
+        #expect(metrics.focusWorkspaceContinuityRestoreAppliedCount == 1)
+        #expect(metrics.focusWorkspaceContinuityRestoreDisabledCount == 1)
+        #expect(metrics.focusWorkspaceContinuityRestoreFallbackSnapshotCount == 1)
+        #expect(metrics.focusWorkspaceContinuityRestoreNoTerminalCandidateCount == 1)
+        #expect(diagnostics.focusWorkspaceContinuityRestoreAppliedCount == 1)
+        #expect(diagnostics.focusWorkspaceContinuityRestoreDisabledCount == 1)
+        #expect(diagnostics.focusWorkspaceContinuityRestoreFallbackSnapshotCount == 1)
+        #expect(diagnostics.focusWorkspaceContinuityRestoreNoTerminalCandidateCount == 1)
+    }
+
+    @Test
     func fileWorkflowCountersRollIntoPilotDiagnostics() {
         let metrics = PerformanceMetrics()
 

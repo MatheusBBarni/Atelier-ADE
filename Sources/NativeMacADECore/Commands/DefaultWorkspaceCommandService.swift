@@ -878,11 +878,28 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
         var restoreResult = restoreResultFromCoordinator
         recordCoordinatorRestoreDiagnostics(restoreResult.diagnostics)
         let restoredStore = restoreResult.store
+        let restoredProjects = restoredStore.projects
+        let restoredSessions = restoredStore.sessions
+        let restoredTabs = restoredStore.tabs
+        let continuityRestore = resolveFocusWorkspaceContinuityRestore(
+            restoredSelection: restoredStore.selection,
+            sessions: restoredSessions,
+            tabs: restoredTabs,
+            appPreferences: store.appPreferences
+        )
+        metrics.recordFocusWorkspaceContinuityRestore(continuityRestore.resolution)
+        logger.emit("restore_continuity_resolved", fields: continuityRestore.fields)
+        restoreResult.store.restore(
+            projects: restoredProjects,
+            sessions: restoredSessions,
+            tabs: restoredTabs,
+            selection: continuityRestore.selection
+        )
         store.restore(
-            projects: restoredStore.projects,
-            sessions: restoredStore.sessions,
-            tabs: restoredStore.tabs,
-            selection: restoredStore.selection
+            projects: restoreResult.store.projects,
+            sessions: restoreResult.store.sessions,
+            tabs: restoreResult.store.tabs,
+            selection: restoreResult.store.selection
         )
         pruneTerminalExitSnapshotsToCurrentTerminalTabs()
         surfacesByTabID.removeAll()
@@ -937,15 +954,94 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
             skippedProjectCount: restoreResult.skippedProjects.count
         )
         metrics.recordLaunchToReady(duration: duration)
-        logger.emit("restore_completed", fields: [
+        var restoreCompletedFields = [
             "project_count": String(store.projects.count),
             "session_count": String(store.sessions.count),
             "tab_count": String(store.tabs.count),
             "skipped_project_count": String(restoreResult.skippedProjects.count),
             "duration_ms": String(Int((duration * 1_000).rounded())),
             "succeeded": String(!hasFailure)
-        ])
+        ]
+        restoreCompletedFields.merge(continuityRestore.fields) { _, new in new }
+        logger.emit("restore_completed", fields: restoreCompletedFields)
         return restoreResult
+    }
+
+    private func resolveFocusWorkspaceContinuityRestore(
+        restoredSelection: WorkspaceSelection,
+        sessions: [WorkspaceSession],
+        tabs: [WorkspaceTab],
+        appPreferences: AppPreferences
+    ) -> FocusWorkspaceContinuityRestoreApplication {
+        let preferences = appPreferences.normalizedFocusWorkspaceContinuity
+        let rawSelectedTabKind = tabKind(tabID: restoredSelection.tabID, tabs: tabs)
+        let selectedSessionTerminalCount = restoredSelection.sessionID.map { selectedSessionID in
+            tabs.filter { $0.sessionID == selectedSessionID && $0.kind == .terminal }.count
+        } ?? 0
+
+        guard preferences.focusWorkspaceEnabled, preferences.focusWorkspaceContinuityEnabled else {
+            return FocusWorkspaceContinuityRestoreApplication(
+                selection: restoredSelection,
+                resolution: .disabled,
+                preferences: preferences,
+                restoredSelection: restoredSelection,
+                rawSelectedTabKind: rawSelectedTabKind,
+                resolvedSelectedTabKind: rawSelectedTabKind,
+                sessionTerminalCount: selectedSessionTerminalCount
+            )
+        }
+
+        guard let selectedProjectID = restoredSelection.projectID,
+              let selectedSessionID = restoredSelection.sessionID,
+              sessions.contains(where: { $0.id == selectedSessionID && $0.projectID == selectedProjectID })
+        else {
+            return FocusWorkspaceContinuityRestoreApplication(
+                selection: restoredSelection,
+                resolution: .fallbackSnapshot,
+                preferences: preferences,
+                restoredSelection: restoredSelection,
+                rawSelectedTabKind: rawSelectedTabKind,
+                resolvedSelectedTabKind: rawSelectedTabKind,
+                sessionTerminalCount: selectedSessionTerminalCount
+            )
+        }
+
+        guard selectedSessionTerminalCount > 0 else {
+            return FocusWorkspaceContinuityRestoreApplication(
+                selection: restoredSelection,
+                resolution: .noTerminalCandidate,
+                preferences: preferences,
+                restoredSelection: restoredSelection,
+                rawSelectedTabKind: rawSelectedTabKind,
+                resolvedSelectedTabKind: rawSelectedTabKind,
+                sessionTerminalCount: selectedSessionTerminalCount
+            )
+        }
+
+        let resolvedSelection = FocusWorkspaceContinuityRestoreSelector().resolve(
+            restoredSelection: restoredSelection,
+            sessions: sessions,
+            tabs: tabs,
+            appPreferences: preferences
+        )
+        let resolvedSelectedTabKind = tabKind(tabID: resolvedSelection.tabID, tabs: tabs)
+        let resolution: FocusWorkspaceContinuityRestoreResolution =
+            resolvedSelectedTabKind == .terminal ? .applied : .fallbackSnapshot
+
+        return FocusWorkspaceContinuityRestoreApplication(
+            selection: resolvedSelection,
+            resolution: resolution,
+            preferences: preferences,
+            restoredSelection: restoredSelection,
+            rawSelectedTabKind: rawSelectedTabKind,
+            resolvedSelectedTabKind: resolvedSelectedTabKind,
+            sessionTerminalCount: selectedSessionTerminalCount
+        )
+    }
+
+    private func tabKind(tabID: UUID?, tabs: [WorkspaceTab]) -> WorkspaceTabKind? {
+        guard let tabID else { return nil }
+        return tabs.first { $0.id == tabID }?.kind
     }
 
     public func closeTab(tabID: UUID, force: Bool) async throws {
@@ -2138,6 +2234,33 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
             lhs.launchCommand == rhs.launchCommand &&
             lhs.launchArgumentsJSON == rhs.launchArgumentsJSON &&
             lhs.secretRef == rhs.secretRef
+    }
+}
+
+private struct FocusWorkspaceContinuityRestoreApplication {
+    var selection: WorkspaceSelection
+    var resolution: FocusWorkspaceContinuityRestoreResolution
+    var preferences: AppPreferences
+    var restoredSelection: WorkspaceSelection
+    var rawSelectedTabKind: WorkspaceTabKind?
+    var resolvedSelectedTabKind: WorkspaceTabKind?
+    var sessionTerminalCount: Int
+
+    var fields: [String: String] {
+        [
+            "focus_workspace_enabled": String(preferences.focusWorkspaceEnabled),
+            "focus_workspace_continuity_enabled": String(preferences.focusWorkspaceContinuityEnabled),
+            "selected_project_id_present": String(restoredSelection.projectID != nil),
+            "selected_session_id_present": String(restoredSelection.sessionID != nil),
+            "raw_selected_tab_kind": Self.kindField(rawSelectedTabKind),
+            "resolved_restore_tab_kind": Self.kindField(resolvedSelectedTabKind),
+            "continuity_resolution": resolution.rawValue,
+            "session_terminal_count": String(sessionTerminalCount)
+        ]
+    }
+
+    private static func kindField(_ kind: WorkspaceTabKind?) -> String {
+        kind?.rawValue ?? "none"
     }
 }
 

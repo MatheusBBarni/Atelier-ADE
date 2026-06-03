@@ -1114,6 +1114,97 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
     }
 
     @Test
+    func continuityEnabledRelaunchLandsOnMostRecentTerminalAndKeepsLaunchIntentTruthful() async throws {
+        let harness = try makeHarness()
+        let fixture = try await seedContinuityRestoreGraph(
+            in: harness.persistence,
+            appPreferences: AppPreferences(
+                focusWorkspaceEnabled: true,
+                focusWorkspaceContinuityEnabled: true
+            )
+        )
+        let newestTerminalTab = try #require(fixture.newestTerminalTab)
+
+        _ = try await harness.service.loadAppPreferences()
+        let result = try await harness.service.restoreWorkspace()
+        let recreatedTerminal = try #require(harness.terminal.createdTabs.first { $0.id == newestTerminalTab.id })
+
+        #expect(harness.store.selectedProjectID == fixture.project.id)
+        #expect(harness.store.selectedSessionID == fixture.selectedSession.id)
+        #expect(harness.store.selectedTabID == newestTerminalTab.id)
+        #expect(result.store.selectedTabID == newestTerminalTab.id)
+        #expect(recreatedTerminal.launchCommand == "herdr")
+        #expect(recreatedTerminal.launchArgumentsJSON == "[\"--restore\"]")
+        #expect(try await harness.persistence.loadRestoreSnapshot()?.selectedTabID == fixture.selectedFileTab.id)
+        #expect(harness.service.metrics.focusWorkspaceContinuityRestoreAppliedCount == 1)
+        #expect(harness.service.logger.events.contains { event in
+            event.name == "restore_completed" &&
+                event.fields["continuity_resolution"] == "applied" &&
+                event.fields["raw_selected_tab_kind"] == "file" &&
+                event.fields["resolved_restore_tab_kind"] == "terminal"
+        })
+    }
+
+    @Test
+    func continuityEnabledRelaunchWithoutSelectedSessionTerminalPreservesRawSelection() async throws {
+        let harness = try makeHarness()
+        let fixture = try await seedContinuityRestoreGraph(
+            in: harness.persistence,
+            includeSelectedSessionTerminals: false,
+            includeOtherSessionTerminal: true,
+            appPreferences: AppPreferences(
+                focusWorkspaceEnabled: true,
+                focusWorkspaceContinuityEnabled: true
+            )
+        )
+        let otherTerminalTab = try #require(fixture.otherTerminalTab)
+
+        _ = try await harness.service.loadAppPreferences()
+        let result = try await harness.service.restoreWorkspace()
+
+        #expect(harness.store.selectedProjectID == fixture.project.id)
+        #expect(harness.store.selectedSessionID == fixture.selectedSession.id)
+        #expect(harness.store.selectedTabID == fixture.selectedFileTab.id)
+        #expect(result.store.selectedTabID == fixture.selectedFileTab.id)
+        #expect(harness.terminal.createdTabs.map(\.id) == [otherTerminalTab.id])
+        #expect(harness.service.metrics.focusWorkspaceContinuityRestoreNoTerminalCandidateCount == 1)
+        #expect(harness.service.logger.events.contains { event in
+            event.name == "restore_completed" &&
+                event.fields["continuity_resolution"] == "no_terminal_candidate" &&
+                event.fields["session_terminal_count"] == "0"
+        })
+    }
+
+    @Test
+    func continuityDisabledRelaunchPreservesCurrentProjectSessionAndTabSelection() async throws {
+        let harness = try makeHarness()
+        let fixture = try await seedContinuityRestoreGraph(
+            in: harness.persistence,
+            appPreferences: AppPreferences(
+                focusWorkspaceEnabled: true,
+                focusWorkspaceContinuityEnabled: false
+            )
+        )
+        let olderTerminalTab = try #require(fixture.olderTerminalTab)
+        let newestTerminalTab = try #require(fixture.newestTerminalTab)
+
+        _ = try await harness.service.loadAppPreferences()
+        let result = try await harness.service.restoreWorkspace()
+
+        #expect(harness.store.selectedProjectID == fixture.project.id)
+        #expect(harness.store.selectedSessionID == fixture.selectedSession.id)
+        #expect(harness.store.selectedTabID == fixture.selectedFileTab.id)
+        #expect(result.store.selectedTabID == fixture.selectedFileTab.id)
+        #expect(harness.store.tabsForSelectedSession.map(\.id) == [
+            olderTerminalTab.id,
+            fixture.selectedFileTab.id,
+            newestTerminalTab.id
+        ])
+        #expect(harness.terminal.createdTabs.map(\.id) == [olderTerminalTab.id, newestTerminalTab.id])
+        #expect(harness.service.metrics.focusWorkspaceContinuityRestoreDisabledCount == 1)
+    }
+
+    @Test
     func focusWorkspaceRestoreGrandfathersLegacyTabsAndBlocksFutureTerminalCreation() async throws {
         let harness = try makeHarness()
         let projectPath = try makeTemporaryProjectDirectory()
@@ -2046,6 +2137,103 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
         return fileURL
     }
 
+    private func seedContinuityRestoreGraph(
+        in persistence: SQLiteWorkspaceMetadataStore,
+        includeSelectedSessionTerminals: Bool = true,
+        includeOtherSessionTerminal: Bool = false,
+        appPreferences: AppPreferences
+    ) async throws -> ContinuityRestoreGraph {
+        let projectPath = try makeTemporaryProjectDirectory()
+        let fileURL = try makeTemporaryProjectFile(in: projectPath, relativePath: "Sources/App.swift")
+        let project = WorkspaceProject(path: projectPath, displayName: "continuity")
+        let selectedSession = WorkspaceSession(
+            projectID: project.id,
+            title: "Selected",
+            createdAt: Date(timeIntervalSince1970: 100),
+            lastActivatedAt: Date(timeIntervalSince1970: 200)
+        )
+        let selectedFileTab = WorkspaceTab(
+            sessionID: selectedSession.id,
+            kind: .file,
+            workingDirectory: projectPath,
+            fileReference: WorkspaceFileReference(path: fileURL.path, projectRoot: projectPath),
+            ordinal: includeSelectedSessionTerminals ? 1 : 0,
+            createdAt: Date(timeIntervalSince1970: 300),
+            lastActivatedAt: Date(timeIntervalSince1970: 1_000)
+        )
+        let olderTerminalTab: WorkspaceTab? = includeSelectedSessionTerminals
+            ? WorkspaceTab(
+                sessionID: selectedSession.id,
+                workingDirectory: projectPath,
+                launchCommand: "codex",
+                launchArgumentsJSON: "[\"exec\"]",
+                ordinal: 0,
+                createdAt: Date(timeIntervalSince1970: 250),
+                lastActivatedAt: Date(timeIntervalSince1970: 400)
+            )
+            : nil
+        let newestTerminalTab: WorkspaceTab? = includeSelectedSessionTerminals
+            ? WorkspaceTab(
+                sessionID: selectedSession.id,
+                workingDirectory: projectPath,
+                launchCommand: "herdr",
+                launchArgumentsJSON: "[\"--restore\"]",
+                ordinal: 2,
+                createdAt: Date(timeIntervalSince1970: 350),
+                lastActivatedAt: Date(timeIntervalSince1970: 700)
+            )
+            : nil
+        let otherSession: WorkspaceSession? = includeOtherSessionTerminal
+            ? WorkspaceSession(
+                projectID: project.id,
+                title: "Other",
+                createdAt: Date(timeIntervalSince1970: 110),
+                lastActivatedAt: Date(timeIntervalSince1970: 900)
+            )
+            : nil
+        let otherTerminalTab: WorkspaceTab? = otherSession.map { session in
+            WorkspaceTab(
+                sessionID: session.id,
+                workingDirectory: projectPath,
+                launchCommand: "ignored",
+                launchArgumentsJSON: "[]",
+                ordinal: 0,
+                createdAt: Date(timeIntervalSince1970: 500),
+                lastActivatedAt: Date(timeIntervalSince1970: 950)
+            )
+        }
+        let selectedSessionTabs = [olderTerminalTab, selectedFileTab, newestTerminalTab].compactMap { $0 }
+        let otherTabs = [otherTerminalTab].compactMap { $0 }
+        let snapshot = RestoreSnapshot(
+            selectedProjectID: project.id,
+            selectedSessionID: selectedSession.id,
+            selectedTabID: selectedFileTab.id,
+            tabOrder: (selectedSessionTabs + otherTabs).map(\.id),
+            updatedAt: Date(timeIntervalSince1970: 1_100)
+        )
+
+        try await persistence.save(project: project)
+        try await persistence.save(session: selectedSession)
+        if let otherSession {
+            try await persistence.save(session: otherSession)
+        }
+        for tab in selectedSessionTabs + otherTabs {
+            try await persistence.save(tab: tab)
+        }
+        try await persistence.save(snapshot: snapshot)
+        try await persistence.save(appPreferences: appPreferences)
+
+        return ContinuityRestoreGraph(
+            project: project,
+            selectedSession: selectedSession,
+            selectedFileTab: selectedFileTab,
+            olderTerminalTab: olderTerminalTab,
+            newestTerminalTab: newestTerminalTab,
+            otherTerminalTab: otherTerminalTab,
+            snapshot: snapshot
+        )
+    }
+
     private func managedKeybindingOverrides() -> [AppCommandID: KeybindingOverride] {
         AppCommandRegistry.managedCommandIDs.enumerated().reduce(into: [:]) { overrides, pair in
             let index = pair.offset + 1
@@ -2094,6 +2282,16 @@ private struct CommandServiceIntegrationHarness {
     let portableSettingsFileStore: PortableSettingsFileStore
     let service: DefaultWorkspaceCommandService
     let databasePath: String
+}
+
+private struct ContinuityRestoreGraph {
+    let project: WorkspaceProject
+    let selectedSession: WorkspaceSession
+    let selectedFileTab: WorkspaceTab
+    let olderTerminalTab: WorkspaceTab?
+    let newestTerminalTab: WorkspaceTab?
+    let otherTerminalTab: WorkspaceTab?
+    let snapshot: RestoreSnapshot
 }
 
 @MainActor
