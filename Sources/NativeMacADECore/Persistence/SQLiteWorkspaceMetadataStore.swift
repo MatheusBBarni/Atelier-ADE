@@ -128,15 +128,16 @@ public actor SQLiteWorkspaceMetadataStore: WorkspacePersistenceStore {
     }
 
     public func loadAppPreferences() async throws -> AppPreferences {
-        let preferences = try query("SELECT id, theme_id, default_session_shortcut_id, terminal_font_size, keybindings_json, focus_workspace_enabled, updated_at FROM app_preferences WHERE id = 1") { statement in
+        let preferences = try query("SELECT id, theme_id, default_session_shortcut_id, terminal_font_size, keybindings_json, focus_workspace_enabled, focus_workspace_continuity_enabled, updated_at FROM app_preferences WHERE id = 1") { statement in
             try AppPreferences(
                 id: int(statement, 0),
                 themeID: text(statement, 1),
                 defaultSessionShortcutID: optionalUUID(statement, 2),
                 terminalFontSize: double(statement, 3),
                 focusWorkspaceEnabled: bool(statement, 5),
+                focusWorkspaceContinuityEnabled: bool(statement, 6),
                 keybindings: AppPreferences.decodeKeybindingsJSON(text(statement, 4)),
-                updatedAt: date(statement, 6)
+                updatedAt: date(statement, 7)
             )
         }.first
         return preferences ?? .defaults
@@ -386,14 +387,15 @@ public actor SQLiteWorkspaceMetadataStore: WorkspacePersistenceStore {
     public func save(appPreferences: AppPreferences) async throws {
         let keybindingsJSON = try appPreferences.keybindingsJSON
         try execute("""
-            INSERT INTO app_preferences (id, theme_id, default_session_shortcut_id, terminal_font_size, keybindings_json, focus_workspace_enabled, updated_at)
-            VALUES (1, ?, ?, ?, ?, ?, ?)
+            INSERT INTO app_preferences (id, theme_id, default_session_shortcut_id, terminal_font_size, keybindings_json, focus_workspace_enabled, focus_workspace_continuity_enabled, updated_at)
+            VALUES (1, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 theme_id = excluded.theme_id,
                 default_session_shortcut_id = excluded.default_session_shortcut_id,
                 terminal_font_size = excluded.terminal_font_size,
                 keybindings_json = excluded.keybindings_json,
                 focus_workspace_enabled = excluded.focus_workspace_enabled,
+                focus_workspace_continuity_enabled = excluded.focus_workspace_continuity_enabled,
                 updated_at = excluded.updated_at
             """) { statement in
             bind(statement, appPreferences.themeID, 1)
@@ -401,7 +403,8 @@ public actor SQLiteWorkspaceMetadataStore: WorkspacePersistenceStore {
             bind(statement, appPreferences.terminalFontSize, 3)
             bind(statement, keybindingsJSON, 4)
             bind(statement, appPreferences.focusWorkspaceEnabled, 5)
-            bind(statement, appPreferences.updatedAt, 6)
+            bind(statement, appPreferences.focusWorkspaceContinuityEnabled, 6)
+            bind(statement, appPreferences.updatedAt, 7)
         }
     }
 

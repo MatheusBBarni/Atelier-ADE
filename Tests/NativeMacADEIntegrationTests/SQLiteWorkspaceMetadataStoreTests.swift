@@ -16,14 +16,20 @@ struct SQLiteWorkspaceMetadataStoreTests {
         #expect(tables == WorkspaceMigrations.metadataTables)
         #expect(try inspectColumnNames(path: path, tableName: "session_shortcuts").contains("has_user_override"))
         #expect(try inspectColumnNames(path: path, tableName: "tabs").isSuperset(of: ["kind", "file_path", "title", "shortcut_id"]))
-        #expect(try inspectColumnNames(path: path, tableName: "app_preferences").isSuperset(of: ["terminal_font_size", "focus_workspace_enabled"]))
-        #expect(WorkspaceMigrations.currentUserVersion == 6)
+        #expect(try inspectColumnNames(path: path, tableName: "app_preferences").isSuperset(of: [
+            "terminal_font_size",
+            "focus_workspace_enabled",
+            "focus_workspace_continuity_enabled"
+        ]))
+        #expect(WorkspaceMigrations.currentUserVersion == 7)
         #expect(try inspectUserVersion(path: path) == WorkspaceMigrations.currentUserVersion)
         #expect(try inspectAppPreferencesRowCount(path: path) == 1)
         #expect(try inspectAppPreferencesFocusFlag(path: path) == false)
+        #expect(try inspectAppPreferencesContinuityFlag(path: path) == false)
         #expect(preferences == .defaults)
         #expect(preferences.themeID == AppTheme.systemSelectionID)
         #expect(preferences.focusWorkspaceEnabled == false)
+        #expect(preferences.focusWorkspaceContinuityEnabled == false)
     }
 
     @Test
@@ -258,9 +264,14 @@ struct SQLiteWorkspaceMetadataStoreTests {
         #expect(try inspectUserTableNames(path: path) == WorkspaceMigrations.metadataTables)
         #expect(try inspectColumnNames(path: path, tableName: "session_shortcuts").contains("has_user_override"))
         #expect(try inspectColumnNames(path: path, tableName: "tabs").isSuperset(of: ["kind", "file_path", "title", "shortcut_id"]))
-        #expect(try inspectColumnNames(path: path, tableName: "app_preferences").isSuperset(of: ["terminal_font_size", "focus_workspace_enabled"]))
+        #expect(try inspectColumnNames(path: path, tableName: "app_preferences").isSuperset(of: [
+            "terminal_font_size",
+            "focus_workspace_enabled",
+            "focus_workspace_continuity_enabled"
+        ]))
         #expect(try inspectAppPreferencesRowCount(path: path) == 1)
         #expect(try inspectAppPreferencesFocusFlag(path: path) == false)
+        #expect(try inspectAppPreferencesContinuityFlag(path: path) == false)
         #expect(try await store.loadProjects() == [fixture.project])
         #expect(try await store.loadSessions() == [fixture.session])
         #expect(try await store.loadTabs() == [fixture.tab])
@@ -291,15 +302,20 @@ struct SQLiteWorkspaceMetadataStoreTests {
 
         #expect(try inspectUserVersion(path: path) == WorkspaceMigrations.currentUserVersion)
         #expect(try inspectColumnNames(path: path, tableName: "tabs").isSuperset(of: ["kind", "file_path", "title", "shortcut_id"]))
-        #expect(try inspectColumnNames(path: path, tableName: "app_preferences").isSuperset(of: ["terminal_font_size", "focus_workspace_enabled"]))
+        #expect(try inspectColumnNames(path: path, tableName: "app_preferences").isSuperset(of: [
+            "terminal_font_size",
+            "focus_workspace_enabled",
+            "focus_workspace_continuity_enabled"
+        ]))
         #expect(try await store.loadTabs() == [fixture.tab])
         #expect(try await store.loadRestoreSnapshot() == fixture.restoreSnapshot)
         #expect(try await store.loadAppPreferences().terminalFontSize == AppPreferences.defaultTerminalFontSize)
         #expect(try await store.loadAppPreferences().focusWorkspaceEnabled == false)
+        #expect(try await store.loadAppPreferences().focusWorkspaceContinuityEnabled == false)
     }
 
     @Test
-    func versionFiveDatabaseUpgradesToVersionSixPreservingMetadataAndAddingFocusDefault() async throws {
+    func versionFiveDatabaseUpgradesToCurrentPreservingMetadataAndAddingPreferenceDefaults() async throws {
         let path = temporaryDatabasePath()
         let fixture = try createVersionFiveDatabase(path: path)
 
@@ -308,7 +324,9 @@ struct SQLiteWorkspaceMetadataStoreTests {
 
         #expect(try inspectUserVersion(path: path) == WorkspaceMigrations.currentUserVersion)
         #expect(try inspectColumnNames(path: path, tableName: "app_preferences").contains("focus_workspace_enabled"))
+        #expect(try inspectColumnNames(path: path, tableName: "app_preferences").contains("focus_workspace_continuity_enabled"))
         #expect(try inspectAppPreferencesFocusFlag(path: path) == false)
+        #expect(try inspectAppPreferencesContinuityFlag(path: path) == false)
         #expect(try await store.loadProjects() == [fixture.project])
         #expect(try await store.loadSessions() == [fixture.session])
         #expect(try await store.loadTabs() == [fixture.tab])
@@ -319,6 +337,33 @@ struct SQLiteWorkspaceMetadataStoreTests {
         #expect(preferences.terminalFontSize == 16)
         #expect(preferences.keybindings == [.openSettings: fixture.openSettingsOverride])
         #expect(preferences.focusWorkspaceEnabled == false)
+        #expect(preferences.focusWorkspaceContinuityEnabled == false)
+        #expect(preferences.updatedAt == Date(timeIntervalSince1970: 80))
+    }
+
+    @Test
+    func versionSixDatabaseUpgradesToVersionSevenAddingContinuityDefault() async throws {
+        let path = temporaryDatabasePath()
+        let fixture = try createVersionSixDatabase(path: path)
+
+        let store = try SQLiteWorkspaceMetadataStore(path: path)
+        let preferences = try await store.loadAppPreferences()
+
+        #expect(try inspectUserVersion(path: path) == 7)
+        #expect(try inspectColumnNames(path: path, tableName: "app_preferences").contains("focus_workspace_continuity_enabled"))
+        #expect(try inspectAppPreferencesFocusFlag(path: path) == true)
+        #expect(try inspectAppPreferencesContinuityFlag(path: path) == false)
+        #expect(try await store.loadProjects() == [fixture.project])
+        #expect(try await store.loadSessions() == [fixture.session])
+        #expect(try await store.loadTabs() == [fixture.tab])
+        #expect(try await store.loadSessionShortcuts() == [fixture.shortcut])
+        #expect(try await store.loadRestoreSnapshot() == fixture.restoreSnapshot)
+        #expect(preferences.themeID == "dracula")
+        #expect(preferences.defaultSessionShortcutID == fixture.shortcut.id)
+        #expect(preferences.terminalFontSize == 16)
+        #expect(preferences.keybindings == [.openSettings: fixture.openSettingsOverride])
+        #expect(preferences.focusWorkspaceEnabled == true)
+        #expect(preferences.focusWorkspaceContinuityEnabled == false)
         #expect(preferences.updatedAt == Date(timeIntervalSince1970: 80))
     }
 
@@ -356,12 +401,61 @@ struct SQLiteWorkspaceMetadataStoreTests {
 
         #expect(try inspectUserVersion(path: path) == WorkspaceMigrations.currentUserVersion)
         #expect(try inspectColumnNames(path: path, tableName: "app_preferences").contains("focus_workspace_enabled"))
+        #expect(try inspectColumnNames(path: path, tableName: "app_preferences").contains("focus_workspace_continuity_enabled"))
         #expect(try inspectAppPreferencesFocusFlag(path: path) == false)
+        #expect(try inspectAppPreferencesContinuityFlag(path: path) == false)
         #expect(preferences.themeID == "catppuccin")
         #expect(preferences.defaultSessionShortcutID == nil)
         #expect(preferences.terminalFontSize == 19)
         #expect(preferences.keybindings == [.openSettings: override])
         #expect(preferences.focusWorkspaceEnabled == false)
+        #expect(preferences.focusWorkspaceContinuityEnabled == false)
+        #expect(preferences.updatedAt == Date(timeIntervalSince1970: 90))
+    }
+
+    @Test
+    func currentVersionDatabaseMissingContinuityColumnRepairsWithoutLosingPreferences() async throws {
+        let path = temporaryDatabasePath()
+        let override = KeybindingOverride(
+            commandID: .openSettings,
+            keyEquivalent: ",",
+            modifiers: [.command, .shift]
+        )
+        do {
+            var database: OpaquePointer?
+            guard sqlite3_open_v2(path, &database, SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK else {
+                throw SQLiteWorkspaceMetadataStoreError.openFailed("Unable to create missing-continuity-column fixture database")
+            }
+            defer { sqlite3_close(database) }
+            try execute(database, """
+            CREATE TABLE app_preferences (
+                id INTEGER PRIMARY KEY NOT NULL CHECK (id = 1),
+                theme_id TEXT NOT NULL,
+                default_session_shortcut_id TEXT REFERENCES session_shortcuts(id) ON DELETE SET NULL,
+                terminal_font_size REAL NOT NULL DEFAULT \(AppPreferences.defaultTerminalFontSize),
+                keybindings_json TEXT NOT NULL,
+                focus_workspace_enabled INTEGER NOT NULL DEFAULT 0 CHECK (focus_workspace_enabled IN (0, 1)),
+                updated_at REAL NOT NULL
+            );
+            INSERT INTO app_preferences (id, theme_id, default_session_shortcut_id, terminal_font_size, keybindings_json, focus_workspace_enabled, updated_at)
+            VALUES (1, 'catppuccin', NULL, 19, '[{"commandID":"openSettings","keyEquivalent":",","modifiers":["command","shift"]}]', 1, 90);
+            PRAGMA user_version = \(WorkspaceMigrations.currentUserVersion);
+            """)
+        }
+
+        let store = try SQLiteWorkspaceMetadataStore(path: path)
+        let preferences = try await store.loadAppPreferences()
+
+        #expect(try inspectUserVersion(path: path) == WorkspaceMigrations.currentUserVersion)
+        #expect(try inspectColumnNames(path: path, tableName: "app_preferences").contains("focus_workspace_continuity_enabled"))
+        #expect(try inspectAppPreferencesFocusFlag(path: path) == true)
+        #expect(try inspectAppPreferencesContinuityFlag(path: path) == false)
+        #expect(preferences.themeID == "catppuccin")
+        #expect(preferences.defaultSessionShortcutID == nil)
+        #expect(preferences.terminalFontSize == 19)
+        #expect(preferences.keybindings == [.openSettings: override])
+        #expect(preferences.focusWorkspaceEnabled == true)
+        #expect(preferences.focusWorkspaceContinuityEnabled == false)
         #expect(preferences.updatedAt == Date(timeIntervalSince1970: 90))
     }
 
@@ -421,6 +515,7 @@ struct SQLiteWorkspaceMetadataStoreTests {
             defaultSessionShortcutID: shortcut.id,
             terminalFontSize: 17,
             focusWorkspaceEnabled: true,
+            focusWorkspaceContinuityEnabled: true,
             keybindings: [
                 .openSettings: KeybindingOverride(commandID: .openSettings, keyEquivalent: ",", modifiers: [.command, .shift]),
                 .zoomOutTerminal: KeybindingOverride(commandID: .zoomOutTerminal, keyEquivalent: "-", modifiers: [.command])
@@ -455,6 +550,7 @@ struct SQLiteWorkspaceMetadataStoreTests {
             "terminal_font_size",
             "keybindings_json",
             "focus_workspace_enabled",
+            "focus_workspace_continuity_enabled",
             "updated_at"
         ])
     }
@@ -877,6 +973,12 @@ struct SQLiteWorkspaceMetadataStoreTests {
         }.first ?? false
     }
 
+    private func inspectAppPreferencesContinuityFlag(path: String) throws -> Bool {
+        try inspect(path: path, sql: "SELECT focus_workspace_continuity_enabled FROM app_preferences WHERE id = 1") { statement in
+            sqlite3_column_int(statement, 0) != 0
+        }.first ?? false
+    }
+
     private func inspectUserVersion(path: String) throws -> Int32 {
         var database: OpaquePointer?
         guard sqlite3_open_v2(path, &database, SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK else {
@@ -1057,6 +1159,16 @@ struct SQLiteWorkspaceMetadataStoreTests {
         PRAGMA user_version = 5;
         """)
 
+        return fixture
+    }
+
+    private func createVersionSixDatabase(path: String) throws -> VersionFiveFixture {
+        let fixture = try createVersionFiveDatabase(path: path)
+        try execute(path: path, """
+        ALTER TABLE app_preferences ADD COLUMN focus_workspace_enabled INTEGER NOT NULL DEFAULT 0 CHECK (focus_workspace_enabled IN (0, 1));
+        UPDATE app_preferences SET focus_workspace_enabled = 1 WHERE id = 1;
+        PRAGMA user_version = 6;
+        """)
         return fixture
     }
 

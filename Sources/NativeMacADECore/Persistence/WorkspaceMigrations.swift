@@ -7,7 +7,7 @@ public enum WorkspaceMigrationError: Error, Equatable, Sendable {
 }
 
 public enum WorkspaceMigrations {
-    public static let currentUserVersion: Int32 = 6
+    public static let currentUserVersion: Int32 = 7
     public static let metadataTables: Set<String> = [
         "projects",
         "sessions",
@@ -43,6 +43,9 @@ public enum WorkspaceMigrations {
         }
         if existingUserVersion < 6 {
             try migrateToV6(database)
+        }
+        if existingUserVersion < 7 {
+            try migrateToV7(database)
         }
         try repairTabMetadataIfNeeded(database)
         try repairAppPreferencesMetadataIfNeeded(database)
@@ -120,6 +123,7 @@ public enum WorkspaceMigrations {
         terminal_font_size REAL NOT NULL DEFAULT \(AppPreferences.defaultTerminalFontSize),
         keybindings_json TEXT NOT NULL,
         focus_workspace_enabled INTEGER NOT NULL DEFAULT 0 CHECK (focus_workspace_enabled IN (0, 1)),
+        focus_workspace_continuity_enabled INTEGER NOT NULL DEFAULT 0 CHECK (focus_workspace_continuity_enabled IN (0, 1)),
         updated_at REAL NOT NULL
     )
     """
@@ -163,6 +167,10 @@ public enum WorkspaceMigrations {
         try addV6AppPreferencesFocusWorkspaceColumnIfNeeded(database)
     }
 
+    private static func migrateToV7(_ database: OpaquePointer?) throws {
+        try addV7AppPreferencesFocusWorkspaceContinuityColumnIfNeeded(database)
+    }
+
     private static func repairTabMetadataIfNeeded(_ database: OpaquePointer?) throws {
         try addV2TabMetadataColumnsIfNeeded(database)
         try addV3TabTitleColumnIfNeeded(database)
@@ -172,6 +180,7 @@ public enum WorkspaceMigrations {
     private static func repairAppPreferencesMetadataIfNeeded(_ database: OpaquePointer?) throws {
         try addV4AppPreferencesFontSizeColumnIfNeeded(database)
         try addV6AppPreferencesFocusWorkspaceColumnIfNeeded(database)
+        try addV7AppPreferencesFocusWorkspaceContinuityColumnIfNeeded(database)
     }
 
     private static func addV2TabMetadataColumnsIfNeeded(_ database: OpaquePointer?) throws {
@@ -204,6 +213,12 @@ public enum WorkspaceMigrations {
     private static func addV6AppPreferencesFocusWorkspaceColumnIfNeeded(_ database: OpaquePointer?) throws {
         if try !table("app_preferences", hasColumn: "focus_workspace_enabled", database: database) {
             try execute(database, "ALTER TABLE app_preferences ADD COLUMN focus_workspace_enabled INTEGER NOT NULL DEFAULT 0 CHECK (focus_workspace_enabled IN (0, 1))")
+        }
+    }
+
+    private static func addV7AppPreferencesFocusWorkspaceContinuityColumnIfNeeded(_ database: OpaquePointer?) throws {
+        if try !table("app_preferences", hasColumn: "focus_workspace_continuity_enabled", database: database) {
+            try execute(database, "ALTER TABLE app_preferences ADD COLUMN focus_workspace_continuity_enabled INTEGER NOT NULL DEFAULT 0 CHECK (focus_workspace_continuity_enabled IN (0, 1))")
         }
     }
 
