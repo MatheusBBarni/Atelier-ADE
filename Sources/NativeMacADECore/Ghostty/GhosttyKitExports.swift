@@ -1,0 +1,6 @@
+import GhosttyKit
+
+public typealias GhosttyLaunchConfiguration = GhosttyKit.GhosttyLaunchConfiguration
+public typealias TerminalAppearance = GhosttyKit.TerminalAppearance
+public typealias GhosttySurfaceHandle = GhosttyKit.GhosttySurfaceHandle
+public typealias GhosttyAdapterError = GhosttyKit.GhosttyAdapterError

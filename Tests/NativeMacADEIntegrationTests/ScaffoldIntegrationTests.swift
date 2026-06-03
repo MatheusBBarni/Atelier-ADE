@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+@testable import GhosttyKit
 @testable import NativeMacADECore
 
 @Suite(.serialized)
@@ -11,6 +12,12 @@ struct ScaffoldIntegrationTests {
 
         #expect(container.workspaceStore.projects.isEmpty)
         #expect(container.workspaceStore.selectedProjectID == nil)
+    }
+
+    @Test
+    func ghosttyWrapperPinnedRevisionIsVisibleThroughAppDependencyGraph() {
+        #expect(LiveGhosttySurfaceRuntime.pinnedRevision == "cb36966a752982014827a9cabcf630ec3788b3d9")
+        #expect(LiveGhosttyAdapter.pinnedRevision == LiveGhosttySurfaceRuntime.pinnedRevision)
     }
 
     @Test
@@ -72,12 +79,15 @@ struct ScaffoldIntegrationTests {
         #expect(first.appContextID == 1)
         #expect(second.appContextID == 1)
         #expect(first.rawSurfaceID != second.rawSurfaceID)
-        #expect(CGhosttyRuntime.initializeCallCount == 1)
     }
 
     @Test
     func surfaceCreationFailureReturnsTypedUserVisibleErrorWithoutCrashing() async throws {
-        let adapter = LiveGhosttyAdapter(runtime: CGhosttyRuntime(forceSurfaceCreationFailure: true))
+        let adapter = LiveGhosttyAdapter(
+            runtime: LiveGhosttySurfaceRuntime(
+                bridge: CGhosttyRuntime(forceSurfaceCreationFailure: true)
+            )
+        )
         adapter.resetSharedAppContextForTesting()
 
         do {

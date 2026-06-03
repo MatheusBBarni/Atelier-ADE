@@ -1,6 +1,7 @@
 import AppKit
 import Darwin
 import Foundation
+import GhosttyKit
 @preconcurrency import SwiftTerm
 
 @MainActor

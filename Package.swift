@@ -9,6 +9,7 @@ let package = Package(
     ],
     products: [
         .executable(name: "NativeMacADE", targets: ["NativeMacADE"]),
+        .library(name: "GhosttyKit", targets: ["GhosttyKit"]),
         .library(name: "NativeMacADECore", targets: ["NativeMacADECore"])
     ],
     dependencies: [
@@ -32,19 +33,27 @@ let package = Package(
             publicHeadersPath: "include"
         ),
         .target(
+            name: "GhosttyKit",
+            dependencies: ["CGhostty"]
+        ),
+        .target(
             name: "NativeMacADECore",
             dependencies: [
-                "CGhostty",
+                "GhosttyKit",
                 .product(name: "SwiftTerm", package: "SwiftTerm")
             ]
         ),
         .testTarget(
+            name: "GhosttyKitTests",
+            dependencies: ["GhosttyKit"]
+        ),
+        .testTarget(
             name: "NativeMacADECoreTests",
-            dependencies: ["NativeMacADECore"]
+            dependencies: ["NativeMacADECore", "GhosttyKit"]
         ),
         .testTarget(
             name: "NativeMacADEIntegrationTests",
-            dependencies: ["NativeMacADE", "NativeMacADECore"]
+            dependencies: ["NativeMacADE", "NativeMacADECore", "GhosttyKit"]
         )
     ]
 )

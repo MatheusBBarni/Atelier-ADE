@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+@testable import GhosttyKit
 @testable import NativeMacADECore
 
 @Suite(.serialized)
@@ -41,7 +42,9 @@ struct GhosttyAdapterTests {
     @Test
     func adapterErrorMappingConvertsInitAndSurfaceFailuresToTypedUserVisibleErrors() async throws {
         let initFailingAdapter = LiveGhosttyAdapter(
-            runtime: CGhosttyRuntime(forceInitializationFailure: true)
+            runtime: LiveGhosttySurfaceRuntime(
+                bridge: CGhosttyRuntime(forceInitializationFailure: true)
+            )
         )
         initFailingAdapter.resetSharedAppContextForTesting()
 
@@ -50,7 +53,9 @@ struct GhosttyAdapterTests {
         }
 
         let surfaceFailingAdapter = LiveGhosttyAdapter(
-            runtime: CGhosttyRuntime(forceSurfaceCreationFailure: true)
+            runtime: LiveGhosttySurfaceRuntime(
+                bridge: CGhosttyRuntime(forceSurfaceCreationFailure: true)
+            )
         )
         surfaceFailingAdapter.resetSharedAppContextForTesting()
 
@@ -81,7 +86,7 @@ struct GhosttyAdapterTests {
 
     @Test
     func inheritedSurfaceCreationPreservesParentRawContextInsideAdapter() async throws {
-        let adapter = LiveGhosttyAdapter()
+        let adapter = LiveGhosttyAdapter(runtime: LiveGhosttySurfaceRuntime())
         adapter.resetSharedAppContextForTesting()
         let parent = try await adapter.createSurface(
             configuration: GhosttyLaunchConfiguration(workingDirectory: "/tmp/native-mac-ade-parent")
