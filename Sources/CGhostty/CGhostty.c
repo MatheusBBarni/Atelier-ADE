@@ -83,6 +83,8 @@ typedef struct ade_native_api {
     bool (*surface_needs_confirm_quit)(ade_native_surface_t);
     bool (*surface_process_exited)(ade_native_surface_t);
     void (*surface_draw)(ade_native_surface_t);
+    bool (*surface_key)(ade_native_surface_t, ade_ghostty_key_event_t);
+    void (*surface_text)(ade_native_surface_t, const char *, uintptr_t);
 } ade_native_api_t;
 
 typedef struct ade_native_context {
@@ -202,6 +204,8 @@ static bool ade_load_native_api(void) {
     ok = ade_load_symbol((void **)&native_api.surface_needs_confirm_quit, "ghostty_surface_needs_confirm_quit", true) && ok;
     ok = ade_load_symbol((void **)&native_api.surface_process_exited, "ghostty_surface_process_exited", true) && ok;
     ok = ade_load_symbol((void **)&native_api.surface_draw, "ghostty_surface_draw", false) && ok;
+    ok = ade_load_symbol((void **)&native_api.surface_key, "ghostty_surface_key", false) && ok;
+    ok = ade_load_symbol((void **)&native_api.surface_text, "ghostty_surface_text", false) && ok;
 
     if (!ok) {
         dlclose(native_handle);
@@ -447,6 +451,21 @@ void ade_ghostty_tick_app(ade_ghostty_app_context_t app_context) {
 void ade_ghostty_draw_surface(ade_ghostty_surface_t surface) {
     if (!surface.uses_native_renderer || surface.native_surface == NULL || native_api.surface_draw == NULL) { return; }
     native_api.surface_draw(surface.native_surface);
+}
+
+bool ade_ghostty_send_key(ade_ghostty_surface_t surface, ade_ghostty_key_event_t event) {
+    if (!surface.uses_native_renderer || surface.native_surface == NULL || native_api.surface_key == NULL) {
+        return false;
+    }
+
+    return native_api.surface_key(surface.native_surface, event);
+}
+
+void ade_ghostty_send_text(ade_ghostty_surface_t surface, const char *text, uintptr_t byte_count) {
+    if (!surface.uses_native_renderer || surface.native_surface == NULL || native_api.surface_text == NULL) { return; }
+    if (text == NULL || byte_count == 0) { return; }
+
+    native_api.surface_text(surface.native_surface, text, byte_count);
 }
 
 void ade_ghostty_destroy_surface(ade_ghostty_surface_t *surface) {

@@ -44,6 +44,36 @@ typedef struct ade_ghostty_surface {
     void *native_command;
 } ade_ghostty_surface_t;
 
+typedef enum ade_ghostty_key_action {
+    ADE_GHOSTTY_KEY_RELEASE = 0,
+    ADE_GHOSTTY_KEY_PRESS = 1,
+    ADE_GHOSTTY_KEY_REPEAT = 2
+} ade_ghostty_key_action_t;
+
+typedef enum ade_ghostty_key_mods {
+    ADE_GHOSTTY_MODS_NONE = 0,
+    ADE_GHOSTTY_MODS_SHIFT = 1 << 0,
+    ADE_GHOSTTY_MODS_CTRL = 1 << 1,
+    ADE_GHOSTTY_MODS_ALT = 1 << 2,
+    ADE_GHOSTTY_MODS_SUPER = 1 << 3,
+    ADE_GHOSTTY_MODS_CAPS = 1 << 4,
+    ADE_GHOSTTY_MODS_NUM = 1 << 5,
+    ADE_GHOSTTY_MODS_SHIFT_RIGHT = 1 << 6,
+    ADE_GHOSTTY_MODS_CTRL_RIGHT = 1 << 7,
+    ADE_GHOSTTY_MODS_ALT_RIGHT = 1 << 8,
+    ADE_GHOSTTY_MODS_SUPER_RIGHT = 1 << 9
+} ade_ghostty_key_mods_t;
+
+typedef struct ade_ghostty_key_event {
+    ade_ghostty_key_action_t action;
+    ade_ghostty_key_mods_t mods;
+    ade_ghostty_key_mods_t consumed_mods;
+    uint32_t keycode;
+    const char *text;
+    uint32_t unshifted_codepoint;
+    bool composing;
+} ade_ghostty_key_event_t;
+
 typedef struct ade_ghostty_init_result {
     ade_ghostty_error_code_t code;
     const char *message;
@@ -91,6 +121,8 @@ bool ade_ghostty_surface_has_exited(ade_ghostty_surface_t surface);
 int32_t ade_ghostty_surface_exit_status(ade_ghostty_surface_t surface);
 void ade_ghostty_tick_app(ade_ghostty_app_context_t app_context);
 void ade_ghostty_draw_surface(ade_ghostty_surface_t surface);
+bool ade_ghostty_send_key(ade_ghostty_surface_t surface, ade_ghostty_key_event_t event);
+void ade_ghostty_send_text(ade_ghostty_surface_t surface, const char *text, uintptr_t byte_count);
 void ade_ghostty_destroy_surface(ade_ghostty_surface_t *surface);
 
 #endif

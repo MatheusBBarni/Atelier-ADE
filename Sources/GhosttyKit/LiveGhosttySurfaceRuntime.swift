@@ -49,6 +49,14 @@ public final class LiveGhosttySurfaceRuntime: GhosttySurfaceRuntime {
             appContextID: rawSurface.appContextID,
             inheritedSurfaceRawID: rawSurface.inheritedSurfaceID
         )
+        renderView.onFocusRequested = { [weak self] in
+            guard let self else { return }
+            self.focus(surface: handle)
+        }
+        renderView.onKeyEvent = { [weak self] event, action in
+            guard let self else { return false }
+            return self.sendKeyEvent(surfaceID: handle.id, event: event, action: action)
+        }
         let nativeView: NSView = rawSurface.usesNativeRenderer
             ? renderView
             : GhosttySurfaceDiagnosticView(configuration: configuration, rawSurface: rawSurface)
@@ -139,6 +147,33 @@ public final class LiveGhosttySurfaceRuntime: GhosttySurfaceRuntime {
             }
         }
     }
+
+    private func sendKeyEvent(
+        surfaceID: UUID,
+        event: NSEvent,
+        action: CGhosttyRuntime.KeyAction
+    ) -> Bool {
+        guard let record = surfaces[surfaceID] else { return false }
+
+        let keyEvent = CGhosttyRuntime.KeyEvent(
+            action: action,
+            modifiers: event.ghosttyModifierMask,
+            consumedModifiers: event.ghosttyConsumedModifierMask,
+            keyCode: UInt32(event.keyCode),
+            text: action == .press || action == .repeatKey ? event.ghosttyInputText : nil,
+            unshiftedCodepoint: event.ghosttyUnshiftedCodepoint,
+            composing: false
+        )
+
+        let handled = cRuntime.sendKey(surface: record.rawSurface, event: keyEvent)
+        if handled || action != .press && action != .repeatKey {
+            return handled
+        }
+
+        guard let text = event.ghosttyInputText else { return handled }
+        cRuntime.sendText(surface: record.rawSurface, text: text)
+        return true
+    }
 }
 
 @MainActor
@@ -153,6 +188,9 @@ private struct SurfaceRecord {
 
 @MainActor
 private final class GhosttySurfaceRenderView: NSView {
+    var onFocusRequested: (() -> Void)?
+    var onKeyEvent: ((NSEvent, CGhosttyRuntime.KeyAction) -> Bool)?
+
     init(configuration: GhosttyLaunchConfiguration) {
         super.init(frame: .zero)
         wantsLayer = true
@@ -170,6 +208,80 @@ private final class GhosttySurfaceRenderView: NSView {
 
     override var acceptsFirstResponder: Bool {
         true
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
+        onFocusRequested?()
+        super.mouseDown(with: event)
+    }
+
+    override func keyDown(with event: NSEvent) {
+        let action: CGhosttyRuntime.KeyAction = event.isARepeat ? .repeatKey : .press
+        if onKeyEvent?(event, action) == true { return }
+        super.keyDown(with: event)
+    }
+
+    override func keyUp(with event: NSEvent) {
+        if onKeyEvent?(event, .release) == true { return }
+        super.keyUp(with: event)
+    }
+}
+
+private extension NSEvent {
+    var ghosttyInputText: String? {
+        guard let characters else { return nil }
+
+        if characters.count == 1,
+           let scalar = characters.unicodeScalars.first {
+            if scalar.value < 0x20 {
+                return self.characters(byApplyingModifiers: modifierFlags.subtracting(.control))
+            }
+
+            if scalar.value >= 0xF700 && scalar.value <= 0xF8FF {
+                return nil
+            }
+        }
+
+        return characters
+    }
+
+    var ghosttyModifierMask: UInt32 {
+        ghosttyModifierMask(for: modifierFlags)
+    }
+
+    var ghosttyConsumedModifierMask: UInt32 {
+        ghosttyModifierMask(for: modifierFlags.subtracting([.control, .command]))
+    }
+
+    var ghosttyUnshiftedCodepoint: UInt32 {
+        guard type == .keyDown || type == .keyUp,
+              let characters = characters(byApplyingModifiers: []),
+              let scalar = characters.unicodeScalars.first
+        else { return 0 }
+
+        return scalar.value
+    }
+
+    private func ghosttyModifierMask(for flags: NSEvent.ModifierFlags) -> UInt32 {
+        var mask: UInt32 = 0
+        if flags.contains(.shift) { mask |= 1 << 0 }
+        if flags.contains(.control) { mask |= 1 << 1 }
+        if flags.contains(.option) { mask |= 1 << 2 }
+        if flags.contains(.command) { mask |= 1 << 3 }
+        if flags.contains(.capsLock) { mask |= 1 << 4 }
+        if flags.contains(.numericPad) { mask |= 1 << 5 }
+
+        let rawFlags = flags.rawValue
+        if rawFlags & UInt(NX_DEVICERSHIFTKEYMASK) != 0 { mask |= 1 << 6 }
+        if rawFlags & UInt(NX_DEVICERCTLKEYMASK) != 0 { mask |= 1 << 7 }
+        if rawFlags & UInt(NX_DEVICERALTKEYMASK) != 0 { mask |= 1 << 8 }
+        if rawFlags & UInt(NX_DEVICERCMDKEYMASK) != 0 { mask |= 1 << 9 }
+        return mask
     }
 }
 

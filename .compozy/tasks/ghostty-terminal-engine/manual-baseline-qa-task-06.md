@@ -79,3 +79,16 @@ Result: Real native Ghostty rendering is now observable, but the full manual bas
 - `swift test` passed 446 tests in 41 suites after the native string-retention change.
 
 Remaining manual baseline items: vim-style TUI, htop-style TUI, tmux-style workflow, shell prompt/input, copy/paste, colors, Unicode, ligatures, alternate screen behavior, long build output, logs, and streaming agent output.
+
+## 2026-06-03 Custom Command and Keyboard Regression Evidence
+
+Result: The reported custom command and keyboard regressions were fixed for the observed native Ghostty surface. The full manual baseline is still not certified.
+
+- `swift test --filter 'GhosttySurfaceRuntimeTests|GhosttyAdapterTests|TerminalLaunchTranslatorTests|TerminalHostControllerTests|TerminalHostIntegrationTests'` passed 50 tests in 5 suites.
+- `./scripts/run.sh bundle` rebuilt and signed `.build/arm64-apple-macosx/debug/Atelier.app` successfully.
+- `open -n .build/arm64-apple-macosx/debug/Atelier.app --args -ApplePersistenceIgnoreState YES` launched a visible `Atelier` window.
+- `.tmp/atelier-ghostty-before-keyboard-test.png` captured the restored custom-command `Pi` tab running inside the native Ghostty surface instead of showing the previous `Ghostty failed to launch the requested command` screen.
+- The native Ghostty command now uses the translated shell launch path, for example zsh with `-il` or `-ilc`, so custom zsh aliases/functions such as `coo` can resolve through the same login shell environment as the old terminal path.
+- `.tmp/atelier-ghostty-after-keyboard-test.png` captured `kbtest` typed into the native Ghostty terminal prompt via macOS `System Events`, verifying that AppKit key events are forwarded into `ghostty_surface_key`.
+
+Remaining manual baseline items: vim-style TUI, htop-style TUI, tmux-style workflow, copy/paste, colors, Unicode, ligatures, alternate screen behavior, long build output, logs, and streaming agent output.

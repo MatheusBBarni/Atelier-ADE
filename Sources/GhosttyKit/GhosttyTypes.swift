@@ -5,6 +5,7 @@ public struct GhosttyLaunchConfiguration: Equatable, Sendable {
     public var workingDirectory: String
     public var command: String?
     public var arguments: [String]
+    public var nativeCommand: String?
     public var environment: [String: String]
     public var inheritedSurfaceID: UUID?
     public var appearance: TerminalAppearance
@@ -13,6 +14,7 @@ public struct GhosttyLaunchConfiguration: Equatable, Sendable {
         workingDirectory: String,
         command: String? = nil,
         arguments: [String] = [],
+        nativeCommand: String? = nil,
         environment: [String: String] = [:],
         inheritedSurfaceID: UUID? = nil,
         appearance: TerminalAppearance = .cursorDefault
@@ -20,6 +22,7 @@ public struct GhosttyLaunchConfiguration: Equatable, Sendable {
         self.workingDirectory = workingDirectory
         self.command = command
         self.arguments = arguments
+        self.nativeCommand = nativeCommand
         self.environment = environment
         self.inheritedSurfaceID = inheritedSurfaceID
         self.appearance = appearance
@@ -30,6 +33,7 @@ public struct GhosttyLaunchConfiguration: Equatable, Sendable {
         workingDirectory: String,
         command: String? = nil,
         arguments: [String] = [],
+        nativeCommand: String? = nil,
         environment: [String: String] = [:],
         appearance: TerminalAppearance = .cursorDefault
     ) -> GhosttyLaunchConfiguration {
@@ -37,6 +41,7 @@ public struct GhosttyLaunchConfiguration: Equatable, Sendable {
             workingDirectory: workingDirectory,
             command: command,
             arguments: arguments,
+            nativeCommand: nativeCommand,
             environment: environment,
             inheritedSurfaceID: parent.id,
             appearance: appearance

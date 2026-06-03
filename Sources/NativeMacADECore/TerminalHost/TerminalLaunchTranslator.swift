@@ -14,6 +14,12 @@ public struct TerminalLaunchTranslation: Equatable, Sendable {
     public var commandLine: String?
     public var commandDescription: String
 
+    public var nativeGhosttyCommand: String {
+        ([shellExecutable] + shellArguments)
+            .map(TerminalLaunchCommandBuilder.shellEscape)
+            .joined(separator: " ")
+    }
+
     public var processEnvironmentEntries: [String] {
         processEnvironment
             .sorted { $0.key < $1.key }
@@ -25,6 +31,7 @@ public struct TerminalLaunchTranslation: Equatable, Sendable {
             workingDirectory: workingDirectory,
             command: command,
             arguments: arguments,
+            nativeCommand: nativeGhosttyCommand,
             environment: processEnvironment,
             appearance: appearance
         )

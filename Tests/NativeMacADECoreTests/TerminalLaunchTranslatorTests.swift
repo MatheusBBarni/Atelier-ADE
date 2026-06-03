@@ -36,6 +36,7 @@ struct TerminalLaunchTranslatorTests {
         #expect(configuration.workingDirectory == tab.workingDirectory)
         #expect(configuration.command == nil)
         #expect(configuration.arguments == [])
+        #expect(configuration.nativeCommand == "'/bin/zsh' '-il'")
         #expect(configuration.environment["SHELL"] == "/bin/zsh")
     }
 
@@ -77,6 +78,9 @@ struct TerminalLaunchTranslatorTests {
         let configuration = translation.ghosttyLaunchConfiguration()
         #expect(configuration.command == "codex")
         #expect(configuration.arguments == translation.arguments)
+        #expect(configuration.nativeCommand?.hasPrefix("'/bin/zsh' '-ilc' ") == true)
+        #expect(configuration.nativeCommand?.contains("codex '\"'\"'resume'\"'\"'") == true)
+        #expect(configuration.nativeCommand?.contains("CODEX_TUI_DISABLE_KEYBOARD_ENHANCEMENT='\"'\"'1'\"'\"'") == true)
         #expect(configuration.environment["CODEX_TUI_DISABLE_KEYBOARD_ENHANCEMENT"] == "1")
     }
 

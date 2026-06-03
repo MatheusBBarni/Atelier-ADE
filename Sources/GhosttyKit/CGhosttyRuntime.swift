@@ -15,6 +15,33 @@ struct CGhosttyRuntime: Sendable {
         fileprivate var rawValue: ade_ghostty_surface_t
     }
 
+    enum KeyAction: Sendable {
+        case release
+        case press
+        case repeatKey
+
+        var cValue: ade_ghostty_key_action_t {
+            switch self {
+            case .release:
+                ADE_GHOSTTY_KEY_RELEASE
+            case .press:
+                ADE_GHOSTTY_KEY_PRESS
+            case .repeatKey:
+                ADE_GHOSTTY_KEY_REPEAT
+            }
+        }
+    }
+
+    struct KeyEvent: Sendable {
+        var action: KeyAction
+        var modifiers: UInt32
+        var consumedModifiers: UInt32
+        var keyCode: UInt32
+        var text: String?
+        var unshiftedCodepoint: UInt32
+        var composing: Bool
+    }
+
     static let pinnedRevision = String(cString: ade_ghostty_pinned_revision())
     static var initializeCallCount: UInt64 { ade_ghostty_initialize_call_count() }
 
@@ -130,6 +157,33 @@ struct CGhosttyRuntime: Sendable {
         ade_ghostty_draw_surface(surface.rawValue)
     }
 
+    func sendKey(surface: Surface, event: KeyEvent) -> Bool {
+        var cEvent = ade_ghostty_key_event_t()
+        cEvent.action = event.action.cValue
+        cEvent.mods = ade_ghostty_key_mods_t(event.modifiers)
+        cEvent.consumed_mods = ade_ghostty_key_mods_t(event.consumedModifiers)
+        cEvent.keycode = event.keyCode
+        cEvent.unshifted_codepoint = event.unshiftedCodepoint
+        cEvent.composing = event.composing
+
+        if let text = event.text {
+            return text.withCString { textPointer in
+                cEvent.text = textPointer
+                return ade_ghostty_send_key(surface.rawValue, cEvent)
+            }
+        }
+
+        cEvent.text = nil
+        return ade_ghostty_send_key(surface.rawValue, cEvent)
+    }
+
+    func sendText(surface: Surface, text: String) {
+        guard !text.isEmpty else { return }
+        text.withCString { textPointer in
+            ade_ghostty_send_text(surface.rawValue, textPointer, UInt(text.utf8.count))
+        }
+    }
+
     private func mapError(code: ade_ghostty_error_code_t, message: UnsafePointer<CChar>?) -> GhosttyAdapterError {
         let message = message.map(String.init(cString:)) ?? "Unknown Ghostty failure"
         switch code {
@@ -163,6 +217,10 @@ private func nativeSurfaceMetrics(for view: NSView) -> NativeSurfaceMetrics {
 }
 
 private func ghosttyCommandLine(configuration: GhosttyLaunchConfiguration) -> String? {
+    if let nativeCommand = configuration.nativeCommand, !nativeCommand.isEmpty {
+        return nativeCommand
+    }
+
     guard let command = configuration.command, !command.isEmpty else { return nil }
     return ([command] + configuration.arguments)
         .map(shellQuoted)
