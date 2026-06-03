@@ -70,6 +70,52 @@ struct DefaultWorkspaceCommandServiceTests {
     }
 
     @Test
+    func creatingSessionRecordsGhosttySurfaceAndPersistsOnlyAfterCreation() async throws {
+        let harness = makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+        let project = try await harness.service.openProject(path: projectPath)
+
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let firstTab = try #require(harness.store.tabs.first)
+        let surface = try #require(harness.terminal.surface(for: firstTab.id))
+
+        #expect(harness.terminal.createdTabs == [firstTab])
+        #expect(surface == harness.terminal.surfacesByTabID[firstTab.id])
+        #expect(try await harness.persistence.loadSessions() == [session])
+        #expect(try await harness.persistence.loadTabs() == [firstTab])
+        #expect(harness.store.sessions == [session])
+        #expect(harness.store.tabs == [firstTab])
+        #expect(harness.service.metrics.terminalSurfaceCreationCount == 1)
+    }
+
+    @Test
+    func creatingSessionSurfaceFailureDoesNotPersistSessionOrFirstTabAndRecordsTelemetry() async throws {
+        let harness = makeHarness()
+        let project = try await harness.service.openProject(path: makeTemporaryProjectDirectory())
+        let persistedSessionsBefore = try await harness.persistence.loadSessions()
+        let persistedTabsBefore = try await harness.persistence.loadTabs()
+        harness.terminal.surfaceCreationError = GhosttyAdapterError.surfaceCreationFailed("first tab failed")
+
+        await #expect(throws: WorkspaceCommandError.terminalUnavailable("first tab failed")) {
+            _ = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        }
+
+        let attemptedTab = try #require(harness.terminal.createdTabs.first)
+        #expect(harness.store.sessions.isEmpty)
+        #expect(harness.store.tabs.isEmpty)
+        #expect(try await harness.persistence.loadSessions() == persistedSessionsBefore)
+        #expect(try await harness.persistence.loadTabs() == persistedTabsBefore)
+        #expect(harness.terminal.surface(for: attemptedTab.id) == nil)
+        #expect(harness.service.metrics.terminalSurfaceFailureCount == 1)
+        #expect(harness.service.logger.events.contains { event in
+            event.name == "terminal_surface_failed" &&
+                event.fields["tab_id"] == attemptedTab.id.uuidString &&
+                event.fields["session_id"] == attemptedTab.sessionID.uuidString &&
+                event.fields["reason"]?.contains("first tab failed") == true
+        })
+    }
+
+    @Test
     func creatingSessionWithShortcutStoresShortcutAndLaunchesFirstTab() async throws {
         let harness = makeHarness()
         let projectPath = try makeTemporaryProjectDirectory()
@@ -220,12 +266,89 @@ struct DefaultWorkspaceCommandServiceTests {
 
         #expect(AppPreferences.defaults.themeID == AppTheme.systemSelectionID)
         #expect(AppPreferences.defaults.focusWorkspaceEnabled == false)
+        #expect(AppPreferences.defaults.focusWorkspaceContinuityEnabled == false)
         #expect(AppPreferences.defaultThemeID == AppTheme.systemSelectionID)
         #expect(AppPreferences.isSupportedThemeSelectionID(AppTheme.systemSelectionID))
         #expect(loadedPreferences.themeID == AppTheme.systemSelectionID)
         #expect(loadedPreferences.focusWorkspaceEnabled == false)
+        #expect(loadedPreferences.focusWorkspaceContinuityEnabled == false)
         #expect(harness.store.appPreferences.themeID == AppTheme.systemSelectionID)
         #expect(harness.store.appPreferences.focusWorkspaceEnabled == false)
+        #expect(harness.store.appPreferences.focusWorkspaceContinuityEnabled == false)
+    }
+
+    @Test
+    func savingPreferencesWithFocusWorkspaceOffNormalizesContinuityOff() async throws {
+        let now = Date(timeIntervalSince1970: 1_717_393_700)
+        let harness = makeHarness(now: { now })
+
+        try await harness.service.saveAppPreferences(AppPreferences(
+            themeID: AppTheme.systemSelectionID,
+            focusWorkspaceEnabled: false,
+            focusWorkspaceContinuityEnabled: true
+        ))
+
+        let persistedPreferences = try await harness.persistence.loadAppPreferences()
+        #expect(persistedPreferences.focusWorkspaceEnabled == false)
+        #expect(persistedPreferences.focusWorkspaceContinuityEnabled == false)
+        #expect(persistedPreferences.updatedAt == now)
+        #expect(harness.store.appPreferences == persistedPreferences)
+    }
+
+    @Test
+    func loadingPreferencesWithFocusWorkspaceOffRepairsContinuityOff() async throws {
+        let now = Date(timeIntervalSince1970: 1_717_393_701)
+        let harness = makeHarness(now: { now })
+        try await harness.persistence.save(appPreferences: AppPreferences(
+            themeID: "catppuccin",
+            focusWorkspaceEnabled: false,
+            focusWorkspaceContinuityEnabled: true,
+            updatedAt: Date(timeIntervalSince1970: 200)
+        ))
+
+        let loadedPreferences = try await harness.service.loadAppPreferences()
+        let persistedPreferences = try await harness.persistence.loadAppPreferences()
+
+        #expect(loadedPreferences.focusWorkspaceEnabled == false)
+        #expect(loadedPreferences.focusWorkspaceContinuityEnabled == false)
+        #expect(loadedPreferences.themeID == "catppuccin")
+        #expect(loadedPreferences.updatedAt == now)
+        #expect(persistedPreferences == loadedPreferences)
+        #expect(harness.store.appPreferences == loadedPreferences)
+    }
+
+    @Test
+    func savingPreferencesWithFocusWorkspaceContinuityOptedInPreservesChildFlag() async throws {
+        let harness = makeHarness()
+
+        try await harness.service.saveAppPreferences(AppPreferences(
+            focusWorkspaceEnabled: true,
+            focusWorkspaceContinuityEnabled: true
+        ))
+
+        let persistedPreferences = try await harness.persistence.loadAppPreferences()
+        #expect(persistedPreferences.focusWorkspaceEnabled)
+        #expect(persistedPreferences.focusWorkspaceContinuityEnabled)
+        #expect(harness.store.appPreferences.focusWorkspaceEnabled)
+        #expect(harness.store.appPreferences.focusWorkspaceContinuityEnabled)
+    }
+
+    @Test
+    func loadingContinuityChildOnlyRepairDoesNotRecordParentFocusTransition() async throws {
+        let harness = makeHarness()
+        try await harness.persistence.save(appPreferences: AppPreferences(
+            focusWorkspaceEnabled: false,
+            focusWorkspaceContinuityEnabled: true
+        ))
+
+        let loadedPreferences = try await harness.service.loadAppPreferences()
+
+        #expect(loadedPreferences.focusWorkspaceEnabled == false)
+        #expect(loadedPreferences.focusWorkspaceContinuityEnabled == false)
+        #expect(harness.service.metrics.focusWorkspaceEnableCount == 0)
+        #expect(harness.service.metrics.focusWorkspaceDisableCount == 0)
+        #expect(harness.service.logger.events.contains { $0.name == "focus_workspace_enabled" } == false)
+        #expect(harness.service.logger.events.contains { $0.name == "focus_workspace_disabled" } == false)
     }
 
     @Test
@@ -443,6 +566,28 @@ struct DefaultWorkspaceCommandServiceTests {
     }
 
     @Test
+    func savingPreferencesRejectsOutOfRangeTerminalFontSizeAndLeavesPersistenceUnchanged() async throws {
+        let harness = makeHarness()
+        let originalPreferences = AppPreferences(themeID: "cursor", terminalFontSize: 16)
+        try await harness.persistence.save(appPreferences: originalPreferences)
+
+        await #expect(throws: WorkspaceCommandError.settingsValidationFailed(.terminalFontSizeOutOfBounds(
+            value: 30,
+            minimum: AppPreferences.minimumTerminalFontSize,
+            maximum: AppPreferences.maximumTerminalFontSize
+        ))) {
+            try await harness.service.saveAppPreferences(AppPreferences(themeID: "cursor", terminalFontSize: 30))
+        }
+
+        #expect(try await harness.persistence.loadAppPreferences() == originalPreferences)
+        #expect(harness.service.logger.events.contains { event in
+            event.name == "settings_save_failed" &&
+                event.fields["field"] == "terminal_font_size" &&
+                event.fields["reason"]?.contains("terminal_font_size_out_of_range:30.0") == true
+        })
+    }
+
+    @Test
     func savingAndReloadingPreferencesPreservesFocusWorkspaceAndUnrelatedFields() async throws {
         let now = Date(timeIntervalSince1970: 1_717_394_000)
         let harness = makeHarness(now: { now })
@@ -478,6 +623,168 @@ struct DefaultWorkspaceCommandServiceTests {
         #expect(loadedPreferences.keybindings == [.openSettings: override])
         #expect(loadedPreferences.updatedAt == now)
         #expect(harness.store.appPreferences == loadedPreferences)
+    }
+
+    @Test
+    func loadAppPreferencesAppliesPresentPortableConfigBeforeReturningRuntimePreferences() async throws {
+        let now = Date(timeIntervalSince1970: 1_717_394_100)
+        let harness = makeHarness(now: { now })
+        let codex = try #require(SessionShortcut.builtInDefaults.first { $0.label == "Codex" })
+        try await harness.persistence.save(appPreferences: AppPreferences(
+            themeID: "cursor",
+            terminalFontSize: 13,
+            focusWorkspaceEnabled: false
+        ))
+        try harness.portableSettingsFileStore.save(PortableSettingsConfig(
+            appearance: PortableAppearanceConfig(themeID: "dracula", terminalFontSize: 18),
+            behavior: PortableBehaviorConfig(focusWorkspaceEnabled: true),
+            defaultProfile: .codex,
+            keybindings: [
+                PortableKeybindingOverride(
+                    commandID: AppCommandID.openSettings.rawValue,
+                    keyEquivalent: "m",
+                    modifiers: [.command, .option]
+                )
+            ],
+            keybindingsSectionPresent: true
+        ))
+
+        let loadedPreferences = try await harness.service.loadAppPreferences()
+        let persistedPreferences = try await harness.persistence.loadAppPreferences()
+
+        #expect(loadedPreferences.themeID == "dracula")
+        #expect(loadedPreferences.terminalFontSize == 18)
+        #expect(loadedPreferences.focusWorkspaceEnabled)
+        #expect(loadedPreferences.defaultSessionShortcutID == codex.id)
+        #expect(loadedPreferences.keybindings[.openSettings]?.keyEquivalent == "m")
+        #expect(loadedPreferences.updatedAt == now)
+        #expect(persistedPreferences == loadedPreferences)
+        #expect(harness.store.appPreferences == loadedPreferences)
+        #expect(harness.service.metrics.portableSettingsSectionRejectedCount == 0)
+        #expect(harness.service.logger.events.contains { event in
+            event.name == "portable_settings_loaded" &&
+                event.fields["file_present"] == "true" &&
+                event.fields["applied_section_count"] == "4" &&
+                event.fields["source"] == "startup"
+        })
+    }
+
+    @Test
+    func missingPortableConfigSeedsOnceFromNonDefaultSQLitePreferences() async throws {
+        let harness = makeHarness()
+        let override = KeybindingOverride(
+            commandID: .searchSessions,
+            keyEquivalent: "k",
+            modifiers: [.command, .option]
+        )
+        try await harness.persistence.save(appPreferences: AppPreferences(
+            themeID: "catppuccin",
+            terminalFontSize: 17,
+            focusWorkspaceEnabled: true,
+            keybindings: [.searchSessions: override]
+        ))
+
+        let firstLoad = try await harness.service.loadAppPreferences()
+        let seededConfig = try loadedPortableConfig(from: harness.portableSettingsFileStore)
+        let secondLoad = try await harness.service.loadAppPreferences()
+
+        #expect(firstLoad.themeID == "catppuccin")
+        #expect(firstLoad.terminalFontSize == 17)
+        #expect(firstLoad.focusWorkspaceEnabled)
+        #expect(seededConfig.appearance?.themeID == "catppuccin")
+        #expect(seededConfig.appearance?.terminalFontSize == 17)
+        #expect(seededConfig.behavior?.focusWorkspaceEnabled == true)
+        #expect(seededConfig.keybindings.map(\.commandID) == [AppCommandID.searchSessions.rawValue])
+        #expect(secondLoad.themeID == firstLoad.themeID)
+        #expect(harness.service.metrics.portableSettingsSeededCount == 1)
+        #expect(harness.service.logger.events.filter { $0.name == "portable_settings_seeded" }.count == 1)
+    }
+
+    @Test
+    func missingPortableConfigLeavesFileAbsentForPristineDefaults() async throws {
+        let harness = makeHarness()
+
+        let loadedPreferences = try await harness.service.loadAppPreferences()
+
+        #expect(loadedPreferences == .defaults)
+        #expect(FileManager.default.fileExists(atPath: harness.portableSettingsFileStore.canonicalURL.path) == false)
+        #expect(harness.service.metrics.portableSettingsSeededCount == 0)
+        #expect(harness.service.logger.events.contains { event in
+            event.name == "portable_settings_loaded" &&
+                event.fields["file_present"] == "false" &&
+                event.fields["seeded_from_sqlite"] == "false"
+        })
+    }
+
+    @Test
+    func saveAppPreferencesExportsPortableSubsetAndSurfacesWriteFailure() async throws {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("native-mac-ade-blocked-portable-settings-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let blockedParent = root.appendingPathComponent("blocked-parent")
+        try Data([0x00]).write(to: blockedParent)
+        let blockedStore = PortableSettingsFileStore(
+            canonicalURL: blockedParent.appendingPathComponent("settings.json")
+        )
+        let harness = makeHarness(portableSettingsFileStore: blockedStore)
+
+        do {
+            try await harness.service.saveAppPreferences(AppPreferences(themeID: "dracula"))
+            Issue.record("Expected portable settings export failure")
+        } catch let error as PortableSettingsFileStoreError {
+            guard case .writeFailed = error else {
+                Issue.record("Unexpected portable settings error: \(error)")
+                return
+            }
+        }
+
+        #expect(try await harness.persistence.loadAppPreferences() == .defaults)
+        #expect(harness.store.appPreferences == .defaults)
+        #expect(harness.service.metrics.portableSettingsExportFailureCount == 1)
+        #expect(harness.service.metrics.settingsSaveFailureCount == 1)
+        #expect(harness.service.logger.events.contains { $0.name == "portable_settings_export_failed" })
+    }
+
+    @Test
+    func manualPortableReloadUsesSharedApplyPathAndReportsRejectedSections() async throws {
+        let now = Date(timeIntervalSince1970: 1_717_394_110)
+        let harness = makeHarness(now: { now })
+        let existingOverride = KeybindingOverride(
+            commandID: .openSettings,
+            keyEquivalent: ",",
+            modifiers: [.command, .shift]
+        )
+        try await harness.persistence.save(appPreferences: AppPreferences(
+            themeID: "cursor",
+            keybindings: [.openSettings: existingOverride]
+        ))
+        try harness.portableSettingsFileStore.save(PortableSettingsConfig(
+            appearance: PortableAppearanceConfig(themeID: "dracula", terminalFontSize: 18),
+            keybindings: [
+                PortableKeybindingOverride(commandID: AppCommandID.nextTab.rawValue, keyEquivalent: "[")
+            ],
+            keybindingsSectionPresent: true
+        ))
+
+        let result = try await harness.service.reloadPortableSettingsConfig()
+        let persistedPreferences = try await harness.persistence.loadAppPreferences()
+
+        #expect(result.appliedSections == [.appearance])
+        #expect(result.rejectedSections["keybindings"]?.contains("duplicate_managed_keybinding:nextTab:previousTab") == true)
+        #expect(persistedPreferences.themeID == "dracula")
+        #expect(persistedPreferences.terminalFontSize == 18)
+        #expect(persistedPreferences.keybindings == [.openSettings: existingOverride])
+        #expect(persistedPreferences.updatedAt == now)
+        #expect(harness.service.metrics.portableSettingsReloadCount == 1)
+        #expect(harness.service.metrics.portableSettingsPartialApplyCount == 1)
+        #expect(harness.service.metrics.portableSettingsSectionRejectedCount == 1)
+        #expect(harness.service.logger.events.contains { $0.name == "portable_settings_reloaded" })
+        #expect(harness.service.logger.events.contains { event in
+            event.name == "portable_settings_section_rejected" &&
+                event.fields["section"] == "keybindings" &&
+                event.fields["source"] == "manual_reload"
+        })
     }
 
     @Test
@@ -1017,6 +1324,33 @@ struct DefaultWorkspaceCommandServiceTests {
     }
 
     @Test
+    func creatingTerminalTabFailureRecordsSurfaceTelemetryAndLeavesMetadataUnchanged() async throws {
+        let harness = makeHarness()
+        let project = try await harness.service.openProject(path: makeTemporaryProjectDirectory())
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let tabsBefore = harness.store.tabs
+        let persistedTabsBefore = try await harness.persistence.loadTabs()
+        harness.terminal.surfaceCreationError = GhosttyAdapterError.surfaceCreationFailed("tab surface failed")
+
+        await #expect(throws: WorkspaceCommandError.terminalUnavailable("tab surface failed")) {
+            _ = try await harness.service.createTab(sessionID: session.id)
+        }
+
+        let attemptedTab = try #require(harness.terminal.createdTabs.last)
+        #expect(attemptedTab.sessionID == session.id)
+        #expect(harness.store.tabs == tabsBefore)
+        #expect(try await harness.persistence.loadTabs() == persistedTabsBefore)
+        #expect(harness.terminal.surface(for: attemptedTab.id) == nil)
+        #expect(harness.service.metrics.terminalSurfaceFailureCount == 1)
+        #expect(harness.service.logger.events.contains { event in
+            event.name == "terminal_surface_failed" &&
+                event.fields["tab_id"] == attemptedTab.id.uuidString &&
+                event.fields["session_id"] == session.id.uuidString &&
+                event.fields["reason"]?.contains("tab surface failed") == true
+        })
+    }
+
+    @Test
     func shortcutLaunchMappingProducesExpectedGhosttyLaunchConfiguration() throws {
         let shortcut = SessionShortcut(
             label: "Claude",
@@ -1037,6 +1371,7 @@ struct DefaultWorkspaceCommandServiceTests {
         #expect(configuration.workingDirectory == "/Users/example/project")
         #expect(configuration.command == "claude")
         #expect(configuration.arguments == ["--dangerously-skip-permissions"])
+        #expect(configuration.environment["CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN"] == "1")
         #expect(configuration.appearance == AppTheme.defaultTheme.terminalAppearance)
     }
 
@@ -1733,6 +2068,97 @@ struct DefaultWorkspaceCommandServiceTests {
         #expect(result.store.tabsForSelectedSession.map(\.kind) == [.terminal, .file])
         #expect(terminal.createdTabs.map(\.id) == [terminalTabID])
         #expect(service.metrics.terminalSurfaceCreationCount == 1)
+        #expect(try await persistence.loadTabs() == [terminalTab, fileTab])
+    }
+
+    @Test
+    func restoreWorkspaceLeavesRestoredSelectionUnchangedWhenContinuityDisabled() async throws {
+        let harness = makeHarness()
+        let fixture = try await seedContinuityRestoreGraph(
+            in: harness.persistence,
+            appPreferences: AppPreferences(
+                focusWorkspaceEnabled: true,
+                focusWorkspaceContinuityEnabled: false
+            )
+        )
+        _ = try await harness.service.loadAppPreferences()
+
+        let result = try await harness.service.restoreWorkspace()
+
+        #expect(harness.store.selectedTabID == fixture.selectedFileTab.id)
+        #expect(result.store.selectedTabID == fixture.selectedFileTab.id)
+        #expect(harness.service.metrics.focusWorkspaceContinuityRestoreDisabledCount == 1)
+        #expect(harness.service.metrics.focusWorkspaceContinuityRestoreAppliedCount == 0)
+        #expect(try await harness.persistence.loadRestoreSnapshot()?.selectedTabID == fixture.selectedFileTab.id)
+        let event = try #require(harness.service.logger.events.first { $0.name == "restore_continuity_resolved" })
+        #expect(event.fields["continuity_resolution"] == "disabled")
+        #expect(event.fields["raw_selected_tab_kind"] == "file")
+        #expect(event.fields["resolved_restore_tab_kind"] == "file")
+        #expect(event.fields["session_terminal_count"] == "2")
+    }
+
+    @Test
+    func restoreWorkspaceAppliesContinuitySelectorBeforeLiveStoreRestore() async throws {
+        let harness = makeHarness()
+        let fixture = try await seedContinuityRestoreGraph(
+            in: harness.persistence,
+            appPreferences: AppPreferences(
+                focusWorkspaceEnabled: true,
+                focusWorkspaceContinuityEnabled: true
+            )
+        )
+        let newestTerminalTab = try #require(fixture.newestTerminalTab)
+        _ = try await harness.service.loadAppPreferences()
+
+        let result = try await harness.service.restoreWorkspace()
+        let olderTerminalTab = try #require(fixture.olderTerminalTab)
+
+        #expect(harness.store.selectedProjectID == fixture.project.id)
+        #expect(harness.store.selectedSessionID == fixture.selectedSession.id)
+        #expect(harness.store.selectedTabID == newestTerminalTab.id)
+        #expect(result.store.selectedTabID == newestTerminalTab.id)
+        #expect(harness.terminal.createdTabs.map(\.id) == [
+            olderTerminalTab.id,
+            newestTerminalTab.id
+        ])
+        #expect(harness.service.metrics.focusWorkspaceContinuityRestoreAppliedCount == 1)
+        #expect(harness.service.metrics.focusWorkspaceContinuityRestoreDisabledCount == 0)
+        #expect(try await harness.persistence.loadRestoreSnapshot()?.selectedTabID == fixture.selectedFileTab.id)
+        let event = try #require(harness.service.logger.events.first { $0.name == "restore_continuity_resolved" })
+        #expect(event.fields["continuity_resolution"] == "applied")
+        #expect(event.fields["raw_selected_tab_kind"] == "file")
+        #expect(event.fields["resolved_restore_tab_kind"] == "terminal")
+        #expect(event.fields["session_terminal_count"] == "2")
+    }
+
+    @Test
+    func restoreWorkspaceFallsBackWhenSelectedSessionHasNoTerminalCandidate() async throws {
+        let harness = makeHarness()
+        let fixture = try await seedContinuityRestoreGraph(
+            in: harness.persistence,
+            includeSelectedSessionTerminals: false,
+            includeOtherSessionTerminal: true,
+            appPreferences: AppPreferences(
+                focusWorkspaceEnabled: true,
+                focusWorkspaceContinuityEnabled: true
+            )
+        )
+        let otherTerminalTab = try #require(fixture.otherTerminalTab)
+        _ = try await harness.service.loadAppPreferences()
+
+        let result = try await harness.service.restoreWorkspace()
+
+        #expect(harness.store.selectedSessionID == fixture.selectedSession.id)
+        #expect(harness.store.selectedTabID == fixture.selectedFileTab.id)
+        #expect(result.store.selectedTabID == fixture.selectedFileTab.id)
+        #expect(harness.terminal.createdTabs.map(\.id) == [otherTerminalTab.id])
+        #expect(harness.service.metrics.focusWorkspaceContinuityRestoreNoTerminalCandidateCount == 1)
+        #expect(harness.service.metrics.focusWorkspaceContinuityRestoreAppliedCount == 0)
+        let event = try #require(harness.service.logger.events.first { $0.name == "restore_continuity_resolved" })
+        #expect(event.fields["continuity_resolution"] == "no_terminal_candidate")
+        #expect(event.fields["raw_selected_tab_kind"] == "file")
+        #expect(event.fields["resolved_restore_tab_kind"] == "file")
+        #expect(event.fields["session_terminal_count"] == "0")
     }
 
     @Test
@@ -1742,15 +2168,36 @@ struct DefaultWorkspaceCommandServiceTests {
         let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
         let tabsBefore = harness.store.tabs
         let tab = try await harness.service.createTab(sessionID: session.id)
+        let surface = try #require(harness.terminal.surface(for: tab.id))
         harness.terminal.canCloseResult = false
 
         await #expect(throws: WorkspaceCommandError.closeRejected(tab.id)) {
             try await harness.service.closeTab(tabID: tab.id, force: false)
         }
 
+        #expect(harness.terminal.canCloseRequests == [surface])
+        #expect(harness.service.metrics.closeConfirmationRejectCount == 1)
+        #expect(harness.terminal.releasedTabIDs.isEmpty)
         #expect(harness.store.tabs == tabsBefore + [tab])
         #expect(harness.store.selectedTabID == tab.id)
         #expect(try await harness.persistence.loadTabs() == tabsBefore + [tab])
+    }
+
+    @Test
+    func forceClosingTerminalTabBypassesGhosttyCanCloseAndReleasesSurface() async throws {
+        let harness = makeHarness()
+        let project = try await harness.service.openProject(path: makeTemporaryProjectDirectory())
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let tab = try #require(harness.store.tabs.first { $0.sessionID == session.id })
+        harness.terminal.canCloseResult = false
+
+        try await harness.service.closeTab(tabID: tab.id, force: true)
+
+        #expect(harness.terminal.canCloseRequests.isEmpty)
+        #expect(harness.terminal.releasedTabIDs == [tab.id])
+        #expect(harness.terminal.surface(for: tab.id) == nil)
+        #expect(harness.store.tabs.isEmpty)
+        #expect(try await harness.persistence.loadTabs().isEmpty)
     }
 
     @Test
@@ -1766,6 +2213,8 @@ struct DefaultWorkspaceCommandServiceTests {
         try await harness.service.closeTab(tabID: closedTab.id, force: true)
 
         #expect(harness.terminalExitEvents.snapshot(tabID: closedTab.id) == nil)
+        #expect(harness.terminal.releasedTabIDs == [closedTab.id])
+        #expect(harness.terminal.surface(for: closedTab.id) == nil)
         let retainedSnapshot = try #require(harness.terminalExitEvents.snapshot(tabID: retainedTab.id))
         #expect(retainedSnapshot == TerminalExitObservation(tabID: retainedTab.id, exitStatus: 0))
     }
@@ -2409,7 +2858,10 @@ struct DefaultWorkspaceCommandServiceTests {
         #expect(store.tabs == [tab])
     }
 
-    private func makeHarness(now: @escaping @MainActor () -> Date = Date.init) -> CommandServiceHarness<InMemoryWorkspacePersistenceStore> {
+    private func makeHarness(
+        portableSettingsFileStore: PortableSettingsFileStore? = nil,
+        now: @escaping @MainActor () -> Date = Date.init
+    ) -> CommandServiceHarness<InMemoryWorkspacePersistenceStore> {
         let store = WorkspaceStore()
         let persistence = InMemoryWorkspacePersistenceStore()
         let terminal = FakeTerminalSurfaceManager()
@@ -2418,9 +2870,11 @@ struct DefaultWorkspaceCommandServiceTests {
         let fileAccess = LocalWorkspaceFileAccess()
         let fileBuffers = WorkspaceFileBufferController(fileAccess: fileAccess, now: now)
         let externalEditor = FakeExternalEditorOpener()
+        let portableSettingsFileStore = portableSettingsFileStore ?? temporaryPortableSettingsFileStore()
         let service = DefaultWorkspaceCommandService(
             store: store,
             persistenceStore: persistence,
+            portableSettingsFileStore: portableSettingsFileStore,
             restoreCoordinator: coordinator,
             terminalSurfaceManager: terminal,
             terminalExitEvents: terminalExitEvents,
@@ -2437,8 +2891,123 @@ struct DefaultWorkspaceCommandServiceTests {
             terminalExitEvents: terminalExitEvents,
             fileBuffers: fileBuffers,
             externalEditor: externalEditor,
+            portableSettingsFileStore: portableSettingsFileStore,
             service: service
         )
+    }
+
+    private func seedContinuityRestoreGraph(
+        in persistence: InMemoryWorkspacePersistenceStore,
+        includeSelectedSessionTerminals: Bool = true,
+        includeOtherSessionTerminal: Bool = false,
+        appPreferences: AppPreferences
+    ) async throws -> ContinuityRestoreGraph {
+        let projectPath = try makeTemporaryProjectDirectory()
+        let fileURL = try makeTemporaryProjectFile(in: projectPath, relativePath: "Sources/App.swift")
+        let project = WorkspaceProject(path: projectPath, displayName: "continuity")
+        let selectedSession = WorkspaceSession(
+            projectID: project.id,
+            title: "Selected",
+            createdAt: Date(timeIntervalSince1970: 100),
+            lastActivatedAt: Date(timeIntervalSince1970: 200)
+        )
+        let selectedFileTab = WorkspaceTab(
+            sessionID: selectedSession.id,
+            kind: .file,
+            workingDirectory: projectPath,
+            fileReference: WorkspaceFileReference(path: fileURL.path, projectRoot: projectPath),
+            ordinal: includeSelectedSessionTerminals ? 1 : 0,
+            createdAt: Date(timeIntervalSince1970: 300),
+            lastActivatedAt: Date(timeIntervalSince1970: 1_000)
+        )
+        let olderTerminalTab: WorkspaceTab? = includeSelectedSessionTerminals
+            ? WorkspaceTab(
+                sessionID: selectedSession.id,
+                workingDirectory: projectPath,
+                launchCommand: "codex",
+                launchArgumentsJSON: "[\"exec\"]",
+                ordinal: 0,
+                createdAt: Date(timeIntervalSince1970: 250),
+                lastActivatedAt: Date(timeIntervalSince1970: 400)
+            )
+            : nil
+        let newestTerminalTab: WorkspaceTab? = includeSelectedSessionTerminals
+            ? WorkspaceTab(
+                sessionID: selectedSession.id,
+                workingDirectory: projectPath,
+                launchCommand: "herdr",
+                launchArgumentsJSON: "[\"--restore\"]",
+                ordinal: 2,
+                createdAt: Date(timeIntervalSince1970: 350),
+                lastActivatedAt: Date(timeIntervalSince1970: 700)
+            )
+            : nil
+        let otherSession: WorkspaceSession? = includeOtherSessionTerminal
+            ? WorkspaceSession(
+                projectID: project.id,
+                title: "Other",
+                createdAt: Date(timeIntervalSince1970: 110),
+                lastActivatedAt: Date(timeIntervalSince1970: 900)
+            )
+            : nil
+        let otherTerminalTab: WorkspaceTab? = otherSession.map { session in
+            WorkspaceTab(
+                sessionID: session.id,
+                workingDirectory: projectPath,
+                launchCommand: "ignored",
+                launchArgumentsJSON: "[]",
+                ordinal: 0,
+                createdAt: Date(timeIntervalSince1970: 500),
+                lastActivatedAt: Date(timeIntervalSince1970: 950)
+            )
+        }
+        let selectedSessionTabs = [olderTerminalTab, selectedFileTab, newestTerminalTab].compactMap { $0 }
+        let otherTabs = [otherTerminalTab].compactMap { $0 }
+        let snapshot = RestoreSnapshot(
+            selectedProjectID: project.id,
+            selectedSessionID: selectedSession.id,
+            selectedTabID: selectedFileTab.id,
+            tabOrder: (selectedSessionTabs + otherTabs).map(\.id),
+            updatedAt: Date(timeIntervalSince1970: 1_100)
+        )
+
+        try await persistence.save(project: project)
+        try await persistence.save(session: selectedSession)
+        if let otherSession {
+            try await persistence.save(session: otherSession)
+        }
+        for tab in selectedSessionTabs + otherTabs {
+            try await persistence.save(tab: tab)
+        }
+        try await persistence.save(snapshot: snapshot)
+        try await persistence.save(appPreferences: appPreferences)
+
+        return ContinuityRestoreGraph(
+            project: project,
+            selectedSession: selectedSession,
+            selectedFileTab: selectedFileTab,
+            olderTerminalTab: olderTerminalTab,
+            newestTerminalTab: newestTerminalTab,
+            otherTerminalTab: otherTerminalTab,
+            snapshot: snapshot
+        )
+    }
+
+    private func temporaryPortableSettingsFileStore() -> PortableSettingsFileStore {
+        let url = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("native-mac-ade-core-portable-settings-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("settings.json")
+        return PortableSettingsFileStore(canonicalURL: url)
+    }
+
+    private func loadedPortableConfig(from fileStore: PortableSettingsFileStore) throws -> PortableSettingsConfig {
+        switch try fileStore.load() {
+        case .loaded(let config, _):
+            return config
+        case .missingFile:
+            Issue.record("Expected portable settings config to exist")
+            return PortableSettingsConfig()
+        }
     }
 
     private func makeTemporaryProjectDirectory(named name: String = UUID().uuidString) throws -> String {
@@ -2509,7 +3078,18 @@ private struct CommandServiceHarness<Persistence: WorkspacePersistenceStore> {
     let terminalExitEvents: TerminalExitEventSource
     let fileBuffers: WorkspaceFileBufferController
     let externalEditor: FakeExternalEditorOpener
+    let portableSettingsFileStore: PortableSettingsFileStore
     let service: DefaultWorkspaceCommandService
+}
+
+private struct ContinuityRestoreGraph {
+    let project: WorkspaceProject
+    let selectedSession: WorkspaceSession
+    let selectedFileTab: WorkspaceTab
+    let olderTerminalTab: WorkspaceTab?
+    let newestTerminalTab: WorkspaceTab?
+    let otherTerminalTab: WorkspaceTab?
+    let snapshot: RestoreSnapshot
 }
 
 @MainActor
@@ -2519,6 +3099,7 @@ private final class FakeTerminalSurfaceManager: WorkspaceTerminalSurfaceManaging
     private(set) var resizedTabIDs: [UUID] = []
     private(set) var releasedTabIDs: [UUID] = []
     private(set) var canCloseRequestCount = 0
+    private(set) var canCloseRequests: [GhosttySurfaceHandle] = []
     var surfaceCreationError: Error?
     var surfacesByTabID: [UUID: GhosttySurfaceHandle] = [:]
     var canCloseResult = true
@@ -2540,6 +3121,7 @@ private final class FakeTerminalSurfaceManager: WorkspaceTerminalSurfaceManaging
 
     func canClose(surface: GhosttySurfaceHandle) async -> Bool {
         canCloseRequestCount += 1
+        canCloseRequests.append(surface)
         return canCloseResult
     }
 

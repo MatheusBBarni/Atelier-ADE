@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+@testable import GhosttyKit
 @testable import NativeMacADECore
 
 @Suite(.serialized)
@@ -11,6 +12,12 @@ struct ScaffoldIntegrationTests {
 
         #expect(container.workspaceStore.projects.isEmpty)
         #expect(container.workspaceStore.selectedProjectID == nil)
+    }
+
+    @Test
+    func ghosttyWrapperPinnedRevisionIsVisibleThroughAppDependencyGraph() {
+        #expect(LiveGhosttySurfaceRuntime.pinnedRevision == "cb36966a752982014827a9cabcf630ec3788b3d9")
+        #expect(LiveGhosttyAdapter.pinnedRevision == LiveGhosttySurfaceRuntime.pinnedRevision)
     }
 
     @Test
@@ -47,15 +54,57 @@ struct ScaffoldIntegrationTests {
     }
 
     @Test
-    func terminalHostCreatesSingleEmbeddedSurfaceWithoutRequiringGhosttyRuntime() async throws {
-        let host = TerminalHostController()
+    func ghosttyExitCallbackPublishesObservationAndTerminalProcessLog() async throws {
+        let container = AppDependencyContainer.live()
+        let project = WorkspaceProject(path: try makeTemporaryDirectory(), displayName: "ghostty-exit")
+        let session = WorkspaceSession(projectID: project.id)
+        let tab = WorkspaceTab(sessionID: session.id, workingDirectory: project.path, ordinal: 0)
+        var observations: [TerminalExitObservation] = []
+
+        container.workspaceStore.upsertProject(project, select: false)
+        container.workspaceStore.upsertSession(session, select: false)
+        container.workspaceStore.upsertTab(tab, select: false)
+        _ = container.terminalExitEvents.subscribe { observations.append($0) }
+
+        container.terminalHostController.onSurfaceExited?(tab.id, 17)
+
+        try await waitUntil("ghostty exit fan-out") {
+            observations.count == 1
+                && container.workspaceLogger.events.filter { $0.name == "terminal_process_exited" }.count == 1
+        }
+
+        let event = try #require(container.workspaceLogger.events.first { $0.name == "terminal_process_exited" })
+        #expect(observations == [TerminalExitObservation(tabID: tab.id, exitStatus: 17)])
+        #expect(container.terminalExitEvents.snapshot(tabID: tab.id) == TerminalExitObservation(tabID: tab.id, exitStatus: 17))
+        #expect(container.performanceMetrics.terminalProcessExitCount == 1)
+        #expect(event.fields["tab_id"] == tab.id.uuidString)
+        #expect(event.fields["session_id"] == session.id.uuidString)
+        #expect(event.fields["exit_status"] == "17")
+    }
+
+    @Test
+    func liveContainerConstructsWrapperBackedGhosttyAdapter() throws {
+        let container = AppDependencyContainer.live()
+        let adapter = try #require(container.ghosttyAdapter as? LiveGhosttyAdapter)
+
+        #expect(adapter.usesEmbeddedSessionDriver == false)
+    }
+
+    @Test
+    func terminalHostCreatesWrapperBackedSurfaceThroughLiveAdapter() async throws {
+        let adapter = LiveGhosttyAdapter()
+        adapter.resetSharedAppContextForTesting()
+        let host = TerminalHostController(adapter: adapter)
         let tab = WorkspaceTab(sessionID: UUID(), workingDirectory: try makeTemporaryDirectory(), ordinal: 0)
 
         let surface = try await host.createSurface(for: tab)
 
         #expect(LiveGhosttyAdapter.pinnedRevision == "cb36966a752982014827a9cabcf630ec3788b3d9")
-        #expect(surface.rawSurfaceID == 0)
-        #expect(surface.appContextID == 0)
+        #expect(surface.rawSurfaceID > 0)
+        #expect(surface.appContextID == 1)
+        #expect(adapter.nativeView(for: surface) != nil)
+
+        host.releaseSurface(for: tab.id)
     }
 
     @Test
@@ -72,12 +121,15 @@ struct ScaffoldIntegrationTests {
         #expect(first.appContextID == 1)
         #expect(second.appContextID == 1)
         #expect(first.rawSurfaceID != second.rawSurfaceID)
-        #expect(CGhosttyRuntime.initializeCallCount == 1)
     }
 
     @Test
     func surfaceCreationFailureReturnsTypedUserVisibleErrorWithoutCrashing() async throws {
-        let adapter = LiveGhosttyAdapter(runtime: CGhosttyRuntime(forceSurfaceCreationFailure: true))
+        let adapter = LiveGhosttyAdapter(
+            runtime: LiveGhosttySurfaceRuntime(
+                bridge: CGhosttyRuntime(forceSurfaceCreationFailure: true)
+            )
+        )
         adapter.resetSharedAppContextForTesting()
 
         do {

@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Extract launch metadata translation from the SwiftTerm driver"
 type: refactor
 complexity: medium
@@ -28,11 +28,11 @@ This task separates terminal launch behavior from `TerminalSessionDriver` so the
 </requirements>
 
 ## Subtasks
-- [ ] 3.1 Identify all launch behavior currently embedded in `TerminalSessionDriver`.
-- [ ] 3.2 Move launch translation into a Swift type independent of SwiftTerm.
-- [ ] 3.3 Preserve command escaping and agent-specific argument/environment behavior.
-- [ ] 3.4 Update tests so launch behavior is covered without a SwiftTerm terminal view.
-- [ ] 3.5 Keep `GhosttyLaunchConfiguration` compatible with existing workspace tab metadata.
+- [x] 3.1 Identify all launch behavior currently embedded in `TerminalSessionDriver`.
+- [x] 3.2 Move launch translation into a Swift type independent of SwiftTerm.
+- [x] 3.3 Preserve command escaping and agent-specific argument/environment behavior.
+- [x] 3.4 Update tests so launch behavior is covered without a SwiftTerm terminal view.
+- [x] 3.5 Keep `GhosttyLaunchConfiguration` compatible with existing workspace tab metadata.
 
 ## Implementation Details
 Use the TechSpec "Data Models" and "Development Sequencing" sections for the desired launch payload shape. This task should not host Ghostty views; it only preserves launch metadata behavior so task 04 can consume it.
@@ -64,14 +64,14 @@ Use the TechSpec "Data Models" and "Development Sequencing" sections for the des
 
 ## Tests
 - Unit tests:
-  - [ ] Plain shell tab produces a launch payload with the selected working directory and no agent command.
-  - [ ] Codex launch translation preserves stored arguments and current Codex-specific additions.
-  - [ ] Claude launch translation preserves stored arguments and current Claude-specific additions.
-  - [ ] Command escaping preserves arguments containing spaces, quotes, and `$HOME`.
-  - [ ] Invalid or empty launch argument JSON still decodes to an empty argument list.
+  - [x] Plain shell tab produces a launch payload with the selected working directory and no agent command.
+  - [x] Codex launch translation preserves stored arguments and current Codex-specific additions.
+  - [x] Claude launch translation preserves stored arguments and current Claude-specific additions.
+  - [x] Command escaping preserves arguments containing spaces, quotes, and `$HOME`.
+  - [x] Invalid or empty launch argument JSON still decodes to an empty argument list.
 - Integration tests:
-  - [ ] Creating a session with a built-in agent shortcut persists the same launch command and arguments as before.
-  - [ ] Creating an additional agent tab reuses stored session shortcut launch metadata.
+  - [x] Creating a session with a built-in agent shortcut persists the same launch command and arguments as before.
+  - [x] Creating an additional agent tab reuses stored session shortcut launch metadata.
 - Test coverage target: >=80%
 - All tests must pass
 

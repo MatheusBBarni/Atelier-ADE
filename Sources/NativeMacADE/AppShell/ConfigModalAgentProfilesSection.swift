@@ -133,6 +133,7 @@ struct ConfigModalAgentProfilesSection: View {
                     .font(.callout)
                     .foregroundStyle(theme.secondaryText.color)
                     .fixedSize(horizontal: false, vertical: true)
+                PortableSettingsScopeBadgeView(label: .agentProfilesMixed)
             }
 
             Spacer(minLength: 12)
@@ -360,6 +361,8 @@ struct ConfigModalAgentProfilesSection: View {
                 return "The selected Agent Profile is no longer available. Choose another default or Plain Shell."
             case .unknownThemeID:
                 return "Settings could not be saved because the current theme is no longer available."
+            case .terminalFontSizeOutOfBounds:
+                return "Settings could not be saved because the font size is outside the supported range."
             case .duplicateManagedKeybinding, .mismatchedKeybindingCommandID, .emptyKeybinding:
                 return "Settings could not be saved because a keyboard binding needs attention."
             }
@@ -481,6 +484,10 @@ private struct AgentProfileRowView: View {
                             .foregroundStyle(theme.mutedText.color)
                             .lineLimit(2)
                     }
+                    Text(row.portabilitySummary)
+                        .font(.caption)
+                        .foregroundStyle(theme.mutedText.color)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
 
@@ -596,6 +603,7 @@ private struct AgentProfileEditorView: View {
                 TextField("codex", text: $draft.launchCommand)
                     .textFieldStyle(.roundedBorder)
                     .font(.body.monospaced())
+                PortableSettingsScopeBadgeView(label: .agentProfileCommandDetails)
             }
 
             VStack(alignment: .leading, spacing: 8) {
@@ -620,6 +628,9 @@ private struct AgentProfileEditorView: View {
             Toggle("Use as default for new sessions", isOn: $draft.makeDefault)
                 .toggleStyle(.checkbox)
                 .foregroundStyle(theme.primaryText.color)
+            PortableSettingsScopeBadgeView(
+                label: draft.isBuiltIn ? .builtInDefaultProfileSelection : .customDefaultProfileSelection
+            )
 
             HStack {
                 Spacer()

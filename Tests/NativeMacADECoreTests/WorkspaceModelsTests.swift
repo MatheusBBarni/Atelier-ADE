@@ -22,6 +22,7 @@ struct WorkspaceModelsTests {
             defaultSessionShortcutID: shortcutID,
             terminalFontSize: 15,
             focusWorkspaceEnabled: true,
+            focusWorkspaceContinuityEnabled: true,
             keybindings: [
                 .searchSessions: searchOverride,
                 .zoomInTerminal: zoomOverride
@@ -38,10 +39,12 @@ struct WorkspaceModelsTests {
         #expect(preferences.defaultSessionShortcutID == shortcutID)
         #expect(preferences.terminalFontSize == 15)
         #expect(preferences.focusWorkspaceEnabled == true)
+        #expect(preferences.focusWorkspaceContinuityEnabled == true)
         #expect(AppPreferences.defaultThemeID == AppTheme.systemSelectionID)
         #expect(AppPreferences.defaults.themeID == AppTheme.systemSelectionID)
         #expect(AppPreferences.defaults.terminalFontSize == TerminalAppearance.cursorDefault.fontSize)
         #expect(AppPreferences.defaults.focusWorkspaceEnabled == false)
+        #expect(AppPreferences.defaults.focusWorkspaceContinuityEnabled == false)
         #expect(AppPreferences.supportedSelectionIDs == AppTheme.supportedSelectionIDs)
         #expect(AppPreferences.supportedThemeIDs == AppTheme.supportedSelectionIDs)
         #expect(AppPreferences.isSupportedThemeSelectionID(AppTheme.systemSelectionID))
@@ -52,6 +55,7 @@ struct WorkspaceModelsTests {
         #expect(preferences.updatedAt == updatedAt)
         #expect(copiedPreferences.themeID == "onedark")
         #expect(copiedPreferences.focusWorkspaceEnabled == true)
+        #expect(copiedPreferences.focusWorkspaceContinuityEnabled == true)
         #expect(preferences.themeID == "dracula")
         #expect(decodedKeybindings == preferences.keybindings)
         #expect(AppCommandID.allCases == [
@@ -129,6 +133,7 @@ struct WorkspaceModelsTests {
             defaultSessionShortcutID: shortcut.id,
             terminalFontSize: 14,
             focusWorkspaceEnabled: true,
+            focusWorkspaceContinuityEnabled: true,
             keybindings: [
                 .nextTab: KeybindingOverride(commandID: .nextTab, keyEquivalent: "rightArrow", modifiers: [.command, .option])
             ],
@@ -147,6 +152,7 @@ struct WorkspaceModelsTests {
         updatedPreferences.defaultSessionShortcutID = nil
         updatedPreferences.terminalFontSize = 16
         updatedPreferences.focusWorkspaceEnabled = false
+        updatedPreferences.focusWorkspaceContinuityEnabled = false
         try await store.save(appPreferences: updatedPreferences)
 
         var updatedShortcut = shortcut
@@ -171,6 +177,7 @@ struct WorkspaceModelsTests {
         let preferences = AppPreferences(
             defaultSessionShortcutID: shortcut.id,
             focusWorkspaceEnabled: true,
+            focusWorkspaceContinuityEnabled: true,
             updatedAt: Date(timeIntervalSince1970: 3_000)
         )
         let store = InMemoryWorkspacePersistenceStore(
@@ -184,6 +191,7 @@ struct WorkspaceModelsTests {
 
         #expect(try await store.loadAppPreferences().defaultSessionShortcutID == nil)
         #expect(try await store.loadAppPreferences().focusWorkspaceEnabled == true)
+        #expect(try await store.loadAppPreferences().focusWorkspaceContinuityEnabled == true)
         #expect(try await store.loadSessions().first?.shortcutID == nil)
         #expect(try await store.loadTabs().first?.shortcutID == nil)
     }

@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Restore-time continuity selector
 type: backend
 complexity: medium
@@ -29,10 +29,10 @@ This task adds the pure restore-only selector that expresses the MVP continuity 
 </requirements>
 
 ## Subtasks
-- [ ] 3.1 Define the restore-only continuity selector as a separate Core type adjacent to existing workspace selection policy code.
-- [ ] 3.2 Encode the terminal-first selection rule using restored session membership, tab kind, and `lastActivatedAt` metadata.
-- [ ] 3.3 Preserve clean fallback behavior for disabled continuity, missing selected-session context, and sessions without terminal candidates.
-- [ ] 3.4 Add focused selector tests that prove the contract independently from restore orchestration.
+- [x] 3.1 Define the restore-only continuity selector as a separate Core type adjacent to existing workspace selection policy code.
+- [x] 3.2 Encode the terminal-first selection rule using restored session membership, tab kind, and `lastActivatedAt` metadata.
+- [x] 3.3 Preserve clean fallback behavior for disabled continuity, missing selected-session context, and sessions without terminal candidates.
+- [x] 3.4 Add focused selector tests that prove the contract independently from restore orchestration.
 
 ## Implementation Details
 

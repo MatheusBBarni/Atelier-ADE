@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Settings UI, copy, and continuity cues
 type: frontend
 complexity: high
@@ -31,11 +31,11 @@ This task exposes continuity as an understandable, opt-in Focus Workspace extens
 </requirements>
 
 ## Subtasks
-- [ ] 5.1 Add the continuity child toggle to the Focus Workspace settings section using the existing async preference-save pattern.
-- [ ] 5.2 Add centralized presentation strings for continuity labels, help text, and active-cue wording.
-- [ ] 5.3 Reflect the continuity state through existing banner or focus-cue surfaces so restore behavior is understandable after return.
-- [ ] 5.4 Reuse existing correction surfaces for confirmation or course correction when the restored target is not what the user expected.
-- [ ] 5.5 Add UI contract and presentation regression coverage for the child toggle, copy, and cue behavior.
+- [x] 5.1 Add the continuity child toggle to the Focus Workspace settings section using the existing async preference-save pattern.
+- [x] 5.2 Add centralized presentation strings for continuity labels, help text, and active-cue wording.
+- [x] 5.3 Reflect the continuity state through existing banner or focus-cue surfaces so restore behavior is understandable after return.
+- [x] 5.4 Reuse existing correction surfaces for confirmation or course correction when the restored target is not what the user expected.
+- [x] 5.5 Add UI contract and presentation regression coverage for the child toggle, copy, and cue behavior.
 
 ## Implementation Details
 
@@ -69,14 +69,14 @@ Use the TechSpec sections **System Architecture → Preferences and settings lay
 
 ## Tests
 - Unit tests:
-  - [ ] `FocusWorkspacePresentation` exposes continuity toggle label and help text that distinguish remembered app context from live terminal state.
-  - [ ] `FocusWorkspacePresentation` exposes active-cue wording for continuity-enabled state without implying tmux, pane, or process reattachment.
-  - [ ] The settings presentation for parent-off state does not expose continuity as independently active.
+  - [x] `FocusWorkspacePresentation` exposes continuity toggle label and help text that distinguish remembered app context from live terminal state.
+  - [x] `FocusWorkspacePresentation` exposes active-cue wording for continuity-enabled state without implying tmux, pane, or process reattachment.
+  - [x] The settings presentation for parent-off state does not expose continuity as independently active.
 - Integration tests:
-  - [ ] The Focus Workspace settings section renders a continuity child toggle beneath the parent toggle and persists its enabled state across reload.
-  - [ ] Turning Focus Workspace off clears the continuity child toggle and reloads the settings surface with both toggles off.
-  - [ ] After a continuity-enabled relaunch restore, the active cue or banner explains the remembered focus target using the centralized continuity copy.
-  - [ ] Continuity-enabled users can still use existing session search or row surfaces to confirm or correct the restored target without any new top-level command surface.
+  - [x] The Focus Workspace settings section renders a continuity child toggle beneath the parent toggle and persists its enabled state across reload.
+  - [x] Turning Focus Workspace off clears the continuity child toggle and reloads the settings surface with both toggles off.
+  - [x] After a continuity-enabled relaunch restore, the active cue or banner explains the remembered focus target using the centralized continuity copy.
+  - [x] Continuity-enabled users can still use existing session search or row surfaces to confirm or correct the restored target without any new top-level command surface.
 - Test coverage target: >=80%
 - All tests must pass
 

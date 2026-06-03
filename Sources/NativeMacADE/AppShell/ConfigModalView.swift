@@ -27,6 +27,12 @@ struct ConfigModalView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
+                    ConfigModalPortableSettingsSection(
+                        commandService: commandService
+                    )
+
+                    Divider().overlay(theme.border.color)
+
                     ConfigModalAgentProfilesSection(
                         store: store,
                         commandService: commandService

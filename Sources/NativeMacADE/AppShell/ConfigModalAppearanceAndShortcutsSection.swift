@@ -48,7 +48,8 @@ struct ConfigModalAppearanceAndShortcutsSection: View {
             sectionHeader(
                 title: "Appearance",
                 systemImage: "paintpalette",
-                detail: "Theme updates the app shell and terminal surfaces immediately. Font size updates the app shell and file editor immediately."
+                detail: "Theme updates the app shell and terminal surfaces immediately. Font size updates the app shell and file editor immediately.",
+                scopeLabel: .appearance
             )
 
             VStack(alignment: .leading, spacing: 14) {
@@ -67,7 +68,7 @@ struct ConfigModalAppearanceAndShortcutsSection: View {
                         .frame(width: 72)
                         .disabled(isSavingAppearance)
 
-                        Stepper("", value: $terminalFontSizeDraft, in: 11 ... 24, step: 1)
+                        Stepper("", value: $terminalFontSizeDraft, in: AppPreferences.terminalFontSizeRange, step: 1)
                             .labelsHidden()
                             .disabled(isSavingAppearance)
 
@@ -109,7 +110,8 @@ struct ConfigModalAppearanceAndShortcutsSection: View {
                 sectionHeader(
                     title: "Keyboard Shortcuts",
                     systemImage: "keyboard",
-                    detail: "Managed app commands for projects, sessions, tabs, terminal zoom, sidebars, files, and settings."
+                    detail: "Managed app commands for projects, sessions, tabs, terminal zoom, sidebars, files, and settings.",
+                    scopeLabel: .managedShortcuts
                 )
                 Spacer(minLength: 12)
                 HStack(spacing: 8) {
@@ -149,7 +151,12 @@ struct ConfigModalAppearanceAndShortcutsSection: View {
         }
     }
 
-    private func sectionHeader(title: String, systemImage: String, detail: String) -> some View {
+    private func sectionHeader(
+        title: String,
+        systemImage: String,
+        detail: String,
+        scopeLabel: PortableSettingsScopeLabel
+    ) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Label(title, systemImage: systemImage)
                 .font(.title3.weight(.semibold))
@@ -158,6 +165,7 @@ struct ConfigModalAppearanceAndShortcutsSection: View {
                 .font(.callout)
                 .foregroundStyle(theme.secondaryText.color)
                 .fixedSize(horizontal: false, vertical: true)
+            PortableSettingsScopeBadgeView(label: scopeLabel)
         }
     }
 
@@ -200,7 +208,7 @@ struct ConfigModalAppearanceAndShortcutsSection: View {
     private func persistAppearanceIfNeeded() {
         guard !isSyncingAppearanceDrafts else { return }
 
-        let roundedFontSize = min(max(terminalFontSizeDraft.rounded(), 11), 24)
+        let roundedFontSize = AppPreferences.normalizedTerminalFontSize(terminalFontSizeDraft)
         if roundedFontSize != terminalFontSizeDraft {
             terminalFontSizeDraft = roundedFontSize
             return
@@ -304,6 +312,8 @@ struct ConfigModalAppearanceAndShortcutsSection: View {
             switch failure {
             case .unknownThemeID:
                 return "The selected theme is no longer available."
+            case .terminalFontSizeOutOfBounds:
+                return "Choose a font size between \(Int(AppPreferences.minimumTerminalFontSize)) and \(Int(AppPreferences.maximumTerminalFontSize))."
             case .unknownDefaultSessionShortcut:
                 return "The selected Agent Profile is no longer available."
             case .duplicateManagedKeybinding:

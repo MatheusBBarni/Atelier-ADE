@@ -15,6 +15,7 @@ public protocol WorkspaceTerminalSurfaceManaging: AnyObject {
 public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
     private let store: WorkspaceStore
     private let persistenceStore: any WorkspacePersistenceStore
+    private let portableSettingsFileStore: PortableSettingsFileStore
     private let restoreCoordinator: RestoreCoordinator
     private let terminalSurfaceManager: any WorkspaceTerminalSurfaceManaging
     private let terminalExitEvents: TerminalExitEventSource?
@@ -30,6 +31,7 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
     public init(
         store: WorkspaceStore,
         persistenceStore: any WorkspacePersistenceStore,
+        portableSettingsFileStore: PortableSettingsFileStore = PortableSettingsFileStore(),
         restoreCoordinator: RestoreCoordinator,
         terminalSurfaceManager: any WorkspaceTerminalSurfaceManaging,
         terminalExitEvents: TerminalExitEventSource? = nil,
@@ -44,6 +46,7 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
         let resolvedFileAccess = fileAccess ?? LocalWorkspaceFileAccess(fileManager: fileManager)
         self.store = store
         self.persistenceStore = persistenceStore
+        self.portableSettingsFileStore = portableSettingsFileStore
         self.restoreCoordinator = restoreCoordinator
         self.terminalSurfaceManager = terminalSurfaceManager
         self.terminalExitEvents = terminalExitEvents
@@ -301,9 +304,7 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
     }
 
     public func loadAppPreferences() async throws -> AppPreferences {
-        let preferences = try await loadNormalizedAppPreferences(healStaleReferences: true)
-        store.updateAppPreferences(preferences)
-        return preferences
+        try await bootstrapPortableSettings()
     }
 
     public func saveAppPreferences(_ preferences: AppPreferences) async throws {
@@ -311,11 +312,12 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
 
         do {
             try await validateAppPreferences(preferences)
-            var updatedPreferences = preferences
+            var updatedPreferences = preferences.normalizedFocusWorkspaceContinuity
             updatedPreferences.id = AppPreferences.fixedID
             updatedPreferences.updatedAt = now()
 
             try await persistBuiltInDefaultShortcutIfNeeded(for: updatedPreferences)
+            try exportPortableSettingsConfig(from: updatedPreferences)
             try await persist { try await persistenceStore.save(appPreferences: updatedPreferences) }
             store.updateAppPreferences(updatedPreferences)
 
@@ -358,6 +360,66 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
         }
     }
 
+    public func reloadPortableSettingsConfig() async throws -> PortableSettingsApplyResult {
+        do {
+            let result = try await applyPortableSettingsFromFile(source: "manual_reload")
+            metrics.recordPortableSettingsReload(succeeded: true)
+            logger.emit("portable_settings_reloaded", fields: portableSettingsApplyFields(
+                result: result,
+                source: "manual_reload"
+            ))
+            return result
+        } catch {
+            metrics.recordPortableSettingsReload(succeeded: false)
+            logger.emit("portable_settings_reload_failed", fields: portableSettingsFailureFields(
+                error,
+                source: "manual_reload"
+            ))
+            throw error
+        }
+    }
+
+    public func portableSettingsConfigURL() -> URL {
+        portableSettingsFileStore.canonicalURL
+    }
+
+    @discardableResult
+    public func applyPortableSettingsConfig(_ config: PortableSettingsConfig) async throws -> PortableSettingsApplyResult {
+        try await applyPortableSettingsConfig(config, source: "direct_apply")
+    }
+
+    @discardableResult
+    private func applyPortableSettingsConfig(
+        _ config: PortableSettingsConfig,
+        source: String
+    ) async throws -> PortableSettingsApplyResult {
+        let basePreferences = try await loadNormalizedAppPreferences(healStaleReferences: true)
+        let projection = config.projectedPreferences(from: basePreferences)
+
+        guard !projection.result.appliedSections.isEmpty else {
+            store.updateAppPreferences(basePreferences)
+            recordPortableSettingsApplyObservability(projection.result, source: source)
+            return projection.result
+        }
+
+        var updatedPreferences = projection.preferences.normalizedFocusWorkspaceContinuity
+        updatedPreferences.id = AppPreferences.fixedID
+        updatedPreferences.updatedAt = now()
+
+        try await persistBuiltInDefaultShortcutIfNeeded(for: updatedPreferences)
+        try await persist { try await persistenceStore.save(appPreferences: updatedPreferences) }
+        store.updateAppPreferences(updatedPreferences)
+
+        recordFocusWorkspacePreferenceChange(
+            from: basePreferences,
+            to: updatedPreferences,
+            source: "portable_settings"
+        )
+
+        recordPortableSettingsApplyObservability(projection.result, source: source)
+        return projection.result
+    }
+
     public func availableSessionShortcuts() async throws -> [SessionShortcut] {
         try await loadSessionShortcutsIncludingBuiltIns()
     }
@@ -376,7 +438,7 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
     }
 
     public func deleteSessionShortcut(id: UUID) async throws {
-        if Self.canonicalBuiltInShortcut(id: id) != nil {
+        if SessionShortcut.canonicalBuiltInShortcut(id: id) != nil {
             throw WorkspaceCommandError.builtInShortcutDeletionRejected(id)
         }
 
@@ -409,7 +471,7 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
     }
 
     public func resetBuiltInSessionShortcut(id: UUID) async throws -> SessionShortcut {
-        guard let canonicalShortcut = Self.canonicalBuiltInShortcut(id: id) else {
+        guard let canonicalShortcut = SessionShortcut.canonicalBuiltInShortcut(id: id) else {
             let shortcuts = try await loadSessionShortcutsIncludingBuiltIns(seedMissingBuiltIns: false)
             if shortcuts.contains(where: { $0.id == id }) {
                 throw WorkspaceCommandError.customShortcutResetRejected(id)
@@ -816,11 +878,28 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
         var restoreResult = restoreResultFromCoordinator
         recordCoordinatorRestoreDiagnostics(restoreResult.diagnostics)
         let restoredStore = restoreResult.store
+        let restoredProjects = restoredStore.projects
+        let restoredSessions = restoredStore.sessions
+        let restoredTabs = restoredStore.tabs
+        let continuityRestore = resolveFocusWorkspaceContinuityRestore(
+            restoredSelection: restoredStore.selection,
+            sessions: restoredSessions,
+            tabs: restoredTabs,
+            appPreferences: store.appPreferences
+        )
+        metrics.recordFocusWorkspaceContinuityRestore(continuityRestore.resolution)
+        logger.emit("restore_continuity_resolved", fields: continuityRestore.fields)
+        restoreResult.store.restore(
+            projects: restoredProjects,
+            sessions: restoredSessions,
+            tabs: restoredTabs,
+            selection: continuityRestore.selection
+        )
         store.restore(
-            projects: restoredStore.projects,
-            sessions: restoredStore.sessions,
-            tabs: restoredStore.tabs,
-            selection: restoredStore.selection
+            projects: restoreResult.store.projects,
+            sessions: restoreResult.store.sessions,
+            tabs: restoreResult.store.tabs,
+            selection: restoreResult.store.selection
         )
         pruneTerminalExitSnapshotsToCurrentTerminalTabs()
         surfacesByTabID.removeAll()
@@ -875,15 +954,94 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
             skippedProjectCount: restoreResult.skippedProjects.count
         )
         metrics.recordLaunchToReady(duration: duration)
-        logger.emit("restore_completed", fields: [
+        var restoreCompletedFields = [
             "project_count": String(store.projects.count),
             "session_count": String(store.sessions.count),
             "tab_count": String(store.tabs.count),
             "skipped_project_count": String(restoreResult.skippedProjects.count),
             "duration_ms": String(Int((duration * 1_000).rounded())),
             "succeeded": String(!hasFailure)
-        ])
+        ]
+        restoreCompletedFields.merge(continuityRestore.fields) { _, new in new }
+        logger.emit("restore_completed", fields: restoreCompletedFields)
         return restoreResult
+    }
+
+    private func resolveFocusWorkspaceContinuityRestore(
+        restoredSelection: WorkspaceSelection,
+        sessions: [WorkspaceSession],
+        tabs: [WorkspaceTab],
+        appPreferences: AppPreferences
+    ) -> FocusWorkspaceContinuityRestoreApplication {
+        let preferences = appPreferences.normalizedFocusWorkspaceContinuity
+        let rawSelectedTabKind = tabKind(tabID: restoredSelection.tabID, tabs: tabs)
+        let selectedSessionTerminalCount = restoredSelection.sessionID.map { selectedSessionID in
+            tabs.filter { $0.sessionID == selectedSessionID && $0.kind == .terminal }.count
+        } ?? 0
+
+        guard preferences.focusWorkspaceEnabled, preferences.focusWorkspaceContinuityEnabled else {
+            return FocusWorkspaceContinuityRestoreApplication(
+                selection: restoredSelection,
+                resolution: .disabled,
+                preferences: preferences,
+                restoredSelection: restoredSelection,
+                rawSelectedTabKind: rawSelectedTabKind,
+                resolvedSelectedTabKind: rawSelectedTabKind,
+                sessionTerminalCount: selectedSessionTerminalCount
+            )
+        }
+
+        guard let selectedProjectID = restoredSelection.projectID,
+              let selectedSessionID = restoredSelection.sessionID,
+              sessions.contains(where: { $0.id == selectedSessionID && $0.projectID == selectedProjectID })
+        else {
+            return FocusWorkspaceContinuityRestoreApplication(
+                selection: restoredSelection,
+                resolution: .fallbackSnapshot,
+                preferences: preferences,
+                restoredSelection: restoredSelection,
+                rawSelectedTabKind: rawSelectedTabKind,
+                resolvedSelectedTabKind: rawSelectedTabKind,
+                sessionTerminalCount: selectedSessionTerminalCount
+            )
+        }
+
+        guard selectedSessionTerminalCount > 0 else {
+            return FocusWorkspaceContinuityRestoreApplication(
+                selection: restoredSelection,
+                resolution: .noTerminalCandidate,
+                preferences: preferences,
+                restoredSelection: restoredSelection,
+                rawSelectedTabKind: rawSelectedTabKind,
+                resolvedSelectedTabKind: rawSelectedTabKind,
+                sessionTerminalCount: selectedSessionTerminalCount
+            )
+        }
+
+        let resolvedSelection = FocusWorkspaceContinuityRestoreSelector().resolve(
+            restoredSelection: restoredSelection,
+            sessions: sessions,
+            tabs: tabs,
+            appPreferences: preferences
+        )
+        let resolvedSelectedTabKind = tabKind(tabID: resolvedSelection.tabID, tabs: tabs)
+        let resolution: FocusWorkspaceContinuityRestoreResolution =
+            resolvedSelectedTabKind == .terminal ? .applied : .fallbackSnapshot
+
+        return FocusWorkspaceContinuityRestoreApplication(
+            selection: resolvedSelection,
+            resolution: resolution,
+            preferences: preferences,
+            restoredSelection: restoredSelection,
+            rawSelectedTabKind: rawSelectedTabKind,
+            resolvedSelectedTabKind: resolvedSelectedTabKind,
+            sessionTerminalCount: selectedSessionTerminalCount
+        )
+    }
+
+    private func tabKind(tabID: UUID?, tabs: [WorkspaceTab]) -> WorkspaceTabKind? {
+        guard let tabID else { return nil }
+        return tabs.first { $0.id == tabID }?.kind
     }
 
     public func closeTab(tabID: UUID, force: Bool) async throws {
@@ -936,6 +1094,85 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
         metrics.diagnostics()
     }
 
+    private func bootstrapPortableSettings() async throws -> AppPreferences {
+        do {
+            let result = try portableSettingsFileStore.load()
+            switch result {
+            case .loaded(let config, _):
+                let applyResult = try await applyPortableSettingsConfig(config, source: "startup")
+                logger.emit("portable_settings_loaded", fields: portableSettingsApplyFields(
+                    result: applyResult,
+                    source: "startup"
+                ))
+                return store.appPreferences
+
+            case .missingFile:
+                let preferences = try await loadNormalizedAppPreferences(healStaleReferences: true)
+                store.updateAppPreferences(preferences)
+                var applyResult = PortableSettingsApplyResult(
+                    skippedSections: PortableSettingsConfig.supportedTopLevelSections,
+                    fileMissing: true
+                )
+
+                if containsNonDefaultPortableSettings(preferences) {
+                    do {
+                        try portableSettingsFileStore.save(preferences.portableSettingsConfig)
+                        applyResult.seededFromSQLite = true
+                        metrics.recordPortableSettingsSeeded()
+                        logger.emit("portable_settings_seeded", fields: [
+                            "path": portableSettingsFileStore.canonicalURL.path,
+                            "seed_reason": "non_default_sqlite_preferences"
+                        ])
+                    } catch {
+                        metrics.recordPortableSettingsSeedFailure()
+                        logger.emit("portable_settings_seed_failed", fields: portableSettingsFailureFields(
+                            error,
+                            source: "startup_seed"
+                        ))
+                    }
+                }
+
+                logger.emit("portable_settings_loaded", fields: portableSettingsApplyFields(
+                    result: applyResult,
+                    source: "startup"
+                ))
+                return preferences
+            }
+        } catch let error as PortableSettingsFileStoreError {
+            let preferences = try await loadNormalizedAppPreferences(healStaleReferences: true)
+            store.updateAppPreferences(preferences)
+            metrics.recordPortableSettingsLoadFailure()
+            logger.emit("portable_settings_load_failed", fields: portableSettingsFailureFields(
+                error,
+                source: "startup"
+            ))
+            return preferences
+        }
+    }
+
+    private func applyPortableSettingsFromFile(source: String) async throws -> PortableSettingsApplyResult {
+        switch try portableSettingsFileStore.load() {
+        case .missingFile:
+            let result = PortableSettingsApplyResult(
+                skippedSections: PortableSettingsConfig.supportedTopLevelSections,
+                fileMissing: true
+            )
+            logger.emit("portable_settings_loaded", fields: portableSettingsApplyFields(
+                result: result,
+                source: source
+            ))
+            return result
+
+        case .loaded(let config, _):
+            let result = try await applyPortableSettingsConfig(config, source: source)
+            logger.emit("portable_settings_loaded", fields: portableSettingsApplyFields(
+                result: result,
+                source: source
+            ))
+            return result
+        }
+    }
+
     private func loadSessionShortcutsIncludingBuiltIns(seedMissingBuiltIns: Bool = true) async throws -> [SessionShortcut] {
         let persistedShortcuts = try await persist { try await persistenceStore.loadSessionShortcuts() }
         let persistedByID = Dictionary(uniqueKeysWithValues: persistedShortcuts.map { ($0.id, $0) })
@@ -980,6 +1217,12 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
     private func loadNormalizedAppPreferences(healStaleReferences: Bool) async throws -> AppPreferences {
         var preferences = try await persist { try await persistenceStore.loadAppPreferences() }
         var shouldPersistRepair = false
+
+        let focusNormalizedPreferences = preferences.normalizedFocusWorkspaceContinuity
+        if focusNormalizedPreferences != preferences {
+            preferences = focusNormalizedPreferences
+            shouldPersistRepair = true
+        }
 
         if !AppPreferences.isSupportedThemeSelectionID(preferences.themeID) {
             let invalidThemeID = preferences.themeID
@@ -1029,6 +1272,14 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
             throw WorkspaceCommandError.settingsValidationFailed(.unknownThemeID(preferences.themeID))
         }
 
+        guard AppPreferences.isSupportedTerminalFontSize(preferences.terminalFontSize) else {
+            throw WorkspaceCommandError.settingsValidationFailed(.terminalFontSizeOutOfBounds(
+                value: preferences.terminalFontSize,
+                minimum: AppPreferences.minimumTerminalFontSize,
+                maximum: AppPreferences.maximumTerminalFontSize
+            ))
+        }
+
         try validateManagedKeybindings(preferences.keybindings)
 
         if let defaultShortcutID = preferences.defaultSessionShortcutID {
@@ -1041,7 +1292,7 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
 
     private func persistBuiltInDefaultShortcutIfNeeded(for preferences: AppPreferences) async throws {
         guard let defaultShortcutID = preferences.defaultSessionShortcutID,
-              let canonicalShortcut = Self.canonicalBuiltInShortcut(id: defaultShortcutID)
+              let canonicalShortcut = SessionShortcut.canonicalBuiltInShortcut(id: defaultShortcutID)
         else { return }
 
         let persistedShortcuts = try await persist { try await persistenceStore.loadSessionShortcuts() }
@@ -1074,6 +1325,81 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
         ]
     }
 
+    private func exportPortableSettingsConfig(from preferences: AppPreferences) throws {
+        let config = preferences.portableSettingsConfig
+        do {
+            try portableSettingsFileStore.save(config)
+            metrics.recordPortableSettingsExport(succeeded: true)
+            logger.emit("portable_settings_exported", fields: [
+                "path": portableSettingsFileStore.canonicalURL.path,
+                "exported_sections": config.presentSections.map(\.rawValue).joined(separator: ",")
+            ])
+        } catch {
+            metrics.recordPortableSettingsExport(succeeded: false)
+            logger.emit("portable_settings_export_failed", fields: portableSettingsFailureFields(
+                error,
+                source: "settings_save"
+            ))
+            throw error
+        }
+    }
+
+    private func containsNonDefaultPortableSettings(_ preferences: AppPreferences) -> Bool {
+        let defaults = AppPreferences.defaults
+        if preferences.themeID != defaults.themeID { return true }
+        if preferences.terminalFontSize != defaults.terminalFontSize { return true }
+        if preferences.focusWorkspaceEnabled != defaults.focusWorkspaceEnabled { return true }
+        if !preferences.keybindings.isEmpty { return true }
+        if let defaultShortcutID = preferences.defaultSessionShortcutID,
+           PortableDefaultProfileIdentifier.identifier(forBuiltInShortcutID: defaultShortcutID) != nil {
+            return true
+        }
+        return false
+    }
+
+    private func recordPortableSettingsApplyObservability(
+        _ result: PortableSettingsApplyResult,
+        source: String
+    ) {
+        metrics.recordPortableSettingsApplyResult(result)
+        for section in result.rejectedSections.keys.sorted() {
+            logger.emit("portable_settings_section_rejected", fields: [
+                "path": portableSettingsFileStore.canonicalURL.path,
+                "section": section,
+                "reason": result.rejectedSections[section] ?? "",
+                "source": source
+            ])
+        }
+    }
+
+    private func portableSettingsApplyFields(
+        result: PortableSettingsApplyResult,
+        source: String
+    ) -> [String: String] {
+        [
+            "path": portableSettingsFileStore.canonicalURL.path,
+            "file_present": String(!result.fileMissing),
+            "applied_section_count": String(result.appliedSections.count),
+            "applied_sections": result.appliedSections.map(\.rawValue).joined(separator: ","),
+            "rejected_section_count": String(result.rejectedSections.count),
+            "rejected_sections": result.rejectedSections.keys.sorted().joined(separator: ","),
+            "skipped_sections": result.skippedSections.map(\.rawValue).joined(separator: ","),
+            "seeded_from_sqlite": String(result.seededFromSQLite),
+            "source": source
+        ]
+    }
+
+    private func portableSettingsFailureFields(
+        _ error: Error,
+        source: String
+    ) -> [String: String] {
+        [
+            "path": portableSettingsFileStore.canonicalURL.path,
+            "reason": String(describing: error),
+            "source": source
+        ]
+    }
+
     private func recordSettingsSaveFailure(_ error: Error) {
         metrics.recordSettingsSaveFailure()
         let fields = settingsSaveFailureFields(for: error)
@@ -1100,6 +1426,11 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
             return [
                 "reason": "unknown_theme_id:\(themeID)",
                 "field": "theme_id"
+            ]
+        case .terminalFontSizeOutOfBounds(let value, let minimum, let maximum):
+            return [
+                "reason": "terminal_font_size_out_of_range:\(value):min:\(minimum):max:\(maximum)",
+                "field": "terminal_font_size"
             ]
         case .unknownDefaultSessionShortcut(let shortcutID):
             return [
@@ -1141,7 +1472,7 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
     }
 
     private func normalizedShortcutForSave(_ shortcut: SessionShortcut) -> SessionShortcut {
-        guard let canonicalShortcut = Self.canonicalBuiltInShortcut(id: shortcut.id) else {
+        guard let canonicalShortcut = SessionShortcut.canonicalBuiltInShortcut(id: shortcut.id) else {
             var customShortcut = shortcut
             customShortcut.isBuiltIn = false
             customShortcut.hasUserOverride = false
@@ -1898,15 +2229,38 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
         }
     }
 
-    private static func canonicalBuiltInShortcut(id: UUID) -> SessionShortcut? {
-        SessionShortcut.builtInDefaults.first { $0.id == id }
-    }
-
     private static func profileFieldsMatch(_ lhs: SessionShortcut, _ rhs: SessionShortcut) -> Bool {
         lhs.label == rhs.label &&
             lhs.launchCommand == rhs.launchCommand &&
             lhs.launchArgumentsJSON == rhs.launchArgumentsJSON &&
             lhs.secretRef == rhs.secretRef
+    }
+}
+
+private struct FocusWorkspaceContinuityRestoreApplication {
+    var selection: WorkspaceSelection
+    var resolution: FocusWorkspaceContinuityRestoreResolution
+    var preferences: AppPreferences
+    var restoredSelection: WorkspaceSelection
+    var rawSelectedTabKind: WorkspaceTabKind?
+    var resolvedSelectedTabKind: WorkspaceTabKind?
+    var sessionTerminalCount: Int
+
+    var fields: [String: String] {
+        [
+            "focus_workspace_enabled": String(preferences.focusWorkspaceEnabled),
+            "focus_workspace_continuity_enabled": String(preferences.focusWorkspaceContinuityEnabled),
+            "selected_project_id_present": String(restoredSelection.projectID != nil),
+            "selected_session_id_present": String(restoredSelection.sessionID != nil),
+            "raw_selected_tab_kind": Self.kindField(rawSelectedTabKind),
+            "resolved_restore_tab_kind": Self.kindField(resolvedSelectedTabKind),
+            "continuity_resolution": resolution.rawValue,
+            "session_terminal_count": String(sessionTerminalCount)
+        ]
+    }
+
+    private static func kindField(_ kind: WorkspaceTabKind?) -> String {
+        kind?.rawValue ?? "none"
     }
 }
 

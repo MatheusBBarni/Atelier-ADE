@@ -4,6 +4,9 @@ public struct AppPreferences: Equatable, Sendable {
     public static let fixedID = 1
     public static let defaultThemeID = AppTheme.defaultSelectionID
     public static let defaultTerminalFontSize: Double = 13
+    public static let minimumTerminalFontSize: Double = 11
+    public static let maximumTerminalFontSize: Double = 24
+    public static let terminalFontSizeRange: ClosedRange<Double> = minimumTerminalFontSize ... maximumTerminalFontSize
     public static let supportedSelectionIDs: Set<String> = AppTheme.supportedSelectionIDs
     public static let supportedThemeIDs = supportedSelectionIDs
 
@@ -12,6 +15,7 @@ public struct AppPreferences: Equatable, Sendable {
     public var defaultSessionShortcutID: UUID?
     public var terminalFontSize: Double
     public var focusWorkspaceEnabled: Bool
+    public var focusWorkspaceContinuityEnabled: Bool
     public var keybindings: [AppCommandID: KeybindingOverride]
     public var updatedAt: Date
 
@@ -21,6 +25,7 @@ public struct AppPreferences: Equatable, Sendable {
         defaultSessionShortcutID: UUID? = nil,
         terminalFontSize: Double = Self.defaultTerminalFontSize,
         focusWorkspaceEnabled: Bool = false,
+        focusWorkspaceContinuityEnabled: Bool = false,
         keybindings: [AppCommandID: KeybindingOverride] = [:],
         updatedAt: Date = Date(timeIntervalSince1970: 0)
     ) {
@@ -29,6 +34,7 @@ public struct AppPreferences: Equatable, Sendable {
         self.defaultSessionShortcutID = defaultSessionShortcutID
         self.terminalFontSize = terminalFontSize
         self.focusWorkspaceEnabled = focusWorkspaceEnabled
+        self.focusWorkspaceContinuityEnabled = focusWorkspaceContinuityEnabled
         self.keybindings = keybindings
         self.updatedAt = updatedAt
     }
@@ -37,8 +43,28 @@ public struct AppPreferences: Equatable, Sendable {
         AppPreferences()
     }
 
+    public var normalizedFocusWorkspaceContinuity: AppPreferences {
+        var preferences = self
+        preferences.normalizeFocusWorkspaceContinuity()
+        return preferences
+    }
+
+    public mutating func normalizeFocusWorkspaceContinuity() {
+        if !focusWorkspaceEnabled {
+            focusWorkspaceContinuityEnabled = false
+        }
+    }
+
     public static func isSupportedThemeSelectionID(_ themeID: String) -> Bool {
         AppTheme.isSupportedSelectionID(themeID)
+    }
+
+    public static func isSupportedTerminalFontSize(_ terminalFontSize: Double) -> Bool {
+        terminalFontSize.isFinite && terminalFontSizeRange.contains(terminalFontSize)
+    }
+
+    public static func normalizedTerminalFontSize(_ terminalFontSize: Double) -> Double {
+        min(max(terminalFontSize.rounded(), minimumTerminalFontSize), maximumTerminalFontSize)
     }
 
     public var keybindingsJSON: String {

@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Continuity preference model, persistence, and migration
 type: backend
 complexity: high
@@ -28,10 +28,10 @@ This task establishes the persisted continuity preference contract that every la
 </requirements>
 
 ## Subtasks
-- [ ] 1.1 Extend the persisted app-preferences model to include the continuity child preference and default contract.
-- [ ] 1.2 Update the workspace metadata schema, seed row, and repair path to support the new continuity column in both fresh and legacy databases.
-- [ ] 1.3 Update SQLite load and save behavior so the continuity preference round-trips through the existing persistence boundary.
-- [ ] 1.4 Add migration and round-trip regression coverage for bootstrap, upgrade, and repair scenarios.
+- [x] 1.1 Extend the persisted app-preferences model to include the continuity child preference and default contract.
+- [x] 1.2 Update the workspace metadata schema, seed row, and repair path to support the new continuity column in both fresh and legacy databases.
+- [x] 1.3 Update SQLite load and save behavior so the continuity preference round-trips through the existing persistence boundary.
+- [x] 1.4 Add migration and round-trip regression coverage for bootstrap, upgrade, and repair scenarios.
 
 ## Implementation Details
 
@@ -64,14 +64,14 @@ Use the TechSpec sections **Implementation Design → Data Models**, **Implement
 
 ## Tests
 - Unit tests:
-  - [ ] `AppPreferences` defaults set `focusWorkspaceContinuityEnabled` to `false` for newly created preferences.
-  - [ ] `AppPreferences` value-semantic copies preserve an explicitly set `focusWorkspaceContinuityEnabled` value.
-  - [ ] Current-version repair logic returns `focusWorkspaceContinuityEnabled = false` when the stored row is missing the new column.
+  - [x] `AppPreferences` defaults set `focusWorkspaceContinuityEnabled` to `false` for newly created preferences.
+  - [x] `AppPreferences` value-semantic copies preserve an explicitly set `focusWorkspaceContinuityEnabled` value.
+  - [x] Current-version repair logic returns `focusWorkspaceContinuityEnabled = false` when the stored row is missing the new column.
 - Integration tests:
-  - [ ] A fresh workspace metadata database bootstraps `app_preferences.focus_workspace_continuity_enabled` with default `0`.
-  - [ ] A version-6 workspace metadata database upgrades to version `7` and loads `focusWorkspaceContinuityEnabled = false`.
-  - [ ] Saving preferences with `focusWorkspaceEnabled = true` and `focusWorkspaceContinuityEnabled = true` round-trips both flags through `SQLiteWorkspaceMetadataStore`.
-  - [ ] A current-version database missing the new column is repaired without losing the rest of the app-preferences record.
+  - [x] A fresh workspace metadata database bootstraps `app_preferences.focus_workspace_continuity_enabled` with default `0`.
+  - [x] A version-6 workspace metadata database upgrades to version `7` and loads `focusWorkspaceContinuityEnabled = false`.
+  - [x] Saving preferences with `focusWorkspaceEnabled = true` and `focusWorkspaceContinuityEnabled = true` round-trips both flags through `SQLiteWorkspaceMetadataStore`.
+  - [x] A current-version database missing the new column is repaired without losing the rest of the app-preferences record.
 - Test coverage target: >=80%
 - All tests must pass
 

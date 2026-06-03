@@ -1,5 +1,4 @@
 import AppKit
-import Dispatch
 import Foundation
 import Testing
 @testable import NativeMacADECore
@@ -49,12 +48,13 @@ struct TerminalHostIntegrationTests {
         let tab = WorkspaceTab(sessionID: UUID(), workingDirectory: "/tmp/native-mac-ade-theme-default", ordinal: 0)
 
         let view = try #require(controller.makeHostView(for: tab, isActive: true) as? TerminalSurfaceHostNSView)
-        _ = try await controller.createSurface(for: tab)
+        let surface = try await controller.createSurface(for: tab)
+        let nativeView = try #require(adapter.nativeViewsBySurface[surface])
 
         #expect(view.terminalAppearance == AppTheme.defaultTheme.terminalAppearance)
-        #expect(view.attachedSurface != nil)
-        #expect(view.embeddedSurfaceView != nil)
-        #expect(view.subviews.contains(where: { $0 === view.embeddedSurfaceView }))
+        #expect(view.attachedSurface == surface)
+        #expect(view.embeddedSurfaceView === nativeView)
+        #expect(view.subviews.contains(where: { $0 === nativeView }))
         #expect(view.layer?.backgroundColor == NSColor(hex: AppTheme.defaultTheme.terminalAppearance.backgroundHex).cgColor)
     }
 
@@ -72,6 +72,9 @@ struct TerminalHostIntegrationTests {
         #expect(surface == reusedSurface)
         #expect(adapter.createdConfigurations.count == 1)
         #expect(controller.surface(for: tab.id) == surface)
+        #expect(adapter.appearanceUpdates == [
+            AppearanceUpdateRequest(surface: surface, appearance: AppTheme.catppuccin.terminalAppearance)
+        ])
         #expect(view.terminalAppearance == AppTheme.catppuccin.terminalAppearance)
         #expect(view.layer?.backgroundColor == NSColor(hex: AppTheme.catppuccin.terminalAppearance.backgroundHex).cgColor)
     }
@@ -117,6 +120,7 @@ struct TerminalHostIntegrationTests {
         let service = DefaultWorkspaceCommandService(
             store: store,
             persistenceStore: persistence,
+            portableSettingsFileStore: temporaryPortableSettingsFileStore(),
             restoreCoordinator: RestoreCoordinator(persistenceStore: persistence),
             terminalSurfaceManager: controller
         )
@@ -154,6 +158,7 @@ struct TerminalHostIntegrationTests {
         let service = DefaultWorkspaceCommandService(
             store: store,
             persistenceStore: persistence,
+            portableSettingsFileStore: temporaryPortableSettingsFileStore(),
             restoreCoordinator: RestoreCoordinator(persistenceStore: persistence),
             terminalSurfaceManager: controller
         )
@@ -192,6 +197,7 @@ struct TerminalHostIntegrationTests {
         let service = DefaultWorkspaceCommandService(
             store: store,
             persistenceStore: persistence,
+            portableSettingsFileStore: temporaryPortableSettingsFileStore(),
             restoreCoordinator: RestoreCoordinator(persistenceStore: persistence),
             terminalSurfaceManager: controller
         )
@@ -226,6 +232,7 @@ struct TerminalHostIntegrationTests {
         let service = DefaultWorkspaceCommandService(
             store: store,
             persistenceStore: persistence,
+            portableSettingsFileStore: temporaryPortableSettingsFileStore(),
             restoreCoordinator: RestoreCoordinator(persistenceStore: persistence),
             terminalSurfaceManager: controller
         )
@@ -298,15 +305,18 @@ struct TerminalHostIntegrationTests {
         let secondTab = WorkspaceTab(sessionID: firstTab.sessionID, workingDirectory: "/tmp/native-mac-ade-second", ordinal: 1)
         let view = try #require(controller.makeHostView(for: firstTab, isActive: true) as? TerminalSurfaceHostNSView)
         let firstSurface = try await controller.createSurface(for: firstTab)
+        let firstNativeView = try #require(adapter.nativeViewsBySurface[firstSurface])
 
         controller.updateHostView(view, tab: secondTab, isActive: true)
         let secondSurface = try await controller.createSurface(for: secondTab)
+        let secondNativeView = try #require(adapter.nativeViewsBySurface[secondSurface])
         controller.releaseSurface(for: firstTab.id)
 
         #expect(firstSurface != secondSurface)
         #expect(view.tabID == secondTab.id)
         #expect(view.attachedSurface == secondSurface)
-        #expect(view.embeddedSurfaceView != nil)
+        #expect(view.embeddedSurfaceView === secondNativeView)
+        #expect(firstNativeView.superview == nil)
     }
 
     @Test
@@ -339,129 +349,66 @@ struct TerminalHostIntegrationTests {
     }
 
     @Test
-    func embeddedShellPreventsCloseWhileProcessIsRunning() async throws {
-        let controller = TerminalHostController()
-        let workingDirectory = try makeTemporaryDirectory()
-        let tab = WorkspaceTab(sessionID: UUID(), workingDirectory: workingDirectory, ordinal: 0)
+    func canCloseUsesGhosttyAdapterRuntimeState() async throws {
+        let adapter = RecordingGhosttyAdapter()
+        adapter.canCloseResult = false
+        let controller = TerminalHostController(adapter: adapter)
+        let tab = WorkspaceTab(sessionID: UUID(), workingDirectory: "/tmp/native-mac-ade-close", ordinal: 0)
 
         let surface = try await controller.createSurface(for: tab)
 
         #expect(await controller.canClose(surface: surface) == false)
-
-        controller.releaseSurface(for: tab.id)
     }
 
     @Test
-    func liveTerminalHostRelayoutsSwiftTermViewAfterZeroSizedInitialAttach() async throws {
-        let controller = TerminalHostController()
-        let workingDirectory = try makeTemporaryDirectory()
-        let tab = WorkspaceTab(sessionID: UUID(), workingDirectory: workingDirectory, ordinal: 0)
+    func terminalHostRelayoutsGhosttyNativeViewAfterZeroSizedInitialAttach() async throws {
+        let adapter = RecordingGhosttyAdapter()
+        let controller = TerminalHostController(adapter: adapter)
+        let tab = WorkspaceTab(sessionID: UUID(), workingDirectory: "/tmp/native-mac-ade-native-relayout", ordinal: 0)
         let view = try #require(controller.makeHostView(for: tab, isActive: true) as? TerminalSurfaceHostNSView)
 
-        _ = try await controller.createSurface(for: tab)
+        let surface = try await controller.createSurface(for: tab)
         view.setFrameSize(NSSize(width: 800, height: 320))
-        try await waitUntil("swiftterm view attachment") {
-            guard let terminalView = view.localProcessTerminalView else { return false }
-            return terminalView.frame.width > 0 && terminalView.frame.height > 0 && terminalView.process.running
+        let nativeView = try #require(adapter.nativeViewsBySurface[surface])
+
+        try await waitUntil("ghostty native view attachment") {
+            nativeView.frame.width > 0 && nativeView.frame.height > 0
         }
 
-        let terminalView = try #require(view.localProcessTerminalView)
-        #expect(terminalView.frame.width > 0)
-        #expect(terminalView.frame.height > 0)
-        #expect(terminalView.process.running)
+        #expect(view.embeddedSurfaceView === nativeView)
+        #expect(nativeView.frame.width > 0)
+        #expect(nativeView.frame.height > 0)
 
         controller.releaseSurface(for: tab.id)
     }
 
     @Test
-    func liveEmbeddedTerminalHostRefreshesAttachedViewAppearance() async throws {
-        let controller = TerminalHostController()
-        let workingDirectory = try makeTemporaryDirectory()
-        let tab = WorkspaceTab(sessionID: UUID(), workingDirectory: workingDirectory, ordinal: 0)
+    func ghosttyTerminalHostRefreshesAttachedViewAppearance() async throws {
+        let adapter = RecordingGhosttyAdapter()
+        let controller = TerminalHostController(adapter: adapter)
+        let tab = WorkspaceTab(sessionID: UUID(), workingDirectory: "/tmp/native-mac-ade-native-appearance", ordinal: 0)
         let view = try #require(controller.makeHostView(for: tab, isActive: true) as? TerminalSurfaceHostNSView)
 
         _ = try await controller.createSurface(for: tab)
-        try await waitUntil("swiftterm view attachment") {
-            view.localProcessTerminalView?.process.running == true
-        }
 
         controller.updateAppearance(AppTheme.dracula.terminalAppearance)
 
         #expect(view.terminalAppearance == AppTheme.dracula.terminalAppearance)
         #expect(view.layer?.backgroundColor == NSColor(hex: AppTheme.dracula.terminalAppearance.backgroundHex).cgColor)
+        #expect(adapter.appearanceUpdates.count == 1)
 
         controller.releaseSurface(for: tab.id)
     }
 
     @Test
-    func shellLaunchCommandRunsAliasFromInteractiveZshProfileAndPreservesQuotedArguments() throws {
-        let workingDirectory = try makeTemporaryDirectory()
-        let zdotdir = try makeTemporaryDirectory()
-        let markerPath = URL(fileURLWithPath: workingDirectory, isDirectory: true)
-            .appendingPathComponent("profile-command-output.txt")
-            .path
-        let suffix = UUID().uuidString.replacingOccurrences(of: "-", with: "_")
-        let functionName = "ade_profile_function_\(suffix)"
-        let aliasName = "ade_profile_alias_\(suffix)"
-        try """
-        function \(functionName)() {
-            [[ "$1" == "two words" ]] || return 41
-            [[ "$2" == "quote'arg" ]] || return 42
-            [[ "$3" == '$HOME' ]] || return 43
-            [[ "$ADE_PROFILE_BUILDER_FLAG" == "builder value" ]] || return 44
-            print -r -- "$1|$2|$3" > "$ADE_PROFILE_MARKER"
-            return 0
-        }
-        alias \(aliasName)=\(functionName)
-        """.write(
-            to: URL(fileURLWithPath: zdotdir, isDirectory: true).appendingPathComponent(".zshrc"),
-            atomically: true,
-            encoding: .utf8
-        )
-        let arguments = ["two words", "quote'arg", "$HOME"]
-        let environment = [
-            "ZDOTDIR": zdotdir,
-            "ADE_PROFILE_MARKER": markerPath
-        ]
-        let oldStyleCommandLine = (["exec", TerminalLaunchCommandBuilder.shellEscape(aliasName)] + arguments.map(TerminalLaunchCommandBuilder.shellEscape))
-            .joined(separator: " ")
+    func testAdapterCapturesNativeViewAccessWithoutRealGhosttySurface() throws {
+        let adapter = RecordingGhosttyAdapter()
+        let surface = GhosttySurfaceHandle()
+        let nativeView = try #require(adapter.nativeView(for: surface))
+        let storedView = try #require(adapter.nativeViewsBySurface[surface])
 
-        let oldStyleRun = try runZshLaunchCommandLine(oldStyleCommandLine, workingDirectory: workingDirectory, environment: environment)
-        #expect(oldStyleRun.terminationStatus != 0)
-        #expect(FileManager.default.fileExists(atPath: markerPath) == false)
-
-        let commandLine = TerminalLaunchCommandBuilder(
-            command: aliasName,
-            arguments: arguments,
-            environment: ["ADE_PROFILE_BUILDER_FLAG": "builder value"]
-        ).commandLine()
-        let run = try runZshLaunchCommandLine(commandLine, workingDirectory: workingDirectory, environment: environment)
-
-        #expect(run.terminationStatus == 0)
-        let markerContents = try String(contentsOfFile: markerPath, encoding: .utf8)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        #expect(markerContents == "two words|quote'arg|$HOME")
-    }
-
-    @Test
-    func shellLaunchCommandExitsWithFunctionStatus() throws {
-        let workingDirectory = try makeTemporaryDirectory()
-        let zdotdir = try makeTemporaryDirectory()
-        let functionName = "ade_status_function_\(UUID().uuidString.replacingOccurrences(of: "-", with: "_"))"
-        try """
-        function \(functionName)() {
-            return 37
-        }
-        """.write(
-            to: URL(fileURLWithPath: zdotdir, isDirectory: true).appendingPathComponent(".zshrc"),
-            atomically: true,
-            encoding: .utf8
-        )
-        let commandLine = TerminalLaunchCommandBuilder(command: functionName, arguments: [], environment: [:]).commandLine()
-
-        let run = try runZshLaunchCommandLine(commandLine, workingDirectory: workingDirectory, environment: ["ZDOTDIR": zdotdir])
-
-        #expect(run.terminationStatus == 37)
+        #expect(adapter.nativeViewRequests == [surface])
+        #expect(storedView === nativeView)
     }
 }
 
@@ -471,7 +418,10 @@ private final class RecordingGhosttyAdapter: GhosttyAdapter {
     private(set) var createdConfigurations: [GhosttyLaunchConfiguration] = []
     private(set) var focusedSurfaces: [GhosttySurfaceHandle] = []
     private(set) var resizeRequests: [ResizeRequest] = []
+    private(set) var appearanceUpdates: [AppearanceUpdateRequest] = []
     private(set) var destroyedSurfaces: [GhosttySurfaceHandle] = []
+    private(set) var nativeViewRequests: [GhosttySurfaceHandle] = []
+    private(set) var nativeViewsBySurface: [GhosttySurfaceHandle: NSView] = [:]
     var canCloseResult = true
     var exitedSurfaces: Set<GhosttySurfaceHandle> = []
     var exitsEverySurface = false
@@ -482,7 +432,7 @@ private final class RecordingGhosttyAdapter: GhosttyAdapter {
 
     func createSurface(configuration: GhosttyLaunchConfiguration) async throws -> GhosttySurfaceHandle {
         createdConfigurations.append(configuration)
-        return GhosttySurfaceHandle()
+        return recordSurface()
     }
 
     func createInheritedSurface(
@@ -490,7 +440,18 @@ private final class RecordingGhosttyAdapter: GhosttyAdapter {
         configuration: GhosttyLaunchConfiguration
     ) async throws -> GhosttySurfaceHandle {
         createdConfigurations.append(configuration)
-        return GhosttySurfaceHandle()
+        return recordSurface()
+    }
+
+    func nativeView(for surface: GhosttySurfaceHandle) -> NSView? {
+        nativeViewRequests.append(surface)
+        if let nativeView = nativeViewsBySurface[surface] {
+            return nativeView
+        }
+
+        let nativeView = NSView()
+        nativeViewsBySurface[surface] = nativeView
+        return nativeView
     }
 
     func focus(surface: GhosttySurfaceHandle) {
@@ -499,6 +460,10 @@ private final class RecordingGhosttyAdapter: GhosttyAdapter {
 
     func resize(surface: GhosttySurfaceHandle, columns: Int, rows: Int) {
         resizeRequests.append(ResizeRequest(surface: surface, columns: columns, rows: rows))
+    }
+
+    func updateAppearance(surface: GhosttySurfaceHandle, appearance: TerminalAppearance) {
+        appearanceUpdates.append(AppearanceUpdateRequest(surface: surface, appearance: appearance))
     }
 
     func canClose(surface: GhosttySurfaceHandle) async -> Bool {
@@ -516,6 +481,12 @@ private final class RecordingGhosttyAdapter: GhosttyAdapter {
     func destroySurface(_ surface: GhosttySurfaceHandle) {
         destroyedSurfaces.append(surface)
     }
+
+    private func recordSurface() -> GhosttySurfaceHandle {
+        let surface = GhosttySurfaceHandle()
+        nativeViewsBySurface[surface] = NSView()
+        return surface
+    }
 }
 
 private struct ResizeRequest: Equatable {
@@ -524,75 +495,16 @@ private struct ResizeRequest: Equatable {
     let rows: Int
 }
 
+private struct AppearanceUpdateRequest: Equatable {
+    let surface: GhosttySurfaceHandle
+    let appearance: TerminalAppearance
+}
+
 private func makeTemporaryDirectory() throws -> String {
     let url = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
         .appendingPathComponent("native-mac-ade-terminal-host-\(UUID().uuidString)", isDirectory: true)
     try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
     return url.path
-}
-
-private struct ZshRunResult {
-    let terminationStatus: Int32
-    let standardOutput: String
-    let standardError: String
-}
-
-private func runZshLaunchCommandLine(
-    _ commandLine: String,
-    workingDirectory: String,
-    environment overrides: [String: String]
-) throws -> ZshRunResult {
-    let zshPath = "/bin/zsh"
-    guard FileManager.default.isExecutableFile(atPath: zshPath) else {
-        throw ZshRunError.zshUnavailable(zshPath)
-    }
-
-    let process = Process()
-    process.executableURL = URL(fileURLWithPath: zshPath)
-    process.arguments = ["-ilc", commandLine]
-    process.currentDirectoryURL = URL(fileURLWithPath: workingDirectory, isDirectory: true)
-    var processEnvironment = ProcessInfo.processInfo.environment
-    for (key, value) in overrides {
-        processEnvironment[key] = value
-    }
-    process.environment = processEnvironment
-
-    let standardOutput = Pipe()
-    let standardError = Pipe()
-    process.standardOutput = standardOutput
-    process.standardError = standardError
-
-    let finished = DispatchSemaphore(value: 0)
-    process.terminationHandler = { _ in finished.signal() }
-
-    try process.run()
-    guard finished.wait(timeout: .now() + .seconds(5)) == .success else {
-        process.terminate()
-        _ = finished.wait(timeout: .now() + .seconds(1))
-        throw ZshRunError.timedOut(commandLine)
-    }
-
-    let output = String(data: standardOutput.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-    let error = String(data: standardError.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-    return ZshRunResult(
-        terminationStatus: process.terminationStatus,
-        standardOutput: output,
-        standardError: error
-    )
-}
-
-private enum ZshRunError: Error, CustomStringConvertible {
-    case zshUnavailable(String)
-    case timedOut(String)
-
-    var description: String {
-        switch self {
-        case .zshUnavailable(let path):
-            return "zsh is unavailable at \(path)"
-        case .timedOut(let commandLine):
-            return "zsh launch command timed out: \(commandLine)"
-        }
-    }
 }
 
 @MainActor
@@ -617,6 +529,13 @@ private func waitUntil(
 
 private struct WaitTimeoutError: Error, CustomStringConvertible {
     let description: String
+}
+
+private func temporaryPortableSettingsFileStore() -> PortableSettingsFileStore {
+    let url = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        .appendingPathComponent("native-mac-ade-terminal-host-portable-settings-\(UUID().uuidString)", isDirectory: true)
+        .appendingPathComponent("settings.json")
+    return PortableSettingsFileStore(canonicalURL: url)
 }
 
 private extension NSColor {

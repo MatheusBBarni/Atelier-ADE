@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Replace TerminalHostController SwiftTerm hosting with Ghostty native surface hosting"
 type: backend
 complexity: critical
@@ -31,12 +31,12 @@ This task performs the core runtime swap inside `TerminalHostController`. It rem
 </requirements>
 
 ## Subtasks
-- [ ] 4.1 Replace SwiftTerm session-driver creation with wrapper-backed Ghostty surface creation.
-- [ ] 4.2 Attach the Ghostty native view to `TerminalSurfaceHostNSView`.
-- [ ] 4.3 Preserve focus, resize, appearance, close, release, and exit behavior.
-- [ ] 4.4 Remove or isolate SwiftTerm-specific host state from the terminal host view.
-- [ ] 4.5 Update host integration tests from SwiftTerm expectations to Ghostty host expectations.
-- [ ] 4.6 Verify repeated view reuse and restored tab attachment remain stable.
+- [x] 4.1 Replace SwiftTerm session-driver creation with wrapper-backed Ghostty surface creation.
+- [x] 4.2 Attach the Ghostty native view to `TerminalSurfaceHostNSView`.
+- [x] 4.3 Preserve focus, resize, appearance, close, release, and exit behavior.
+- [x] 4.4 Remove or isolate SwiftTerm-specific host state from the terminal host view.
+- [x] 4.5 Update host integration tests from SwiftTerm expectations to Ghostty host expectations.
+- [x] 4.6 Verify repeated view reuse and restored tab attachment remain stable.
 
 ## Implementation Details
 Use the TechSpec "System Architecture", "Core Interfaces", and "Development Sequencing" sections. This task should not alter workspace persistence or add a terminal-engine selector; the runtime swap happens behind the existing terminal surface manager contract.
@@ -69,15 +69,15 @@ Use the TechSpec "System Architecture", "Core Interfaces", and "Development Sequ
 
 ## Tests
 - Unit tests:
-  - [ ] `createSurface(for:)` creates exactly one Ghostty surface per terminal tab.
-  - [ ] `focus(tabID:)` delegates to the Ghostty adapter for the active surface.
-  - [ ] `resize(tabID:columns:rows:)` delegates correct dimensions to the Ghostty adapter.
-  - [ ] `canClose(surface:)` uses Ghostty runtime state rather than SwiftTerm process state.
-  - [ ] `releaseSurface(for:)` destroys the Ghostty surface and detaches the hosted native view.
+  - [x] `createSurface(for:)` creates exactly one Ghostty surface per terminal tab.
+  - [x] `focus(tabID:)` delegates to the Ghostty adapter for the active surface.
+  - [x] `resize(tabID:columns:rows:)` delegates correct dimensions to the Ghostty adapter.
+  - [x] `canClose(surface:)` uses Ghostty runtime state rather than SwiftTerm process state.
+  - [x] `releaseSurface(for:)` destroys the Ghostty surface and detaches the hosted native view.
 - Integration tests:
-  - [ ] `TerminalHostView` attaches a non-placeholder Ghostty native view for a selected terminal tab.
-  - [ ] Reused host views drop stale tab mappings and attach the new tab's Ghostty surface.
-  - [ ] Existing theme and zoom updates continue to update the terminal host appearance contract.
+  - [x] `TerminalHostView` attaches a non-placeholder Ghostty native view for a selected terminal tab.
+  - [x] Reused host views drop stale tab mappings and attach the new tab's Ghostty surface.
+  - [x] Existing theme and zoom updates continue to update the terminal host appearance contract.
 - Test coverage target: >=80%
 - All tests must pass
 

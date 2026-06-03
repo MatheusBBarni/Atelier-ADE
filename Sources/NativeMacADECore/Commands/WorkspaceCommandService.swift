@@ -28,11 +28,33 @@ public enum WorkspaceCommandError: Error, Equatable, Sendable {
 
 public enum WorkspaceSettingsValidationFailure: Error, Equatable, Sendable {
     case unknownThemeID(String)
+    case terminalFontSizeOutOfBounds(value: Double, minimum: Double, maximum: Double)
     case unknownDefaultSessionShortcut(UUID)
     case duplicateManagedKeybinding(commandID: AppCommandID, conflictingCommandID: AppCommandID)
     case mismatchedKeybindingCommandID(expected: AppCommandID, actual: AppCommandID)
     case emptyKeybinding(AppCommandID)
     case malformedLaunchArgumentsJSON(UUID)
+}
+
+public extension WorkspaceSettingsValidationFailure {
+    var diagnosticReason: String {
+        switch self {
+        case .unknownThemeID(let themeID):
+            return "unknown_theme_id:\(themeID)"
+        case .terminalFontSizeOutOfBounds(let value, let minimum, let maximum):
+            return "terminal_font_size_out_of_range:\(value):min:\(minimum):max:\(maximum)"
+        case .unknownDefaultSessionShortcut(let shortcutID):
+            return "unknown_default_profile:\(shortcutID.uuidString)"
+        case .duplicateManagedKeybinding(let commandID, let conflictingCommandID):
+            return "duplicate_managed_keybinding:\(commandID.rawValue):\(conflictingCommandID.rawValue)"
+        case .mismatchedKeybindingCommandID(let expected, let actual):
+            return "mismatched_keybinding_command_id:\(expected.rawValue):\(actual.rawValue)"
+        case .emptyKeybinding(let commandID):
+            return "empty_keybinding:\(commandID.rawValue)"
+        case .malformedLaunchArgumentsJSON(let shortcutID):
+            return "malformed_launch_arguments_json:\(shortcutID.uuidString)"
+        }
+    }
 }
 
 @MainActor
@@ -48,6 +70,8 @@ public protocol WorkspaceCommandService: AppShellStartupServicing {
     func recordSettingsOpened(surface: String)
     func loadAppPreferences() async throws -> AppPreferences
     func saveAppPreferences(_ preferences: AppPreferences) async throws
+    func reloadPortableSettingsConfig() async throws -> PortableSettingsApplyResult
+    func portableSettingsConfigURL() -> URL
     func availableSessionShortcuts() async throws -> [SessionShortcut]
     func saveSessionShortcut(_ shortcut: SessionShortcut) async throws -> SessionShortcut
     func deleteSessionShortcut(id: UUID) async throws

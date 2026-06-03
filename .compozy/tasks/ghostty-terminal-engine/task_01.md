@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Add Swift Ghostty wrapper target"
 type: infra
 complexity: high
@@ -28,11 +28,11 @@ This task creates the Swift-native Ghostty wrapper target selected in the TechSp
 </requirements>
 
 ## Subtasks
-- [ ] 1.1 Add the Swift wrapper target and package dependency wiring.
-- [ ] 1.2 Define the minimal wrapper runtime surface needed by the TechSpec.
-- [ ] 1.3 Bridge wrapper calls to the existing `CGhostty` scaffolding.
-- [ ] 1.4 Preserve pinned revision and typed error behavior through the wrapper.
-- [ ] 1.5 Add tests for wrapper initialization, surface creation, and failure mapping.
+- [x] 1.1 Add the Swift wrapper target and package dependency wiring.
+- [x] 1.2 Define the minimal wrapper runtime surface needed by the TechSpec.
+- [x] 1.3 Bridge wrapper calls to the existing `CGhostty` scaffolding.
+- [x] 1.4 Preserve pinned revision and typed error behavior through the wrapper.
+- [x] 1.5 Add tests for wrapper initialization, surface creation, and failure mapping.
 
 ## Implementation Details
 Create the wrapper in a new SwiftPM target and keep it scoped to terminal hosting primitives. Reference the TechSpec "System Architecture" and "Core Interfaces" sections for the intended boundary, and reference ADR-005 for why `CGhostty` remains underneath the Swift wrapper.
@@ -64,14 +64,14 @@ Create the wrapper in a new SwiftPM target and keep it scoped to terminal hostin
 
 ## Tests
 - Unit tests:
-  - [ ] Wrapper initialization returns one shared app context for repeated initialization calls.
-  - [ ] Wrapper exposes the pinned Ghostty revision from `CGhostty`.
-  - [ ] Wrapper surface creation preserves working directory, command, arguments, and appearance payloads.
-  - [ ] Forced initialization failure maps to the existing user-visible Ghostty error type.
-  - [ ] Forced surface creation failure maps to the existing user-visible Ghostty error type.
+  - [x] Wrapper initialization returns one shared app context for repeated initialization calls.
+  - [x] Wrapper exposes the pinned Ghostty revision from `CGhostty`.
+  - [x] Wrapper surface creation preserves working directory, command, arguments, and appearance payloads.
+  - [x] Forced initialization failure maps to the existing user-visible Ghostty error type.
+  - [x] Forced surface creation failure maps to the existing user-visible Ghostty error type.
 - Integration tests:
-  - [ ] SwiftPM builds `CGhostty`, the new wrapper target, and `NativeMacADECore` together.
-  - [ ] Existing scaffold tests can still assert the pinned Ghostty revision through the app dependency graph.
+  - [x] SwiftPM builds `CGhostty`, the new wrapper target, and `NativeMacADECore` together.
+  - [x] Existing scaffold tests can still assert the pinned Ghostty revision through the app dependency graph.
 - Test coverage target: >=80%
 - All tests must pass
 

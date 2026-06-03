@@ -206,6 +206,7 @@ struct RestoreCoordinatorIntegrationTests {
         let restoredService = DefaultWorkspaceCommandService(
             store: restoredStore,
             persistenceStore: harness.persistence,
+            portableSettingsFileStore: temporaryPortableSettingsFileStore(),
             restoreCoordinator: RestoreCoordinator(persistenceStore: harness.persistence),
             terminalSurfaceManager: restoredTerminal,
             fileAccess: restoredFileAccess,
@@ -430,6 +431,7 @@ struct RestoreCoordinatorIntegrationTests {
         let service = DefaultWorkspaceCommandService(
             store: store,
             persistenceStore: persistence,
+            portableSettingsFileStore: temporaryPortableSettingsFileStore(),
             restoreCoordinator: coordinator,
             terminalSurfaceManager: terminal,
             fileAccess: fileAccess,
@@ -482,6 +484,13 @@ struct RestoreCoordinatorIntegrationTests {
         guard sqlite3_exec(database, sql, nil, nil, nil) == SQLITE_OK else {
             throw SQLiteWorkspaceMetadataStoreError.stepFailed("Unable to corrupt restore snapshot")
         }
+    }
+
+    private func temporaryPortableSettingsFileStore() -> PortableSettingsFileStore {
+        let url = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("native-mac-ade-restore-portable-settings-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("settings.json")
+        return PortableSettingsFileStore(canonicalURL: url)
     }
 }
 
