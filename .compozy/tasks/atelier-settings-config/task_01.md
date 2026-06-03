@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Define portable settings schema and stable built-in profile mapping"
 type: backend
 complexity: medium
@@ -29,11 +29,11 @@ This task establishes the public portable-settings contract for Atelier V1. It i
 </requirements>
 
 ## Subtasks
-- [ ] 1.1 Define the versioned portable config document shape and its supported top-level sections.
-- [ ] 1.2 Define the portable apply-result model needed by startup, reload, and diagnostics flows.
-- [ ] 1.3 Establish stable symbolic identifiers for the supported built-in default profiles and the no-default/plain-shell state.
-- [ ] 1.4 Define the portable keybinding override shape against managed command IDs only.
-- [ ] 1.5 Document and enforce which runtime-only and local-only fields are excluded from the external contract.
+- [x] 1.1 Define the versioned portable config document shape and its supported top-level sections.
+- [x] 1.2 Define the portable apply-result model needed by startup, reload, and diagnostics flows.
+- [x] 1.3 Establish stable symbolic identifiers for the supported built-in default profiles and the no-default/plain-shell state.
+- [x] 1.4 Define the portable keybinding override shape against managed command IDs only.
+- [x] 1.5 Document and enforce which runtime-only and local-only fields are excluded from the external contract.
 
 ## Implementation Details
 
@@ -69,14 +69,14 @@ See the TechSpec sections **Core Interfaces**, **Data Models**, **Mapping Rules*
 
 ## Tests
 - Unit tests:
-  - [ ] JSON encode/decode round-trips a valid `PortableSettingsConfig` document without reordering or losing supported sections.
-  - [ ] Symbolic built-in identifiers map to the canonical `plain`, `codex`, `claude`, and `opencode` runtime targets without exposing UUIDs in the file format.
-  - [ ] Portable keybinding DTOs accept managed command IDs and reject unsupported command identifiers.
-  - [ ] Runtime-only metadata such as timestamps, override markers, and secret references do not appear in exported portable DTOs.
+  - [x] JSON encode/decode round-trips a valid `PortableSettingsConfig` document without reordering or losing supported sections.
+  - [x] Symbolic built-in identifiers map to the canonical `plain`, `codex`, `claude`, and `opencode` runtime targets without exposing UUIDs in the file format.
+  - [x] Portable keybinding DTOs accept managed command IDs and reject unsupported command identifiers.
+  - [x] Runtime-only metadata such as timestamps, override markers, and secret references do not appear in exported portable DTOs.
 - Integration tests:
-  - [ ] A built-in default-profile selection mapped through the shared helper resolves the canonical built-in runtime target used for new session bootstrap.
-  - [ ] The `plain` portable default-profile symbol preserves the existing no-default/plain-shell runtime behavior and does not synthesize a fake `SessionShortcut`.
-  - [ ] Centralized built-in profile mapping remains consistent with the built-in catalog consumed by service- and presentation-layer code.
+  - [x] A built-in default-profile selection mapped through the shared helper resolves the canonical built-in runtime target used for new session bootstrap.
+  - [x] The `plain` portable default-profile symbol preserves the existing no-default/plain-shell runtime behavior and does not synthesize a fake `SessionShortcut`.
+  - [x] Centralized built-in profile mapping remains consistent with the built-in catalog consumed by service- and presentation-layer code.
 - Test coverage target: >=80%
 - All tests must pass
 

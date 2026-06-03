@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Implement portable settings projection, omission rules, and section validation"
 type: backend
 complexity: high
@@ -30,11 +30,11 @@ This task turns the portable config schema into usable runtime behavior. It defi
 </requirements>
 
 ## Subtasks
-- [ ] 3.1 Define the mapping between each supported portable config section and the effective `AppPreferences` fields.
-- [ ] 3.2 Add grouped validation rules for portable appearance, behavior, default-profile, and keybinding sections.
-- [ ] 3.3 Add export omission rules for local-only state that must not become part of the portable contract.
-- [ ] 3.4 Add section-level diagnostics that identify which sections were applied and which were rejected.
-- [ ] 3.5 Add automated coverage for valid, invalid, mixed-validity, and local-only omission scenarios.
+- [x] 3.1 Define the mapping between each supported portable config section and the effective `AppPreferences` fields.
+- [x] 3.2 Add grouped validation rules for portable appearance, behavior, default-profile, and keybinding sections.
+- [x] 3.3 Add export omission rules for local-only state that must not become part of the portable contract.
+- [x] 3.4 Add section-level diagnostics that identify which sections were applied and which were rejected.
+- [x] 3.5 Add automated coverage for valid, invalid, mixed-validity, and local-only omission scenarios.
 
 ## Implementation Details
 
@@ -71,15 +71,15 @@ See the TechSpec sections **Error handling conventions**, **Mapping Rules**, **T
 
 ## Tests
 - Unit tests:
-  - [ ] Unknown theme IDs in the portable appearance section are rejected without mutating unrelated valid sections.
-  - [ ] Out-of-range portable `terminalFontSize` values are rejected in core validation rather than silently accepted from a file edit.
-  - [ ] Duplicate or empty managed keybinding overrides reject the keybindings section as a unit.
-  - [ ] `plain`, `codex`, `claude`, and `opencode` portable default-profile values map correctly, while custom-profile identifiers are rejected or omitted from portable export.
-  - [ ] Exporting runtime preferences with a custom default profile omits the portable default-profile field instead of serializing local-only command state.
+  - [x] Unknown theme IDs in the portable appearance section are rejected without mutating unrelated valid sections.
+  - [x] Out-of-range portable `terminalFontSize` values are rejected in core validation rather than silently accepted from a file edit.
+  - [x] Duplicate or empty managed keybinding overrides reject the keybindings section as a unit.
+  - [x] `plain`, `codex`, `claude`, and `opencode` portable default-profile values map correctly, while custom-profile identifiers are rejected or omitted from portable export.
+  - [x] Exporting runtime preferences with a custom default profile omits the portable default-profile field instead of serializing local-only command state.
 - Integration tests:
-  - [ ] A mixed-validity portable config applies valid appearance or behavior sections while reporting rejected default-profile or keybinding sections explicitly.
-  - [ ] Successfully projected portable sections persist back through the `AppPreferences` runtime cache without clobbering unrelated local-only settings.
-  - [ ] Portable keybinding projection produces the same effective runtime shortcuts consumed by the managed app-command layer.
+  - [x] A mixed-validity portable config applies valid appearance or behavior sections while reporting rejected default-profile or keybinding sections explicitly.
+  - [x] Successfully projected portable sections persist back through the `AppPreferences` runtime cache without clobbering unrelated local-only settings.
+  - [x] Portable keybinding projection produces the same effective runtime shortcuts consumed by the managed app-command layer.
 - Test coverage target: >=80%
 - All tests must pass
 

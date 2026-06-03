@@ -13,8 +13,7 @@ let package = Package(
         .library(name: "NativeMacADECore", targets: ["NativeMacADECore"])
     ],
     dependencies: [
-        .package(url: "https://github.com/mchakravarty/CodeEditorView.git", from: "0.15.4"),
-        .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", from: "1.13.0")
+        .package(url: "https://github.com/mchakravarty/CodeEditorView.git", from: "0.15.4")
     ],
     targets: [
         .executableTarget(
@@ -39,8 +38,7 @@ let package = Package(
         .target(
             name: "NativeMacADECore",
             dependencies: [
-                "GhosttyKit",
-                .product(name: "SwiftTerm", package: "SwiftTerm")
+                "GhosttyKit"
             ]
         ),
         .testTarget(

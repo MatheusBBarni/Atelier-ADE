@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Add XDG config locator and atomic portable settings file store"
 type: backend
 complexity: medium
@@ -30,11 +30,11 @@ This task creates the filesystem layer for portable settings. It gives the featu
 </requirements>
 
 ## Subtasks
-- [ ] 2.1 Define the canonical path-resolution contract for XDG-first portable settings storage.
-- [ ] 2.2 Add a dedicated core file-store seam that can load and save the versioned portable config document.
-- [ ] 2.3 Add missing-file detection and parent-directory bootstrap behavior for first-run and seed flows.
-- [ ] 2.4 Add atomic write behavior suitable for user-edited portable config files.
-- [ ] 2.5 Add automated coverage for path resolution, read/write success, and failure scenarios.
+- [x] 2.1 Define the canonical path-resolution contract for XDG-first portable settings storage.
+- [x] 2.2 Add a dedicated core file-store seam that can load and save the versioned portable config document.
+- [x] 2.3 Add missing-file detection and parent-directory bootstrap behavior for first-run and seed flows.
+- [x] 2.4 Add atomic write behavior suitable for user-edited portable config files.
+- [x] 2.5 Add automated coverage for path resolution, read/write success, and failure scenarios.
 
 ## Implementation Details
 
@@ -68,15 +68,15 @@ See the TechSpec sections **Portable Settings File Store**, **Storage Structures
 
 ## Tests
 - Unit tests:
-  - [ ] When `XDG_CONFIG_HOME` is set, the file store resolves `atelier/settings.json` under that directory.
-  - [ ] When `XDG_CONFIG_HOME` is unset, the file store falls back to `~/.config/atelier/settings.json`.
-  - [ ] Saving a valid portable config creates missing parent directories and writes a readable JSON document.
-  - [ ] Loading with no file returns a missing-file result instead of a decode or write failure.
-  - [ ] Invalid JSON content produces a decode failure that is distinct from the missing-file path.
+  - [x] When `XDG_CONFIG_HOME` is set, the file store resolves `atelier/settings.json` under that directory.
+  - [x] When `XDG_CONFIG_HOME` is unset, the file store falls back to `~/.config/atelier/settings.json`.
+  - [x] Saving a valid portable config creates missing parent directories and writes a readable JSON document.
+  - [x] Loading with no file returns a missing-file result instead of a decode or write failure.
+  - [x] Invalid JSON content produces a decode failure that is distinct from the missing-file path.
 - Integration tests:
-  - [ ] A portable config written to a temp XDG directory round-trips through the real filesystem with the expected canonical path.
-  - [ ] Repeated saves replace the existing document without leaving stale partial output at the canonical path.
-  - [ ] File-write failures from an unwritable temp location surface a real error instead of pretending the config was exported.
+  - [x] A portable config written to a temp XDG directory round-trips through the real filesystem with the expected canonical path.
+  - [x] Repeated saves replace the existing document without leaving stale partial output at the canonical path.
+  - [x] File-write failures from an unwritable temp location surface a real error instead of pretending the config was exported.
 - Test coverage target: >=80%
 - All tests must pass
 

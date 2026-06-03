@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Focus Workspace continuity invariant enforcement
 type: backend
 complexity: medium
@@ -29,10 +29,10 @@ This task enforces the parent-child rule that continuity can only exist under Fo
 </requirements>
 
 ## Subtasks
-- [ ] 2.1 Add centralized normalization for the continuity child preference in core app-preferences load and save paths.
-- [ ] 2.2 Ensure invalid persisted combinations are repaired to a truthful disabled state before the rest of the app consumes them.
-- [ ] 2.3 Preserve existing Focus Workspace behavior and side effects for users who leave continuity disabled.
-- [ ] 2.4 Add regression coverage for save-time normalization, load-time repair, and startup ordering.
+- [x] 2.1 Add centralized normalization for the continuity child preference in core app-preferences load and save paths.
+- [x] 2.2 Ensure invalid persisted combinations are repaired to a truthful disabled state before the rest of the app consumes them.
+- [x] 2.3 Preserve existing Focus Workspace behavior and side effects for users who leave continuity disabled.
+- [x] 2.4 Add regression coverage for save-time normalization, load-time repair, and startup ordering.
 
 ## Implementation Details
 
@@ -63,14 +63,14 @@ Use the TechSpec sections **System Architecture → Preferences and settings lay
 
 ## Tests
 - Unit tests:
-  - [ ] Saving preferences with `focusWorkspaceEnabled = false` and `focusWorkspaceContinuityEnabled = true` persists the normalized state `{false, false}`.
-  - [ ] Loading an impossible persisted state `{focusWorkspaceEnabled = false, focusWorkspaceContinuityEnabled = true}` repairs the exposed preferences to `{false, false}`.
-  - [ ] Saving preferences with both `focusWorkspaceEnabled = true` and `focusWorkspaceContinuityEnabled = true` preserves the opted-in state.
-  - [ ] Child-only repair does not trigger extra parent enable or disable behavior beyond the normalized preference result.
+  - [x] Saving preferences with `focusWorkspaceEnabled = false` and `focusWorkspaceContinuityEnabled = true` persists the normalized state `{false, false}`.
+  - [x] Loading an impossible persisted state `{focusWorkspaceEnabled = false, focusWorkspaceContinuityEnabled = true}` repairs the exposed preferences to `{false, false}`.
+  - [x] Saving preferences with both `focusWorkspaceEnabled = true` and `focusWorkspaceContinuityEnabled = true` preserves the opted-in state.
+  - [x] Child-only repair does not trigger extra parent enable or disable behavior beyond the normalized preference result.
 - Integration tests:
-  - [ ] Disabling Focus Workspace after continuity was enabled persists both preferences as `false` after reload.
-  - [ ] App startup loads normalized app preferences before restore consumers observe continuity state.
-  - [ ] Non-opted-in users continue to load and save Focus Workspace preferences without any continuity-specific behavior changes.
+  - [x] Disabling Focus Workspace after continuity was enabled persists both preferences as `false` after reload.
+  - [x] App startup loads normalized app preferences before restore consumers observe continuity state.
+  - [x] Non-opted-in users continue to load and save Focus Workspace preferences without any continuity-specific behavior changes.
 - Test coverage target: >=80%
 - All tests must pass
 

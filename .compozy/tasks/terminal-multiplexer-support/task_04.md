@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Restore pipeline continuity application
 type: backend
 complexity: high
@@ -31,11 +31,11 @@ This task integrates continuity resolution into the real restore path so opted-i
 </requirements>
 
 ## Subtasks
-- [ ] 4.1 Wire the continuity selector into the command-service restore flow at the boundary between restored metadata and live store rehydration.
-- [ ] 4.2 Preserve existing restore behavior for opt-out users and for sessions without valid terminal candidates.
-- [ ] 4.3 Keep restore snapshot truthfulness intact while terminal surfaces are recreated from current launch intent.
-- [ ] 4.4 Add any minimal restore seam needed to expose selector inputs without broadening `RestoreCoordinator` responsibilities.
-- [ ] 4.5 Add restore-path regression coverage and observability assertions for applied versus fallback outcomes.
+- [x] 4.1 Wire the continuity selector into the command-service restore flow at the boundary between restored metadata and live store rehydration.
+- [x] 4.2 Preserve existing restore behavior for opt-out users and for sessions without valid terminal candidates.
+- [x] 4.3 Keep restore snapshot truthfulness intact while terminal surfaces are recreated from current launch intent.
+- [x] 4.4 Add any minimal restore seam needed to expose selector inputs without broadening `RestoreCoordinator` responsibilities.
+- [x] 4.5 Add restore-path regression coverage and observability assertions for applied versus fallback outcomes.
 
 ## Implementation Details
 
@@ -71,15 +71,15 @@ Use the TechSpec sections **System Architecture → Restore orchestration layer*
 
 ## Tests
 - Unit tests:
-  - [ ] `restoreWorkspace()` leaves the restored selection unchanged when continuity is disabled.
-  - [ ] `restoreWorkspace()` applies the selector result before live store restore when both Focus Workspace and continuity are enabled.
-  - [ ] `restoreWorkspace()` falls back to the raw restored selection when the selected session has no eligible terminal tab.
-  - [ ] Restore-path observability records distinct outcomes for applied continuity versus fallback or disabled continuity when metrics are enabled.
+  - [x] `restoreWorkspace()` leaves the restored selection unchanged when continuity is disabled.
+  - [x] `restoreWorkspace()` applies the selector result before live store restore when both Focus Workspace and continuity are enabled.
+  - [x] `restoreWorkspace()` falls back to the raw restored selection when the selected session has no eligible terminal tab.
+  - [x] Restore-path observability records distinct outcomes for applied continuity versus fallback or disabled continuity when metrics are enabled.
 - Integration tests:
-  - [ ] Relaunching with one selected session containing both file and terminal tabs lands on the most recent terminal tab when continuity is enabled.
-  - [ ] Relaunching with continuity enabled but no terminal candidate in the selected session preserves the raw restored tab selection.
-  - [ ] Relaunching with continuity disabled restores the same project, session, and tab behavior as the current non-opted-in flow.
-  - [ ] Continuity-aware restore recreates terminal surfaces from stored launch intent without implying live process reattachment.
+  - [x] Relaunching with one selected session containing both file and terminal tabs lands on the most recent terminal tab when continuity is enabled.
+  - [x] Relaunching with continuity enabled but no terminal candidate in the selected session preserves the raw restored tab selection.
+  - [x] Relaunching with continuity disabled restores the same project, session, and tab behavior as the current non-opted-in flow.
+  - [x] Continuity-aware restore recreates terminal surfaces from stored launch intent without implying live process reattachment.
 - Test coverage target: >=80%
 - All tests must pass
 

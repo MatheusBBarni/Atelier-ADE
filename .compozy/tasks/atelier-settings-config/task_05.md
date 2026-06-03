@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Add config-modal portable settings UX and scope labeling"
 type: frontend
 complexity: high
@@ -31,11 +31,11 @@ This task makes portable settings understandable and usable from the existing se
 </requirements>
 
 ## Subtasks
-- [ ] 5.1 Add a portable-settings control surface to the config modal for path visibility, reveal/open actions, reload, and status.
-- [ ] 5.2 Add portable-scope labeling to the appearance, focus workspace, and keyboard shortcut sections.
-- [ ] 5.3 Add mixed-scope labeling and explanatory copy to the agent-profile section for built-in default selection versus local-only custom profile details.
-- [ ] 5.4 Add feedback presentation for successful reloads, rejected sections, and explicit portable-settings failures.
-- [ ] 5.5 Add automated UI contract coverage for modal composition, scope messaging, and portable-settings actions.
+- [x] 5.1 Add a portable-settings control surface to the config modal for path visibility, reveal/open actions, reload, and status.
+- [x] 5.2 Add portable-scope labeling to the appearance, focus workspace, and keyboard shortcut sections.
+- [x] 5.3 Add mixed-scope labeling and explanatory copy to the agent-profile section for built-in default selection versus local-only custom profile details.
+- [x] 5.4 Add feedback presentation for successful reloads, rejected sections, and explicit portable-settings failures.
+- [x] 5.5 Add automated UI contract coverage for modal composition, scope messaging, and portable-settings actions.
 
 ## Implementation Details
 
@@ -72,15 +72,15 @@ See the TechSpec sections **Settings UI Integration**, **Data Flow**, **Impact A
 
 ## Tests
 - Unit tests:
-  - [ ] Portable status helpers, if introduced, mark appearance, focus workspace, and managed shortcuts as portable V1 settings.
-  - [ ] Agent-profile presentation helpers distinguish built-in default selection from local-only custom profile editing and command details.
-  - [ ] Portable reload status formatting surfaces rejected-section detail instead of collapsing to a binary success/error state.
+  - [x] Portable status helpers, if introduced, mark appearance, focus workspace, and managed shortcuts as portable V1 settings.
+  - [x] Agent-profile presentation helpers distinguish built-in default selection from local-only custom profile editing and command details.
+  - [x] Portable reload status formatting surfaces rejected-section detail instead of collapsing to a binary success/error state.
 - Integration tests:
-  - [ ] The config modal includes a portable-settings control surface with config-path visibility, reveal/open action, and manual reload action.
-  - [ ] The appearance, focus workspace, and keyboard shortcuts sections show portable-scope messaging aligned with the supported V1 contract.
-  - [ ] The agent-profile section explicitly states that custom profiles and machine-specific command details remain local-only while built-in default selection is portable.
-  - [ ] A partial-apply reload result renders visible rejected-section feedback instead of a generic success toast.
-  - [ ] If reveal/open actions are testable through a seam, the modal routes them through the portable config path supplied by the command service.
+  - [x] The config modal includes a portable-settings control surface with config-path visibility, reveal/open action, and manual reload action.
+  - [x] The appearance, focus workspace, and keyboard shortcuts sections show portable-scope messaging aligned with the supported V1 contract.
+  - [x] The agent-profile section explicitly states that custom profiles and machine-specific command details remain local-only while built-in default selection is portable.
+  - [x] A partial-apply reload result renders visible rejected-section feedback instead of a generic success toast.
+  - [x] If reveal/open actions are testable through a seam, the modal routes them through the portable config path supplied by the command service.
 - Test coverage target: >=80%
 - All tests must pass
 

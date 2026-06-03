@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Preserve workspace lifecycle, restore, and exit telemetry on the Ghostty path"
 type: backend
 complexity: high
@@ -29,12 +29,12 @@ This task hardens the Ghostty terminal path against the workspace flows users al
 </requirements>
 
 ## Subtasks
-- [ ] 5.1 Verify new session and tab creation still create Ghostty terminal surfaces.
-- [ ] 5.2 Verify restore recreates Ghostty surfaces for restored terminal tabs.
-- [ ] 5.3 Verify close checks and release paths use Ghostty runtime state.
-- [ ] 5.4 Verify terminal exit callbacks publish through `TerminalExitEventSource`.
-- [ ] 5.5 Verify terminal failure metrics and logs retain existing names and fields.
-- [ ] 5.6 Verify file tabs remain isolated from terminal surface lifecycle.
+- [x] 5.1 Verify new session and tab creation still create Ghostty terminal surfaces.
+- [x] 5.2 Verify restore recreates Ghostty surfaces for restored terminal tabs.
+- [x] 5.3 Verify close checks and release paths use Ghostty runtime state.
+- [x] 5.4 Verify terminal exit callbacks publish through `TerminalExitEventSource`.
+- [x] 5.5 Verify terminal failure metrics and logs retain existing names and fields.
+- [x] 5.6 Verify file tabs remain isolated from terminal surface lifecycle.
 
 ## Implementation Details
 Reference the TechSpec "Monitoring and Observability" and "Testing Approach" sections. This task should make focused integration adjustments after task 04, not redesign workspace models or persistence.
@@ -70,16 +70,16 @@ Reference the TechSpec "Monitoring and Observability" and "Testing Approach" sec
 
 ## Tests
 - Unit tests:
-  - [ ] Creating a session records a Ghostty surface handle and persists session plus first tab only after surface creation succeeds.
-  - [ ] Creating a terminal tab records terminal failure metrics and logs when Ghostty surface creation fails.
-  - [ ] Closing a terminal tab asks Ghostty `canClose` unless forced.
-  - [ ] Releasing a terminal tab clears command-service surface state and removes exit snapshots.
-  - [ ] Opening or restoring a file tab does not create a terminal surface.
+  - [x] Creating a session records a Ghostty surface handle and persists session plus first tab only after surface creation succeeds.
+  - [x] Creating a terminal tab records terminal failure metrics and logs when Ghostty surface creation fails.
+  - [x] Closing a terminal tab asks Ghostty `canClose` unless forced.
+  - [x] Releasing a terminal tab clears command-service surface state and removes exit snapshots.
+  - [x] Opening or restoring a file tab does not create a terminal surface.
 - Integration tests:
-  - [ ] Restoring mixed terminal and file tabs recreates Ghostty surfaces only for terminal tabs.
-  - [ ] Terminal surface failures during restore appear in restore diagnostics and `terminal_surface_failed` logs.
-  - [ ] Ghostty exit callback publishes one `TerminalExitObservation` and one `terminal_process_exited` log event.
-  - [ ] Terminal surface failure rate still contributes to release-blocking diagnostics above the existing threshold.
+  - [x] Restoring mixed terminal and file tabs recreates Ghostty surfaces only for terminal tabs.
+  - [x] Terminal surface failures during restore appear in restore diagnostics and `terminal_surface_failed` logs.
+  - [x] Ghostty exit callback publishes one `TerminalExitObservation` and one `terminal_process_exited` log event.
+  - [x] Terminal surface failure rate still contributes to release-blocking diagnostics above the existing threshold.
 - Test coverage target: >=80%
 - All tests must pass
 

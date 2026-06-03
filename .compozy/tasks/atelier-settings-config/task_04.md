@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Integrate portable settings into startup, save, reload, and app wiring"
 type: backend
 complexity: high
@@ -33,12 +33,12 @@ This task makes portable settings part of the real application lifecycle. It con
 </requirements>
 
 ## Subtasks
-- [ ] 4.1 Extend the command-service API surface for portable config reload and config-path access.
-- [ ] 4.2 Wire the portable file store into live app dependencies and test harness construction.
-- [ ] 4.3 Add startup bootstrap behavior for file-present, file-missing, seed-from-SQLite, and pristine-default scenarios.
-- [ ] 4.4 Add save/export orchestration that keeps the runtime cache, portable file, and store state aligned.
-- [ ] 4.5 Reuse one shared apply path for startup and manual reload diagnostics.
-- [ ] 4.6 Add observability and automated coverage for bootstrap, reload, export, and failure behavior.
+- [x] 4.1 Extend the command-service API surface for portable config reload and config-path access.
+- [x] 4.2 Wire the portable file store into live app dependencies and test harness construction.
+- [x] 4.3 Add startup bootstrap behavior for file-present, file-missing, seed-from-SQLite, and pristine-default scenarios.
+- [x] 4.4 Add save/export orchestration that keeps the runtime cache, portable file, and store state aligned.
+- [x] 4.5 Reuse one shared apply path for startup and manual reload diagnostics.
+- [x] 4.6 Add observability and automated coverage for bootstrap, reload, export, and failure behavior.
 
 ## Implementation Details
 
@@ -76,17 +76,17 @@ See the TechSpec sections **Workspace Command Service**, **Startup Coordinator**
 
 ## Tests
 - Unit tests:
-  - [ ] `loadAppPreferences()` with a present portable config applies supported portable sections before returning runtime preferences.
-  - [ ] When no portable config exists and supported SQLite preferences are non-default, bootstrap seeds the portable file exactly once.
-  - [ ] When no portable config exists and runtime preferences are pristine defaults, bootstrap leaves the file absent.
-  - [ ] `saveAppPreferences(_:)` exports the supported portable subset and records failure when the portable file cannot be written.
-  - [ ] Manual reload reuses the shared apply path and returns explicit diagnostics for applied and rejected sections.
+  - [x] `loadAppPreferences()` with a present portable config applies supported portable sections before returning runtime preferences.
+  - [x] When no portable config exists and supported SQLite preferences are non-default, bootstrap seeds the portable file exactly once.
+  - [x] When no portable config exists and runtime preferences are pristine defaults, bootstrap leaves the file absent.
+  - [x] `saveAppPreferences(_:)` exports the supported portable subset and records failure when the portable file cannot be written.
+  - [x] Manual reload reuses the shared apply path and returns explicit diagnostics for applied and rejected sections.
 - Integration tests:
-  - [ ] Startup with a portable config applies the effective appearance and default-profile state before workspace restore begins.
-  - [ ] Invalid portable JSON falls back to the current normalized runtime preferences while recording portable-load diagnostics.
-  - [ ] Manual reload of a mixed-validity file applies valid sections, reports rejected sections, and remains idempotent when the file has not changed.
-  - [ ] Saving supported settings updates both the SQLite runtime cache and the portable settings file without exporting local-only custom profile data.
-  - [ ] Changing the portable default-profile configuration affects future session bootstrap only and does not rewrite persisted launch metadata for restored tabs.
+  - [x] Startup with a portable config applies the effective appearance and default-profile state before workspace restore begins.
+  - [x] Invalid portable JSON falls back to the current normalized runtime preferences while recording portable-load diagnostics.
+  - [x] Manual reload of a mixed-validity file applies valid sections, reports rejected sections, and remains idempotent when the file has not changed.
+  - [x] Saving supported settings updates both the SQLite runtime cache and the portable settings file without exporting local-only custom profile data.
+  - [x] Changing the portable default-profile configuration affects future session bootstrap only and does not rewrite persisted launch metadata for restored tabs.
 - Test coverage target: >=80%
 - All tests must pass
 

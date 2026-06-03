@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Route GhosttyAdapter through the Swift wrapper runtime"
 type: backend
 complexity: high
@@ -29,11 +29,11 @@ This task updates the existing `GhosttyAdapter` path to use the Swift wrapper ta
 </requirements>
 
 ## Subtasks
-- [ ] 2.1 Update `LiveGhosttyAdapter` to depend on the Swift wrapper runtime.
-- [ ] 2.2 Preserve existing surface creation, inherited surface, focus, resize, close, exit, and destroy behavior.
-- [ ] 2.3 Add native view access to the adapter boundary for later host integration.
-- [ ] 2.4 Update adapter tests for wrapper-backed runtime calls and errors.
-- [ ] 2.5 Keep test fakes compatible with the revised adapter contract.
+- [x] 2.1 Update `LiveGhosttyAdapter` to depend on the Swift wrapper runtime.
+- [x] 2.2 Preserve existing surface creation, inherited surface, focus, resize, close, exit, and destroy behavior.
+- [x] 2.3 Add native view access to the adapter boundary for later host integration.
+- [x] 2.4 Update adapter tests for wrapper-backed runtime calls and errors.
+- [x] 2.5 Keep test fakes compatible with the revised adapter contract.
 
 ## Implementation Details
 Modify the adapter boundary described in the TechSpec "System Architecture" and "Integration Points" sections. Keep the existing app error semantics intact so `DefaultWorkspaceCommandService` does not need to know about wrapper internals.
@@ -65,14 +65,14 @@ Modify the adapter boundary described in the TechSpec "System Architecture" and 
 
 ## Tests
 - Unit tests:
-  - [ ] `LiveGhosttyAdapter.createSurface` delegates to the wrapper runtime and preserves the returned `GhosttySurfaceHandle`.
-  - [ ] `LiveGhosttyAdapter.createInheritedSurface` passes parent context metadata through the wrapper.
-  - [ ] Adapter focus, resize, close, exit status, and destroy calls reach the wrapper runtime.
-  - [ ] Adapter initialization and surface failures still map to `GhosttyAdapterError`.
-  - [ ] Test fakes compile and capture native view access calls without requiring a real Ghostty surface.
+  - [x] `LiveGhosttyAdapter.createSurface` delegates to the wrapper runtime and preserves the returned `GhosttySurfaceHandle`.
+  - [x] `LiveGhosttyAdapter.createInheritedSurface` passes parent context metadata through the wrapper.
+  - [x] Adapter focus, resize, close, exit status, and destroy calls reach the wrapper runtime.
+  - [x] Adapter initialization and surface failures still map to `GhosttyAdapterError`.
+  - [x] Test fakes compile and capture native view access calls without requiring a real Ghostty surface.
 - Integration tests:
-  - [ ] `AppDependencyContainer.live()` constructs a wrapper-backed `LiveGhosttyAdapter`.
-  - [ ] Scaffold tests still confirm one Ghostty app context per process through the live adapter.
+  - [x] `AppDependencyContainer.live()` constructs a wrapper-backed `LiveGhosttyAdapter`.
+  - [x] Scaffold tests still confirm one Ghostty app context per process through the live adapter.
 - Test coverage target: >=80%
 - All tests must pass
 
