@@ -282,6 +282,7 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
         #expect(loadedPreferences.focusWorkspaceEnabled == false)
         #expect(loadedPreferences.focusWorkspaceContinuityEnabled == false)
         #expect(reloadedStore.appPreferences == loadedPreferences)
+        #expect(FocusWorkspaceSettingsPresentation(preferences: loadedPreferences).isContinuityEnabled == false)
     }
 
     @Test
@@ -1135,6 +1136,13 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
         #expect(result.store.selectedTabID == newestTerminalTab.id)
         #expect(recreatedTerminal.launchCommand == "herdr")
         #expect(recreatedTerminal.launchArgumentsJSON == "[\"--restore\"]")
+        #expect(FocusWorkspaceSettingsPresentation(preferences: harness.store.appPreferences).isContinuityEnabled)
+        #expect(FocusWorkspaceActiveCuePresentation(preferences: harness.store.appPreferences).isContinuityEnabled)
+        #expect(
+            FocusWorkspaceActiveCuePresentation(preferences: harness.store.appPreferences).activeHelpText ==
+                FocusWorkspaceActiveCuePresentation.continuityHelpText
+        )
+        #expect(FocusWorkspaceActiveCuePresentation.continuityHelpText.contains("remembered app-owned project"))
         #expect(try await harness.persistence.loadRestoreSnapshot()?.selectedTabID == fixture.selectedFileTab.id)
         #expect(harness.service.metrics.focusWorkspaceContinuityRestoreAppliedCount == 1)
         #expect(harness.service.logger.events.contains { event in
@@ -1304,6 +1312,50 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
         #expect(reloadedStore.appPreferences.focusWorkspaceEnabled)
         #expect(FocusWorkspaceSettingsPresentation(preferences: reloadedStore.appPreferences).isEnabled)
         #expect(FocusWorkspaceActiveCuePresentation(preferences: reloadedStore.appPreferences).isVisible)
+        #expect(reloadedStore.tabsForSelectedSession.count == 1)
+    }
+
+    @Test
+    func focusWorkspaceContinuityPreferencePersistsCuePresentationAcrossRelaunch() async throws {
+        let harness = try makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+        let project = try await harness.service.openProject(path: projectPath)
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        try await harness.service.saveAppPreferences(AppPreferences(
+            focusWorkspaceEnabled: true,
+            focusWorkspaceContinuityEnabled: true
+        ))
+
+        let reloadedStore = WorkspaceStore()
+        let reloadedPersistence = try SQLiteWorkspaceMetadataStore(path: harness.databasePath)
+        let reloadedTerminal = FakeIntegrationTerminalSurfaceManager()
+        let reloadedService = DefaultWorkspaceCommandService(
+            store: reloadedStore,
+            persistenceStore: reloadedPersistence,
+            portableSettingsFileStore: harness.portableSettingsFileStore,
+            restoreCoordinator: RestoreCoordinator(persistenceStore: reloadedPersistence),
+            terminalSurfaceManager: reloadedTerminal,
+            fileAccess: LocalWorkspaceFileAccess(),
+            fileBufferManager: WorkspaceFileBufferController(fileAccess: LocalWorkspaceFileAccess())
+        )
+
+        _ = try await reloadedService.loadAppPreferences()
+        try await reloadedService.restoreWorkspace()
+
+        let settingsPresentation = FocusWorkspaceSettingsPresentation(preferences: reloadedStore.appPreferences)
+        let activeCue = FocusWorkspaceActiveCuePresentation(preferences: reloadedStore.appPreferences)
+
+        #expect(session.id == reloadedStore.selectedSessionID)
+        #expect(reloadedStore.appPreferences.focusWorkspaceEnabled)
+        #expect(reloadedStore.appPreferences.focusWorkspaceContinuityEnabled)
+        #expect(settingsPresentation.isEnabled)
+        #expect(settingsPresentation.isContinuityEnabled)
+        #expect(settingsPresentation.continuityStatus == FocusWorkspaceSettingsPresentation.continuityEnabledStatus)
+        #expect(activeCue.isVisible)
+        #expect(activeCue.isContinuityEnabled)
+        #expect(activeCue.labelText == FocusWorkspaceActiveCuePresentation.continuityLabel)
+        #expect(activeCue.activeHelpText == FocusWorkspaceActiveCuePresentation.continuityHelpText)
+        #expect(activeCue.activeHelpText.contains("session search"))
         #expect(reloadedStore.tabsForSelectedSession.count == 1)
     }
 

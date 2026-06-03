@@ -1,7 +1,39 @@
 import Foundation
 import Testing
+@testable import NativeMacADE
+import NativeMacADECore
 
 struct FocusWorkspaceUIContractIntegrationTests {
+    @Test
+    @MainActor
+    func focusWorkspaceSettingsSectionBodyBuildsForParentAndContinuityStates() {
+        let parentOffStore = WorkspaceStore(
+            appPreferences: AppPreferences(
+                focusWorkspaceEnabled: false,
+                focusWorkspaceContinuityEnabled: true
+            )
+        )
+        let parentOnStore = WorkspaceStore(
+            appPreferences: AppPreferences(
+                focusWorkspaceEnabled: true,
+                focusWorkspaceContinuityEnabled: true
+            )
+        )
+        let parentOffSection = ConfigModalFocusWorkspaceSection(
+            store: parentOffStore,
+            commandService: makeCommandService(store: parentOffStore)
+        )
+        let parentOnSection = ConfigModalFocusWorkspaceSection(
+            store: parentOnStore,
+            commandService: makeCommandService(store: parentOnStore)
+        )
+
+        #expect(FocusWorkspaceSettingsPresentation(preferences: parentOffStore.appPreferences).isContinuityEnabled == false)
+        #expect(FocusWorkspaceSettingsPresentation(preferences: parentOnStore.appPreferences).isContinuityEnabled)
+        _ = parentOffSection.body
+        _ = parentOnSection.body
+    }
+
     @Test
     func configModalComposesDedicatedFocusWorkspaceSectionUsingPreferencesPipeline() throws {
         let configModalSource = try sourceFile("Sources/NativeMacADE/AppShell/ConfigModalView.swift")
@@ -11,9 +43,17 @@ struct FocusWorkspaceUIContractIntegrationTests {
         #expect(focusSectionSource.contains("FocusWorkspaceSettingsPresentation(preferences: store.appPreferences)"))
         #expect(focusSectionSource.contains("commandService.loadAppPreferences()"))
         #expect(focusSectionSource.contains("commandService.saveAppPreferences(preferences)"))
+        #expect(focusSectionSource.contains("focusWorkspaceContinuityBinding"))
+        #expect(focusSectionSource.contains("saveFocusWorkspaceContinuityPreference(enabled: requestedValue)"))
+        #expect(focusSectionSource.contains("FocusWorkspaceSettingsPresentation.continuityToggleTitle"))
+        #expect(focusSectionSource.contains("presentation.continuityStatus"))
+        #expect(focusSectionSource.contains("FocusWorkspaceSettingsPresentation.continuityHelpText"))
         #expect(focusSectionSource.contains("FocusWorkspaceSettingsPresentation.legacyDetail"))
         #expect(focusSectionSource.contains("FocusWorkspaceSettingsPresentation.fileDetail"))
         #expect(focusSectionSource.contains("accessibilityIdentifier(\"focus-workspace-settings-section\")"))
+        #expect(focusSectionSource.contains("accessibilityIdentifier(\"focus-workspace-continuity-toggle\")"))
+        #expect(focusSectionSource.contains(".disabled(isSaving || !presentation.isContinuityAvailable)"))
+        #expect(focusSectionSource.contains("preferences.focusWorkspaceContinuityEnabled = false"))
     }
 
     @Test
@@ -22,8 +62,10 @@ struct FocusWorkspaceUIContractIntegrationTests {
 
         #expect(contentViewSource.contains("FocusWorkspaceActiveCuePresentation(preferences: store.appPreferences)"))
         #expect(contentViewSource.contains("if focusWorkspaceCue.isVisible"))
-        #expect(contentViewSource.contains("FocusWorkspaceActiveCueView()"))
-        #expect(contentViewSource.contains("FocusWorkspaceActiveCuePresentation.helpText"))
+        #expect(contentViewSource.contains("FocusWorkspaceActiveCueView(presentation: focusWorkspaceCue)"))
+        #expect(contentViewSource.contains("Text(presentation.labelText)"))
+        #expect(contentViewSource.contains(".accessibilityLabel(presentation.accessibilityLabelText)"))
+        #expect(contentViewSource.contains(".help(presentation.activeHelpText)"))
     }
 
     @Test
@@ -90,6 +132,21 @@ struct FocusWorkspaceUIContractIntegrationTests {
         )
     }
 
+    @Test
+    func continuityCorrectionUsesExistingSessionSearchAndRowsWithoutNewTopLevelSurface() throws {
+        let contentViewSource = try sourceFile("Sources/NativeMacADE/AppShell/ContentView.swift")
+        let appCommandsSource = try sourceFile("Sources/NativeMacADECore/Commands/AppCommandRegistry.swift")
+
+        #expect(contentViewSource.contains("NotificationCenter.default.publisher(for: .showSessionSearchPalette)"))
+        #expect(contentViewSource.contains("SessionSearchPaletteOverlay("))
+        #expect(contentViewSource.contains("SessionRowView("))
+        #expect(contentViewSource.contains("SessionTerminalChildRowView("))
+        #expect(appCommandsSource.contains(".searchSessions"))
+        #expect(appCommandsSource.contains("returnToFocus") == false)
+        #expect(appCommandsSource.contains("continuity") == false)
+        #expect(contentViewSource.contains("ContinuityCommand") == false)
+    }
+
     private func sourceFile(_ relativePath: String) throws -> String {
         let fileURL = try packageRoot().appendingPathComponent(relativePath)
         return try String(contentsOf: fileURL, encoding: .utf8)
@@ -112,5 +169,47 @@ struct FocusWorkspaceUIContractIntegrationTests {
 
     private enum PackageRootError: Error {
         case notFound
+    }
+
+    @MainActor
+    private func makeCommandService(store: WorkspaceStore) -> DefaultWorkspaceCommandService {
+        let persistence = InMemoryWorkspacePersistenceStore(appPreferences: store.appPreferences)
+        return DefaultWorkspaceCommandService(
+            store: store,
+            persistenceStore: persistence,
+            restoreCoordinator: RestoreCoordinator(persistenceStore: persistence),
+            terminalSurfaceManager: FocusWorkspaceUITerminalSurfaceManager()
+        )
+    }
+}
+
+@MainActor
+private final class FocusWorkspaceUITerminalSurfaceManager: WorkspaceTerminalSurfaceManaging {
+    private var surfacesByTabID: [UUID: GhosttySurfaceHandle] = [:]
+
+    func createSurface(for tab: WorkspaceTab) async throws -> GhosttySurfaceHandle {
+        let surface = GhosttySurfaceHandle()
+        surfacesByTabID[tab.id] = surface
+        return surface
+    }
+
+    func surface(for tabID: UUID) -> GhosttySurfaceHandle? {
+        surfacesByTabID[tabID]
+    }
+
+    func canClose(surface: GhosttySurfaceHandle) async -> Bool {
+        true
+    }
+
+    func focus(tabID: UUID) {}
+
+    func resize(tabID: UUID, columns: Int, rows: Int) {}
+
+    func hasExited(tabID: UUID) async -> Bool {
+        false
+    }
+
+    func releaseSurface(for tabID: UUID) {
+        surfacesByTabID[tabID] = nil
     }
 }

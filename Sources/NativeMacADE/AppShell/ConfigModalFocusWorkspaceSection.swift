@@ -47,6 +47,31 @@ struct ConfigModalFocusWorkspaceSection: View {
                     }
                 }
 
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: "arrow.turn.down.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(theme.mutedText.color)
+                        .frame(width: 18, height: 26)
+                        .accessibilityHidden(true)
+
+                    Toggle(isOn: focusWorkspaceContinuityBinding) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(FocusWorkspaceSettingsPresentation.continuityToggleTitle)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(theme.primaryText.color)
+                            Text(presentation.continuityStatus)
+                                .font(.callout)
+                                .foregroundStyle(theme.secondaryText.color)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .toggleStyle(.switch)
+                    .disabled(isSaving || !presentation.isContinuityAvailable)
+                    .opacity(presentation.isContinuityAvailable ? 1 : 0.62)
+                    .accessibilityIdentifier("focus-workspace-continuity-toggle")
+                    .accessibilityHint(FocusWorkspaceSettingsPresentation.continuityHelpText)
+                }
+
                 Divider().overlay(theme.border.color.opacity(0.72))
 
                 VStack(alignment: .leading, spacing: 10) {
@@ -62,6 +87,11 @@ struct ConfigModalFocusWorkspaceSection: View {
                     )
                     focusWorkspaceNote(
                         systemImage: "clock.arrow.circlepath",
+                        title: FocusWorkspaceSettingsPresentation.continuityTitle,
+                        detail: FocusWorkspaceSettingsPresentation.continuityHelpText
+                    )
+                    focusWorkspaceNote(
+                        systemImage: "rectangle.stack",
                         title: FocusWorkspaceSettingsPresentation.legacyTitle,
                         detail: FocusWorkspaceSettingsPresentation.legacyDetail
                     )
@@ -83,6 +113,17 @@ struct ConfigModalFocusWorkspaceSection: View {
             get: { store.appPreferences.focusWorkspaceEnabled },
             set: { requestedValue in
                 Task { await saveFocusWorkspacePreference(enabled: requestedValue) }
+            }
+        )
+    }
+
+    private var focusWorkspaceContinuityBinding: Binding<Bool> {
+        Binding(
+            get: {
+                store.appPreferences.focusWorkspaceEnabled && store.appPreferences.focusWorkspaceContinuityEnabled
+            },
+            set: { requestedValue in
+                Task { await saveFocusWorkspaceContinuityPreference(enabled: requestedValue) }
             }
         )
     }
@@ -129,10 +170,44 @@ struct ConfigModalFocusWorkspaceSection: View {
         do {
             var preferences = try await commandService.loadAppPreferences()
             preferences.focusWorkspaceEnabled = enabled
+            if !enabled {
+                preferences.focusWorkspaceContinuityEnabled = false
+            }
             try await commandService.saveAppPreferences(preferences)
             feedback = SettingsSectionFeedback(
                 kind: .success,
-                message: enabled ? "Focus Workspace enabled." : "Focus Workspace disabled."
+                message: enabled ? "Focus Workspace enabled." : "Focus Workspace disabled. Continuity is off."
+            )
+        } catch {
+            feedback = SettingsSectionFeedback(kind: .error, message: friendlyMessage(for: error))
+        }
+    }
+
+    private func saveFocusWorkspaceContinuityPreference(enabled: Bool) async {
+        let currentValue = store.appPreferences.focusWorkspaceEnabled && store.appPreferences.focusWorkspaceContinuityEnabled
+        guard store.appPreferences.focusWorkspaceEnabled, enabled != currentValue else { return }
+
+        isSaving = true
+        feedback = nil
+        defer { isSaving = false }
+
+        do {
+            var preferences = try await commandService.loadAppPreferences()
+            guard preferences.focusWorkspaceEnabled else {
+                preferences.focusWorkspaceContinuityEnabled = false
+                try await commandService.saveAppPreferences(preferences)
+                feedback = SettingsSectionFeedback(
+                    kind: .error,
+                    message: FocusWorkspaceSettingsPresentation.continuityUnavailableStatus
+                )
+                return
+            }
+
+            preferences.focusWorkspaceContinuityEnabled = enabled
+            try await commandService.saveAppPreferences(preferences)
+            feedback = SettingsSectionFeedback(
+                kind: .success,
+                message: enabled ? "Continuity enabled." : "Continuity disabled."
             )
         } catch {
             feedback = SettingsSectionFeedback(kind: .error, message: friendlyMessage(for: error))
@@ -141,8 +216,8 @@ struct ConfigModalFocusWorkspaceSection: View {
 
     private func friendlyMessage(for error: Error) -> String {
         guard error is WorkspaceCommandError else {
-            return "Focus Workspace could not be updated."
+            return "Focus Workspace settings could not be updated."
         }
-        return "Focus Workspace could not be updated."
+        return "Focus Workspace settings could not be updated."
     }
 }

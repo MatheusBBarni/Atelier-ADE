@@ -2557,7 +2557,7 @@ struct ActiveContextBanner: View {
                 .font(.system(size: uiFontSize, weight: .semibold))
             Spacer()
             if focusWorkspaceCue.isVisible {
-                FocusWorkspaceActiveCueView()
+                FocusWorkspaceActiveCueView(presentation: focusWorkspaceCue)
             }
             Button(action: onShowSessionCommands) {
                 Image(systemName: "plus")
@@ -2588,6 +2588,7 @@ struct ActiveContextBanner: View {
 }
 
 private struct FocusWorkspaceActiveCueView: View {
+    let presentation: FocusWorkspaceActiveCuePresentation
     @Environment(\.shellThemePalette) private var theme
     @Environment(\.shellUIFontSize) private var uiFontSize
 
@@ -2595,7 +2596,7 @@ private struct FocusWorkspaceActiveCueView: View {
         HStack(spacing: 6) {
             Image(systemName: "viewfinder.circle.fill")
                 .font(.system(size: uiFontSize - 1, weight: .semibold))
-            Text(FocusWorkspaceActiveCuePresentation.label)
+            Text(presentation.labelText)
                 .font(.system(size: max(uiFontSize - 2, 11.0), weight: .semibold))
                 .lineLimit(1)
         }
@@ -2607,8 +2608,8 @@ private struct FocusWorkspaceActiveCueView: View {
             RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .stroke(theme.accent.color.opacity(0.32), lineWidth: 1)
         }
-        .accessibilityLabel(FocusWorkspaceActiveCuePresentation.accessibilityLabel)
-        .help(FocusWorkspaceActiveCuePresentation.helpText)
+        .accessibilityLabel(presentation.accessibilityLabelText)
+        .help(presentation.activeHelpText)
     }
 }
 
