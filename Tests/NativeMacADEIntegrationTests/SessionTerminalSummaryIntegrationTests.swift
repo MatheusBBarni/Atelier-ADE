@@ -153,6 +153,7 @@ private struct SummaryIntegrationHarness {
         service = DefaultWorkspaceCommandService(
             store: store,
             persistenceStore: persistence,
+            portableSettingsFileStore: Self.temporaryPortableSettingsFileStore(),
             restoreCoordinator: RestoreCoordinator(persistenceStore: persistence),
             terminalSurfaceManager: terminal,
             fileAccess: fileAccess,
@@ -176,6 +177,13 @@ private struct SummaryIntegrationHarness {
         URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
             .appendingPathComponent("native-mac-ade-summary-\(UUID().uuidString).sqlite")
             .path
+    }
+
+    private static func temporaryPortableSettingsFileStore() -> PortableSettingsFileStore {
+        let url = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("native-mac-ade-summary-portable-settings-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("settings.json")
+        return PortableSettingsFileStore(canonicalURL: url)
     }
 }
 

@@ -117,6 +117,7 @@ struct TerminalHostIntegrationTests {
         let service = DefaultWorkspaceCommandService(
             store: store,
             persistenceStore: persistence,
+            portableSettingsFileStore: temporaryPortableSettingsFileStore(),
             restoreCoordinator: RestoreCoordinator(persistenceStore: persistence),
             terminalSurfaceManager: controller
         )
@@ -154,6 +155,7 @@ struct TerminalHostIntegrationTests {
         let service = DefaultWorkspaceCommandService(
             store: store,
             persistenceStore: persistence,
+            portableSettingsFileStore: temporaryPortableSettingsFileStore(),
             restoreCoordinator: RestoreCoordinator(persistenceStore: persistence),
             terminalSurfaceManager: controller
         )
@@ -192,6 +194,7 @@ struct TerminalHostIntegrationTests {
         let service = DefaultWorkspaceCommandService(
             store: store,
             persistenceStore: persistence,
+            portableSettingsFileStore: temporaryPortableSettingsFileStore(),
             restoreCoordinator: RestoreCoordinator(persistenceStore: persistence),
             terminalSurfaceManager: controller
         )
@@ -226,6 +229,7 @@ struct TerminalHostIntegrationTests {
         let service = DefaultWorkspaceCommandService(
             store: store,
             persistenceStore: persistence,
+            portableSettingsFileStore: temporaryPortableSettingsFileStore(),
             restoreCoordinator: RestoreCoordinator(persistenceStore: persistence),
             terminalSurfaceManager: controller
         )
@@ -617,6 +621,13 @@ private func waitUntil(
 
 private struct WaitTimeoutError: Error, CustomStringConvertible {
     let description: String
+}
+
+private func temporaryPortableSettingsFileStore() -> PortableSettingsFileStore {
+    let url = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        .appendingPathComponent("native-mac-ade-terminal-host-portable-settings-\(UUID().uuidString)", isDirectory: true)
+        .appendingPathComponent("settings.json")
+    return PortableSettingsFileStore(canonicalURL: url)
 }
 
 private extension NSColor {

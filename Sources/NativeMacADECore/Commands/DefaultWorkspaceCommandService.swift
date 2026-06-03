@@ -15,6 +15,7 @@ public protocol WorkspaceTerminalSurfaceManaging: AnyObject {
 public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
     private let store: WorkspaceStore
     private let persistenceStore: any WorkspacePersistenceStore
+    private let portableSettingsFileStore: PortableSettingsFileStore
     private let restoreCoordinator: RestoreCoordinator
     private let terminalSurfaceManager: any WorkspaceTerminalSurfaceManaging
     private let terminalExitEvents: TerminalExitEventSource?
@@ -30,6 +31,7 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
     public init(
         store: WorkspaceStore,
         persistenceStore: any WorkspacePersistenceStore,
+        portableSettingsFileStore: PortableSettingsFileStore = PortableSettingsFileStore(),
         restoreCoordinator: RestoreCoordinator,
         terminalSurfaceManager: any WorkspaceTerminalSurfaceManaging,
         terminalExitEvents: TerminalExitEventSource? = nil,
@@ -44,6 +46,7 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
         let resolvedFileAccess = fileAccess ?? LocalWorkspaceFileAccess(fileManager: fileManager)
         self.store = store
         self.persistenceStore = persistenceStore
+        self.portableSettingsFileStore = portableSettingsFileStore
         self.restoreCoordinator = restoreCoordinator
         self.terminalSurfaceManager = terminalSurfaceManager
         self.terminalExitEvents = terminalExitEvents
@@ -301,9 +304,7 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
     }
 
     public func loadAppPreferences() async throws -> AppPreferences {
-        let preferences = try await loadNormalizedAppPreferences(healStaleReferences: true)
-        store.updateAppPreferences(preferences)
-        return preferences
+        try await bootstrapPortableSettings()
     }
 
     public func saveAppPreferences(_ preferences: AppPreferences) async throws {
@@ -316,6 +317,7 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
             updatedPreferences.updatedAt = now()
 
             try await persistBuiltInDefaultShortcutIfNeeded(for: updatedPreferences)
+            try exportPortableSettingsConfig(from: updatedPreferences)
             try await persist { try await persistenceStore.save(appPreferences: updatedPreferences) }
             store.updateAppPreferences(updatedPreferences)
 
@@ -358,13 +360,45 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
         }
     }
 
+    public func reloadPortableSettingsConfig() async throws -> PortableSettingsApplyResult {
+        do {
+            let result = try await applyPortableSettingsFromFile(source: "manual_reload")
+            metrics.recordPortableSettingsReload(succeeded: true)
+            logger.emit("portable_settings_reloaded", fields: portableSettingsApplyFields(
+                result: result,
+                source: "manual_reload"
+            ))
+            return result
+        } catch {
+            metrics.recordPortableSettingsReload(succeeded: false)
+            logger.emit("portable_settings_reload_failed", fields: portableSettingsFailureFields(
+                error,
+                source: "manual_reload"
+            ))
+            throw error
+        }
+    }
+
+    public func portableSettingsConfigURL() -> URL {
+        portableSettingsFileStore.canonicalURL
+    }
+
     @discardableResult
     public func applyPortableSettingsConfig(_ config: PortableSettingsConfig) async throws -> PortableSettingsApplyResult {
+        try await applyPortableSettingsConfig(config, source: "direct_apply")
+    }
+
+    @discardableResult
+    private func applyPortableSettingsConfig(
+        _ config: PortableSettingsConfig,
+        source: String
+    ) async throws -> PortableSettingsApplyResult {
         let basePreferences = try await loadNormalizedAppPreferences(healStaleReferences: true)
         let projection = config.projectedPreferences(from: basePreferences)
 
         guard !projection.result.appliedSections.isEmpty else {
             store.updateAppPreferences(basePreferences)
+            recordPortableSettingsApplyObservability(projection.result, source: source)
             return projection.result
         }
 
@@ -382,6 +416,7 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
             source: "portable_settings"
         )
 
+        recordPortableSettingsApplyObservability(projection.result, source: source)
         return projection.result
     }
 
@@ -963,6 +998,85 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
         metrics.diagnostics()
     }
 
+    private func bootstrapPortableSettings() async throws -> AppPreferences {
+        do {
+            let result = try portableSettingsFileStore.load()
+            switch result {
+            case .loaded(let config, _):
+                let applyResult = try await applyPortableSettingsConfig(config, source: "startup")
+                logger.emit("portable_settings_loaded", fields: portableSettingsApplyFields(
+                    result: applyResult,
+                    source: "startup"
+                ))
+                return store.appPreferences
+
+            case .missingFile:
+                let preferences = try await loadNormalizedAppPreferences(healStaleReferences: true)
+                store.updateAppPreferences(preferences)
+                var applyResult = PortableSettingsApplyResult(
+                    skippedSections: PortableSettingsConfig.supportedTopLevelSections,
+                    fileMissing: true
+                )
+
+                if containsNonDefaultPortableSettings(preferences) {
+                    do {
+                        try portableSettingsFileStore.save(preferences.portableSettingsConfig)
+                        applyResult.seededFromSQLite = true
+                        metrics.recordPortableSettingsSeeded()
+                        logger.emit("portable_settings_seeded", fields: [
+                            "path": portableSettingsFileStore.canonicalURL.path,
+                            "seed_reason": "non_default_sqlite_preferences"
+                        ])
+                    } catch {
+                        metrics.recordPortableSettingsSeedFailure()
+                        logger.emit("portable_settings_seed_failed", fields: portableSettingsFailureFields(
+                            error,
+                            source: "startup_seed"
+                        ))
+                    }
+                }
+
+                logger.emit("portable_settings_loaded", fields: portableSettingsApplyFields(
+                    result: applyResult,
+                    source: "startup"
+                ))
+                return preferences
+            }
+        } catch let error as PortableSettingsFileStoreError {
+            let preferences = try await loadNormalizedAppPreferences(healStaleReferences: true)
+            store.updateAppPreferences(preferences)
+            metrics.recordPortableSettingsLoadFailure()
+            logger.emit("portable_settings_load_failed", fields: portableSettingsFailureFields(
+                error,
+                source: "startup"
+            ))
+            return preferences
+        }
+    }
+
+    private func applyPortableSettingsFromFile(source: String) async throws -> PortableSettingsApplyResult {
+        switch try portableSettingsFileStore.load() {
+        case .missingFile:
+            let result = PortableSettingsApplyResult(
+                skippedSections: PortableSettingsConfig.supportedTopLevelSections,
+                fileMissing: true
+            )
+            logger.emit("portable_settings_loaded", fields: portableSettingsApplyFields(
+                result: result,
+                source: source
+            ))
+            return result
+
+        case .loaded(let config, _):
+            let result = try await applyPortableSettingsConfig(config, source: source)
+            logger.emit("portable_settings_loaded", fields: portableSettingsApplyFields(
+                result: result,
+                source: source
+            ))
+            return result
+        }
+    }
+
     private func loadSessionShortcutsIncludingBuiltIns(seedMissingBuiltIns: Bool = true) async throws -> [SessionShortcut] {
         let persistedShortcuts = try await persist { try await persistenceStore.loadSessionShortcuts() }
         let persistedByID = Dictionary(uniqueKeysWithValues: persistedShortcuts.map { ($0.id, $0) })
@@ -1105,6 +1219,81 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
             "selection_id": selectionID,
             "resolved_theme_id": selectionID,
             "resolution_status": selectionID == AppTheme.systemSelectionID ? "deferred_to_runtime_system_scheme" : "resolved_concrete",
+            "source": source
+        ]
+    }
+
+    private func exportPortableSettingsConfig(from preferences: AppPreferences) throws {
+        let config = preferences.portableSettingsConfig
+        do {
+            try portableSettingsFileStore.save(config)
+            metrics.recordPortableSettingsExport(succeeded: true)
+            logger.emit("portable_settings_exported", fields: [
+                "path": portableSettingsFileStore.canonicalURL.path,
+                "exported_sections": config.presentSections.map(\.rawValue).joined(separator: ",")
+            ])
+        } catch {
+            metrics.recordPortableSettingsExport(succeeded: false)
+            logger.emit("portable_settings_export_failed", fields: portableSettingsFailureFields(
+                error,
+                source: "settings_save"
+            ))
+            throw error
+        }
+    }
+
+    private func containsNonDefaultPortableSettings(_ preferences: AppPreferences) -> Bool {
+        let defaults = AppPreferences.defaults
+        if preferences.themeID != defaults.themeID { return true }
+        if preferences.terminalFontSize != defaults.terminalFontSize { return true }
+        if preferences.focusWorkspaceEnabled != defaults.focusWorkspaceEnabled { return true }
+        if !preferences.keybindings.isEmpty { return true }
+        if let defaultShortcutID = preferences.defaultSessionShortcutID,
+           PortableDefaultProfileIdentifier.identifier(forBuiltInShortcutID: defaultShortcutID) != nil {
+            return true
+        }
+        return false
+    }
+
+    private func recordPortableSettingsApplyObservability(
+        _ result: PortableSettingsApplyResult,
+        source: String
+    ) {
+        metrics.recordPortableSettingsApplyResult(result)
+        for section in result.rejectedSections.keys.sorted() {
+            logger.emit("portable_settings_section_rejected", fields: [
+                "path": portableSettingsFileStore.canonicalURL.path,
+                "section": section,
+                "reason": result.rejectedSections[section] ?? "",
+                "source": source
+            ])
+        }
+    }
+
+    private func portableSettingsApplyFields(
+        result: PortableSettingsApplyResult,
+        source: String
+    ) -> [String: String] {
+        [
+            "path": portableSettingsFileStore.canonicalURL.path,
+            "file_present": String(!result.fileMissing),
+            "applied_section_count": String(result.appliedSections.count),
+            "applied_sections": result.appliedSections.map(\.rawValue).joined(separator: ","),
+            "rejected_section_count": String(result.rejectedSections.count),
+            "rejected_sections": result.rejectedSections.keys.sorted().joined(separator: ","),
+            "skipped_sections": result.skippedSections.map(\.rawValue).joined(separator: ","),
+            "seeded_from_sqlite": String(result.seededFromSQLite),
+            "source": source
+        ]
+    }
+
+    private func portableSettingsFailureFields(
+        _ error: Error,
+        source: String
+    ) -> [String: String] {
+        [
+            "path": portableSettingsFileStore.canonicalURL.path,
+            "reason": String(describing: error),
             "source": source
         ]
     }

@@ -4,6 +4,7 @@ import Foundation
 public struct AppDependencyContainer {
     public let workspaceStore: WorkspaceStore
     public let persistenceStore: any WorkspacePersistenceStore
+    public let portableSettingsFileStore: PortableSettingsFileStore
     public let restoreCoordinator: RestoreCoordinator
     public let ghosttyAdapter: any GhosttyAdapter
     public let terminalHostController: TerminalHostController
@@ -18,6 +19,7 @@ public struct AppDependencyContainer {
     public init(
         workspaceStore: WorkspaceStore,
         persistenceStore: any WorkspacePersistenceStore,
+        portableSettingsFileStore: PortableSettingsFileStore,
         restoreCoordinator: RestoreCoordinator,
         ghosttyAdapter: any GhosttyAdapter,
         terminalHostController: TerminalHostController,
@@ -31,6 +33,7 @@ public struct AppDependencyContainer {
     ) {
         self.workspaceStore = workspaceStore
         self.persistenceStore = persistenceStore
+        self.portableSettingsFileStore = portableSettingsFileStore
         self.restoreCoordinator = restoreCoordinator
         self.ghosttyAdapter = ghosttyAdapter
         self.terminalHostController = terminalHostController
@@ -45,6 +48,7 @@ public struct AppDependencyContainer {
 
     public static func live() -> AppDependencyContainer {
         let persistenceStore = livePersistenceStore()
+        let portableSettingsFileStore = PortableSettingsFileStore()
         let workspaceStore = WorkspaceStore()
         let restoreCoordinator = RestoreCoordinator(persistenceStore: persistenceStore)
         let ghosttyAdapter = LiveGhosttyAdapter()
@@ -58,6 +62,7 @@ public struct AppDependencyContainer {
         let workspaceCommandService = DefaultWorkspaceCommandService(
             store: workspaceStore,
             persistenceStore: persistenceStore,
+            portableSettingsFileStore: portableSettingsFileStore,
             restoreCoordinator: restoreCoordinator,
             terminalSurfaceManager: terminalHostController,
             terminalExitEvents: terminalExitEvents,
@@ -76,6 +81,7 @@ public struct AppDependencyContainer {
         return AppDependencyContainer(
             workspaceStore: workspaceStore,
             persistenceStore: persistenceStore,
+            portableSettingsFileStore: portableSettingsFileStore,
             restoreCoordinator: restoreCoordinator,
             ghosttyAdapter: ghosttyAdapter,
             terminalHostController: terminalHostController,

@@ -159,6 +159,7 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
         let reloadedService = DefaultWorkspaceCommandService(
             store: reloadedStore,
             persistenceStore: harness.persistence,
+            portableSettingsFileStore: harness.portableSettingsFileStore,
             restoreCoordinator: RestoreCoordinator(persistenceStore: harness.persistence),
             terminalSurfaceManager: reloadedTerminal
         )
@@ -187,6 +188,7 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
         let reloadedService = DefaultWorkspaceCommandService(
             store: reloadedStore,
             persistenceStore: harness.persistence,
+            portableSettingsFileStore: harness.portableSettingsFileStore,
             restoreCoordinator: RestoreCoordinator(persistenceStore: harness.persistence),
             terminalSurfaceManager: FakeIntegrationTerminalSurfaceManager()
         )
@@ -227,7 +229,7 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
         var observedSchemes: Set<ThemeColorScheme> = []
 
         for theme in AppTheme.catalog {
-            try await harness.persistence.save(appPreferences: AppPreferences(themeID: theme.id))
+            try await harness.service.saveAppPreferences(AppPreferences(themeID: theme.id))
 
             let loadedPreferences = try await harness.service.loadAppPreferences()
 
@@ -312,6 +314,194 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
         #expect(harness.store.appPreferences.defaultSessionShortcutID == nil)
         #expect(harness.store.tabs.map(\.id) == [tab.id])
         #expect(harness.terminal.createdTabs.map(\.id) == [tab.id])
+    }
+
+    @Test
+    func startupWithPortableConfigAppliesPreferencesBeforeWorkspaceRestoreBegins() async throws {
+        let harness = try makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+        let project = WorkspaceProject(path: projectPath, displayName: "Portable Startup")
+        let session = WorkspaceSession(projectID: project.id, title: "Restored")
+        let tab = WorkspaceTab(sessionID: session.id, workingDirectory: projectPath, ordinal: 0)
+        let codex = try #require(SessionShortcut.builtInDefaults.first { $0.label == "Codex" })
+        try await harness.persistence.save(project: project)
+        try await harness.persistence.save(session: session)
+        try await harness.persistence.save(tab: tab)
+        try await harness.persistence.save(snapshot: RestoreSnapshot(
+            selectedProjectID: project.id,
+            selectedSessionID: session.id,
+            selectedTabID: tab.id,
+            openTabIDs: [tab.id]
+        ))
+        try harness.portableSettingsFileStore.save(PortableSettingsConfig(
+            appearance: PortableAppearanceConfig(themeID: "dracula", terminalFontSize: 18),
+            defaultProfile: .codex
+        ))
+        var preferencesBeforeRestore: AppPreferences?
+
+        let startupResult = await AppShellStartupCoordinator.run(commandService: harness.service, store: harness.store) {
+            preferencesBeforeRestore = harness.store.appPreferences
+        }
+
+        #expect(startupResult.preferenceLoadErrorDescription == nil)
+        #expect(startupResult.restoreErrorDescription == nil)
+        #expect(preferencesBeforeRestore?.themeID == "dracula")
+        #expect(preferencesBeforeRestore?.terminalFontSize == 18)
+        #expect(preferencesBeforeRestore?.defaultSessionShortcutID == codex.id)
+        #expect(harness.store.tabs.map(\.id) == [tab.id])
+        #expect(harness.terminal.createdTabs.map(\.id) == [tab.id])
+    }
+
+    @Test
+    func invalidPortableJSONFallsBackToRuntimePreferencesAndRecordsDiagnostics() async throws {
+        let harness = try makeHarness()
+        try await harness.persistence.save(appPreferences: AppPreferences(
+            themeID: "catppuccin",
+            terminalFontSize: 16,
+            focusWorkspaceEnabled: true
+        ))
+        try writePortableSettingsDocument("{ invalid json", to: harness.portableSettingsFileStore)
+
+        let startupResult = await AppShellStartupCoordinator.run(commandService: harness.service, store: harness.store)
+
+        #expect(startupResult.preferenceLoadErrorDescription == nil)
+        #expect(startupResult.restoreErrorDescription == nil)
+        #expect(harness.store.appPreferences.themeID == "catppuccin")
+        #expect(harness.store.appPreferences.terminalFontSize == 16)
+        #expect(harness.store.appPreferences.focusWorkspaceEnabled)
+        #expect(harness.service.metrics.portableSettingsLoadFailureCount == 1)
+        #expect(harness.service.logger.events.contains { event in
+            event.name == "portable_settings_load_failed" &&
+                event.fields["source"] == "startup" &&
+                event.fields["reason"]?.contains("decodeFailed") == true
+        })
+    }
+
+    @Test
+    func manualPortableReloadOfMixedValidityFileAppliesValidSectionsAndIsIdempotent() async throws {
+        let harness = try makeHarness()
+        let existingOverride = KeybindingOverride(
+            commandID: .openSettings,
+            keyEquivalent: ",",
+            modifiers: [.command, .shift]
+        )
+        try await harness.persistence.save(appPreferences: AppPreferences(
+            themeID: "cursor",
+            focusWorkspaceEnabled: false,
+            keybindings: [.openSettings: existingOverride]
+        ))
+        try harness.portableSettingsFileStore.save(PortableSettingsConfig(
+            appearance: PortableAppearanceConfig(themeID: "dracula", terminalFontSize: 19),
+            behavior: PortableBehaviorConfig(focusWorkspaceEnabled: true),
+            defaultProfile: PortableDefaultProfileIdentifier(rawValue: "local-reviewer"),
+            keybindings: [
+                PortableKeybindingOverride(commandID: AppCommandID.nextTab.rawValue, keyEquivalent: "[")
+            ],
+            keybindingsSectionPresent: true
+        ))
+
+        let firstResult = try await harness.service.reloadPortableSettingsConfig()
+        let secondResult = try await harness.service.reloadPortableSettingsConfig()
+        let persistedPreferences = try await harness.persistence.loadAppPreferences()
+
+        #expect(firstResult == secondResult)
+        #expect(firstResult.appliedSections == [.appearance, .behavior])
+        #expect(firstResult.rejectedSections["defaultProfile"] == "unsupported_default_profile:local-reviewer")
+        #expect(firstResult.rejectedSections["keybindings"]?.contains("duplicate_managed_keybinding:nextTab:previousTab") == true)
+        #expect(persistedPreferences.themeID == "dracula")
+        #expect(persistedPreferences.terminalFontSize == 19)
+        #expect(persistedPreferences.focusWorkspaceEnabled)
+        #expect(persistedPreferences.keybindings == [.openSettings: existingOverride])
+        #expect(harness.service.metrics.portableSettingsReloadCount == 2)
+        #expect(harness.service.metrics.portableSettingsPartialApplyCount == 2)
+        #expect(harness.service.metrics.portableSettingsSectionRejectedCount == 4)
+    }
+
+    @Test
+    func savingSupportedSettingsUpdatesSQLiteAndPortableFileWithoutCustomProfileData() async throws {
+        let harness = try makeHarness()
+        let customDefault = try await harness.service.saveSessionShortcut(SessionShortcut(
+            label: "Machine Local Reviewer",
+            launchCommand: "local-review",
+            launchArgumentsJSON: "[\"run\"]",
+            secretRef: "keychain://atelier/local"
+        ))
+        let override = KeybindingOverride(
+            commandID: .searchSessions,
+            keyEquivalent: "k",
+            modifiers: [.command, .option]
+        )
+
+        try await harness.service.saveAppPreferences(AppPreferences(
+            themeID: "nord",
+            defaultSessionShortcutID: customDefault.id,
+            terminalFontSize: 15,
+            focusWorkspaceEnabled: true,
+            keybindings: [.searchSessions: override]
+        ))
+
+        let persistedPreferences = try await harness.persistence.loadAppPreferences()
+        let portableConfig = try loadedPortableConfig(from: harness.portableSettingsFileStore)
+        let document = try String(contentsOf: harness.portableSettingsFileStore.canonicalURL, encoding: .utf8)
+
+        #expect(persistedPreferences.defaultSessionShortcutID == customDefault.id)
+        #expect(persistedPreferences.themeID == "nord")
+        #expect(portableConfig.appearance?.themeID == "nord")
+        #expect(portableConfig.behavior?.focusWorkspaceEnabled == true)
+        #expect(portableConfig.defaultProfile == nil)
+        #expect(portableConfig.keybindings.map(\.commandID) == [AppCommandID.searchSessions.rawValue])
+        #expect(document.contains("defaultProfile") == false)
+        #expect(document.contains("local-review") == false)
+        #expect(document.contains("secretRef") == false)
+        #expect(harness.service.metrics.portableSettingsExportCount == 1)
+    }
+
+    @Test
+    func portableDefaultProfileAffectsFutureSessionsWithoutRewritingRestoredLaunchMetadata() async throws {
+        let harness = try makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+        let project = WorkspaceProject(path: projectPath, displayName: "Default Profile")
+        let claude = try #require(SessionShortcut.builtInDefaults.first { $0.label == "Claude" })
+        let codex = try #require(SessionShortcut.builtInDefaults.first { $0.label == "Codex" })
+        let session = WorkspaceSession(projectID: project.id, title: "Restored", shortcutID: claude.id)
+        let restoredTab = WorkspaceTab(
+            sessionID: session.id,
+            workingDirectory: projectPath,
+            shortcutID: claude.id,
+            launchCommand: "claude",
+            launchArgumentsJSON: "[\"--continue\"]",
+            ordinal: 0
+        )
+        try await harness.persistence.save(project: project)
+        try await harness.persistence.save(shortcut: claude)
+        try await harness.persistence.save(session: session)
+        try await harness.persistence.save(tab: restoredTab)
+        try await harness.persistence.save(snapshot: RestoreSnapshot(
+            selectedProjectID: project.id,
+            selectedSessionID: session.id,
+            selectedTabID: restoredTab.id,
+            openTabIDs: [restoredTab.id]
+        ))
+        try harness.portableSettingsFileStore.save(PortableSettingsConfig(defaultProfile: .codex))
+
+        let startupResult = await AppShellStartupCoordinator.run(commandService: harness.service, store: harness.store)
+        let restoredSurfaceTab = try #require(harness.terminal.createdTabs.first { $0.id == restoredTab.id })
+        let newSession = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let newSessionTab = try #require(harness.terminal.createdTabs.first { $0.sessionID == newSession.id })
+        let persistedRestoredTab = try #require(try await harness.persistence.loadTabs().first { $0.id == restoredTab.id })
+
+        #expect(startupResult.preferenceLoadErrorDescription == nil)
+        #expect(startupResult.restoreErrorDescription == nil)
+        #expect(harness.store.appPreferences.defaultSessionShortcutID == codex.id)
+        #expect(restoredSurfaceTab.shortcutID == claude.id)
+        #expect(restoredSurfaceTab.launchCommand == "claude")
+        #expect(restoredSurfaceTab.launchArgumentsJSON == "[\"--continue\"]")
+        #expect(persistedRestoredTab.shortcutID == claude.id)
+        #expect(persistedRestoredTab.launchCommand == "claude")
+        #expect(persistedRestoredTab.launchArgumentsJSON == "[\"--continue\"]")
+        #expect(newSession.shortcutID == codex.id)
+        #expect(newSessionTab.shortcutID == codex.id)
+        #expect(newSessionTab.launchCommand == "codex")
     }
 
     @Test
@@ -859,6 +1049,7 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
         let reloadedService = DefaultWorkspaceCommandService(
             store: reloadedStore,
             persistenceStore: reloadedPersistence,
+            portableSettingsFileStore: harness.portableSettingsFileStore,
             restoreCoordinator: RestoreCoordinator(persistenceStore: reloadedPersistence),
             terminalSurfaceManager: reloadedTerminal,
             fileAccess: LocalWorkspaceFileAccess(),
@@ -1628,9 +1819,11 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
         let fileAccess = LocalWorkspaceFileAccess()
         let fileBuffers = WorkspaceFileBufferController(fileAccess: fileAccess, now: now)
         let externalEditor = FakeIntegrationExternalEditorOpener()
+        let portableSettingsFileStore = temporaryPortableSettingsFileStore()
         let service = DefaultWorkspaceCommandService(
             store: store,
             persistenceStore: persistence,
+            portableSettingsFileStore: portableSettingsFileStore,
             restoreCoordinator: coordinator,
             terminalSurfaceManager: terminal,
             fileAccess: fileAccess,
@@ -1645,9 +1838,35 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
             terminal: terminal,
             fileBuffers: fileBuffers,
             externalEditor: externalEditor,
+            portableSettingsFileStore: portableSettingsFileStore,
             service: service,
             databasePath: databasePath
         )
+    }
+
+    private func temporaryPortableSettingsFileStore() -> PortableSettingsFileStore {
+        let url = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("native-mac-ade-integration-portable-settings-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("settings.json")
+        return PortableSettingsFileStore(canonicalURL: url)
+    }
+
+    private func loadedPortableConfig(from fileStore: PortableSettingsFileStore) throws -> PortableSettingsConfig {
+        switch try fileStore.load() {
+        case .loaded(let config, _):
+            return config
+        case .missingFile:
+            Issue.record("Expected portable settings config to exist")
+            return PortableSettingsConfig()
+        }
+    }
+
+    private func writePortableSettingsDocument(_ document: String, to fileStore: PortableSettingsFileStore) throws {
+        try FileManager.default.createDirectory(
+            at: fileStore.canonicalURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try document.write(to: fileStore.canonicalURL, atomically: true, encoding: .utf8)
     }
 
     private func temporaryDatabasePath() -> String {
@@ -1720,6 +1939,7 @@ private struct CommandServiceIntegrationHarness {
     let terminal: FakeIntegrationTerminalSurfaceManager
     let fileBuffers: WorkspaceFileBufferController
     let externalEditor: FakeIntegrationExternalEditorOpener
+    let portableSettingsFileStore: PortableSettingsFileStore
     let service: DefaultWorkspaceCommandService
     let databasePath: String
 }

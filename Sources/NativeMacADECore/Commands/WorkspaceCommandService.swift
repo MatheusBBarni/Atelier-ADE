@@ -70,6 +70,8 @@ public protocol WorkspaceCommandService: AppShellStartupServicing {
     func recordSettingsOpened(surface: String)
     func loadAppPreferences() async throws -> AppPreferences
     func saveAppPreferences(_ preferences: AppPreferences) async throws
+    func reloadPortableSettingsConfig() async throws -> PortableSettingsApplyResult
+    func portableSettingsConfigURL() -> URL
     func availableSessionShortcuts() async throws -> [SessionShortcut]
     func saveSessionShortcut(_ shortcut: SessionShortcut) async throws -> SessionShortcut
     func deleteSessionShortcut(id: UUID) async throws

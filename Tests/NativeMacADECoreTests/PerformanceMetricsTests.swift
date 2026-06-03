@@ -28,6 +28,17 @@ struct PerformanceMetricsTests {
         metrics.recordEffectiveThemeApplied()
         metrics.recordThemeRepair()
         metrics.recordKeybindingsChanged(changedCommandCount: 3)
+        metrics.recordPortableSettingsSeeded()
+        metrics.recordPortableSettingsSeedFailure()
+        metrics.recordPortableSettingsLoadFailure()
+        metrics.recordPortableSettingsReload(succeeded: true)
+        metrics.recordPortableSettingsReload(succeeded: false)
+        metrics.recordPortableSettingsExport(succeeded: true)
+        metrics.recordPortableSettingsExport(succeeded: false)
+        metrics.recordPortableSettingsApplyResult(PortableSettingsApplyResult(
+            appliedSections: [.appearance],
+            rejectedSections: ["keybindings": "duplicate_command_id:openSettings"]
+        ))
 
         #expect(metrics.settingsOpenedCount == 1)
         #expect(metrics.settingsSavedCount == 1)
@@ -37,6 +48,15 @@ struct PerformanceMetricsTests {
         #expect(metrics.themeRepairCount == 1)
         #expect(metrics.keybindingChangedCount == 3)
         #expect(metrics.lastSavedChangedKeybindingCount == 3)
+        #expect(metrics.portableSettingsSeededCount == 1)
+        #expect(metrics.portableSettingsSeedFailureCount == 1)
+        #expect(metrics.portableSettingsLoadFailureCount == 1)
+        #expect(metrics.portableSettingsReloadCount == 1)
+        #expect(metrics.portableSettingsReloadFailureCount == 1)
+        #expect(metrics.portableSettingsExportCount == 1)
+        #expect(metrics.portableSettingsExportFailureCount == 1)
+        #expect(metrics.portableSettingsPartialApplyCount == 1)
+        #expect(metrics.portableSettingsSectionRejectedCount == 1)
     }
 
     @Test
