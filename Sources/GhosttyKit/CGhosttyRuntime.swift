@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 @preconcurrency import CGhostty
 
@@ -10,6 +11,7 @@ struct CGhosttyRuntime: Sendable {
         let id: UInt64
         let appContextID: UInt64
         let inheritedSurfaceID: UInt64?
+        let usesNativeRenderer: Bool
         fileprivate var rawValue: ade_ghostty_surface_t
     }
 
@@ -36,25 +38,39 @@ struct CGhosttyRuntime: Sendable {
         return AppContext(id: result.app_context.id)
     }
 
+    @MainActor
     func createSurface(
         appContext: AppContext,
         configuration: GhosttyLaunchConfiguration,
-        inheritedSurfaceID: UInt64?
+        inheritedSurfaceID: UInt64?,
+        nativeView: NSView
     ) throws -> Surface {
         let argumentsJSON = String(data: try JSONEncoder().encode(configuration.arguments), encoding: .utf8) ?? "[]"
+        let environmentJSON = String(data: try JSONEncoder().encode(configuration.environment), encoding: .utf8) ?? "{}"
         let inherited = inheritedSurfaceID.map(String.init)
+        let commandLine = ghosttyCommandLine(configuration: configuration)
+        let metrics = nativeSurfaceMetrics(for: nativeView)
+        let nativeViewPointer = Unmanaged.passUnretained(nativeView).toOpaque()
         let result = configuration.workingDirectory.withCString { workingDirectoryPointer in
-            withOptionalCString(configuration.command) { commandPointer in
+            withOptionalCString(commandLine) { commandPointer in
                 argumentsJSON.withCString { argumentsPointer in
-                    withOptionalCString(inherited) { inheritedPointer in
-                        ade_ghostty_create_surface(
-                            ade_ghostty_app_context_t(id: appContext.id),
-                            workingDirectoryPointer,
-                            commandPointer,
-                            argumentsPointer,
-                            inheritedPointer,
-                            forceSurfaceCreationFailure
-                        )
+                    environmentJSON.withCString { environmentPointer in
+                        withOptionalCString(inherited) { inheritedPointer in
+                            ade_ghostty_create_surface(
+                                ade_ghostty_app_context_t(id: appContext.id),
+                                workingDirectoryPointer,
+                                commandPointer,
+                                argumentsPointer,
+                                environmentPointer,
+                                inheritedPointer,
+                                nativeViewPointer,
+                                metrics.scaleFactor,
+                                metrics.widthPixels,
+                                metrics.heightPixels,
+                                Float(configuration.appearance.fontSize),
+                                forceSurfaceCreationFailure
+                            )
+                        }
                     }
                 }
             }
@@ -68,6 +84,7 @@ struct CGhosttyRuntime: Sendable {
             id: result.surface.id,
             appContextID: result.surface.app_context_id,
             inheritedSurfaceID: result.surface.has_inherited_context ? result.surface.inherited_surface_id : nil,
+            usesNativeRenderer: result.surface.uses_native_renderer,
             rawValue: result.surface
         )
     }
@@ -76,8 +93,17 @@ struct CGhosttyRuntime: Sendable {
         ade_ghostty_focus_surface(&surface.rawValue, focused)
     }
 
-    func resize(surface: inout Surface, columns: Int, rows: Int) {
-        ade_ghostty_resize_surface(&surface.rawValue, Int32(columns), Int32(rows))
+    @MainActor
+    func resize(surface: inout Surface, columns: Int, rows: Int, nativeView: NSView?) {
+        let metrics = nativeView.map { nativeSurfaceMetrics(for: $0) } ?? NativeSurfaceMetrics(widthPixels: 1, heightPixels: 1, scaleFactor: 1)
+        ade_ghostty_resize_surface(
+            &surface.rawValue,
+            Int32(columns),
+            Int32(rows),
+            metrics.widthPixels,
+            metrics.heightPixels,
+            metrics.scaleFactor
+        )
     }
 
     func canClose(surface: Surface) -> Bool {
@@ -96,6 +122,14 @@ struct CGhosttyRuntime: Sendable {
         ade_ghostty_destroy_surface(&surface.rawValue)
     }
 
+    func tick(appContext: AppContext) {
+        ade_ghostty_tick_app(ade_ghostty_app_context_t(id: appContext.id))
+    }
+
+    func draw(surface: Surface) {
+        ade_ghostty_draw_surface(surface.rawValue)
+    }
+
     private func mapError(code: ade_ghostty_error_code_t, message: UnsafePointer<CChar>?) -> GhosttyAdapterError {
         let message = message.map(String.init(cString:)) ?? "Unknown Ghostty failure"
         switch code {
@@ -109,6 +143,41 @@ struct CGhosttyRuntime: Sendable {
             return .unknown(message)
         }
     }
+}
+
+private struct NativeSurfaceMetrics {
+    var widthPixels: UInt32
+    var heightPixels: UInt32
+    var scaleFactor: Double
+}
+
+@MainActor
+private func nativeSurfaceMetrics(for view: NSView) -> NativeSurfaceMetrics {
+    let scaleFactor = view.window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 1
+    let backingBounds = view.convertToBacking(view.bounds)
+    return NativeSurfaceMetrics(
+        widthPixels: UInt32(max(backingBounds.width.rounded(), 1)),
+        heightPixels: UInt32(max(backingBounds.height.rounded(), 1)),
+        scaleFactor: scaleFactor
+    )
+}
+
+private func ghosttyCommandLine(configuration: GhosttyLaunchConfiguration) -> String? {
+    guard let command = configuration.command, !command.isEmpty else { return nil }
+    return ([command] + configuration.arguments)
+        .map(shellQuoted)
+        .joined(separator: " ")
+}
+
+private func shellQuoted(_ argument: String) -> String {
+    guard !argument.isEmpty else { return "''" }
+
+    let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_+-./:=@")
+    if argument.unicodeScalars.allSatisfy({ allowed.contains($0) }) {
+        return argument
+    }
+
+    return "'" + argument.replacingOccurrences(of: "'", with: "'\\''") + "'"
 }
 
 private func withOptionalCString<Result>(

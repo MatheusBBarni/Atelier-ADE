@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import NativeMacADECore
 import SwiftUI
 
@@ -14,6 +15,7 @@ struct AtelierApp: App {
     private let fileBufferController: any WorkspaceFileBufferManaging
 
     init() {
+        setenv("ADE_GHOSTTY_ENABLE_NATIVE", "1", 1)
         self.init(container: .live())
     }
 

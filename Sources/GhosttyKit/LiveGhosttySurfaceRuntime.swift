@@ -9,6 +9,7 @@ public final class LiveGhosttySurfaceRuntime: GhosttySurfaceRuntime {
 
     private let cRuntime: CGhosttyRuntime
     private var surfaces: [UUID: SurfaceRecord] = [:]
+    private var renderTasksBySurfaceID: [UUID: Task<Void, Never>] = [:]
 
     public init() {
         self.cRuntime = CGhosttyRuntime()
@@ -36,25 +37,33 @@ public final class LiveGhosttySurfaceRuntime: GhosttySurfaceRuntime {
         }
 
         let inheritedRawID = configuration.inheritedSurfaceID.flatMap { surfaces[$0]?.rawSurface.id }
+        let renderView = GhosttySurfaceRenderView(configuration: configuration)
         let rawSurface = try cRuntime.createSurface(
             appContext: appContext,
             configuration: configuration,
-            inheritedSurfaceID: inheritedRawID
+            inheritedSurfaceID: inheritedRawID,
+            nativeView: renderView
         )
         let handle = GhosttySurfaceHandle(
             rawSurfaceID: rawSurface.id,
             appContextID: rawSurface.appContextID,
             inheritedSurfaceRawID: rawSurface.inheritedSurfaceID
         )
+        let nativeView: NSView = rawSurface.usesNativeRenderer
+            ? renderView
+            : GhosttySurfaceDiagnosticView(configuration: configuration, rawSurface: rawSurface)
 
         surfaces[handle.id] = SurfaceRecord(
             configuration: configuration,
             rawSurface: rawSurface,
-            nativeView: GhosttySurfaceDiagnosticView(configuration: configuration, rawSurface: rawSurface),
+            nativeView: nativeView,
             focused: false,
             columns: 80,
             rows: 24
         )
+        if rawSurface.usesNativeRenderer {
+            startRendering(surfaceID: handle.id)
+        }
         return handle
     }
 
@@ -71,7 +80,7 @@ public final class LiveGhosttySurfaceRuntime: GhosttySurfaceRuntime {
 
     public func resize(surface: GhosttySurfaceHandle, columns: Int, rows: Int) {
         guard var record = surfaces[surface.id] else { return }
-        cRuntime.resize(surface: &record.rawSurface, columns: columns, rows: rows)
+        cRuntime.resize(surface: &record.rawSurface, columns: columns, rows: rows, nativeView: record.nativeView)
         record.columns = columns
         record.rows = rows
         surfaces[surface.id] = record
@@ -94,6 +103,8 @@ public final class LiveGhosttySurfaceRuntime: GhosttySurfaceRuntime {
 
     public func destroySurface(_ surface: GhosttySurfaceHandle) {
         guard var record = surfaces[surface.id] else { return }
+        renderTasksBySurfaceID[surface.id]?.cancel()
+        renderTasksBySurfaceID[surface.id] = nil
         cRuntime.destroy(surface: &record.rawSurface)
         surfaces[surface.id] = nil
     }
@@ -110,6 +121,24 @@ public final class LiveGhosttySurfaceRuntime: GhosttySurfaceRuntime {
         guard let record = surfaces[surface.id] else { return nil }
         return (record.columns, record.rows)
     }
+
+    func usesNativeRenderer(surface: GhosttySurfaceHandle) -> Bool {
+        surfaces[surface.id]?.rawSurface.usesNativeRenderer == true
+    }
+
+    private func startRendering(surfaceID: UUID) {
+        renderTasksBySurfaceID[surfaceID]?.cancel()
+        renderTasksBySurfaceID[surfaceID] = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                guard let self, let record = self.surfaces[surfaceID], let appContext = Self.sharedAppContext else {
+                    return
+                }
+                self.cRuntime.tick(appContext: appContext)
+                self.cRuntime.draw(surface: record.rawSurface)
+                try? await Task.sleep(for: .milliseconds(16))
+            }
+        }
+    }
 }
 
 @MainActor
@@ -120,6 +149,28 @@ private struct SurfaceRecord {
     var focused: Bool
     var columns: Int
     var rows: Int
+}
+
+@MainActor
+private final class GhosttySurfaceRenderView: NSView {
+    init(configuration: GhosttyLaunchConfiguration) {
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.ghosttyKitColor(
+            hex: configuration.appearance.backgroundHex,
+            fallback: .black
+        ).cgColor
+        setAccessibilityLabel("Ghostty native surface")
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override var acceptsFirstResponder: Bool {
+        true
+    }
 }
 
 @MainActor

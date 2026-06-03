@@ -30,6 +30,7 @@ typedef struct ade_ghostty_app_context {
 typedef struct ade_ghostty_surface {
     uint64_t id;
     uint64_t app_context_id;
+    bool uses_native_renderer;
     bool focused;
     bool exited;
     bool close_allowed;
@@ -38,6 +39,9 @@ typedef struct ade_ghostty_surface {
     int32_t exit_status;
     int32_t columns;
     int32_t rows;
+    void *native_surface;
+    void *native_working_directory;
+    void *native_command;
 } ade_ghostty_surface_t;
 
 typedef struct ade_ghostty_init_result {
@@ -63,15 +67,30 @@ ade_ghostty_surface_result_t ade_ghostty_create_surface(
     const char *working_directory,
     const char *command,
     const char *arguments_json,
+    const char *environment_json,
     const char *inherited_surface_id,
+    void *native_view,
+    double scale_factor,
+    uint32_t width_px,
+    uint32_t height_px,
+    float font_size,
     bool force_failure
 );
 
 void ade_ghostty_focus_surface(ade_ghostty_surface_t *surface, bool focused);
-void ade_ghostty_resize_surface(ade_ghostty_surface_t *surface, int32_t columns, int32_t rows);
+void ade_ghostty_resize_surface(
+    ade_ghostty_surface_t *surface,
+    int32_t columns,
+    int32_t rows,
+    uint32_t width_px,
+    uint32_t height_px,
+    double scale_factor
+);
 bool ade_ghostty_surface_can_close(ade_ghostty_surface_t surface);
 bool ade_ghostty_surface_has_exited(ade_ghostty_surface_t surface);
 int32_t ade_ghostty_surface_exit_status(ade_ghostty_surface_t surface);
+void ade_ghostty_tick_app(ade_ghostty_app_context_t app_context);
+void ade_ghostty_draw_surface(ade_ghostty_surface_t surface);
 void ade_ghostty_destroy_surface(ade_ghostty_surface_t *surface);
 
 #endif

@@ -66,3 +66,16 @@ Result: Still not certified as complete.
 - The wrapper runtime now returns a visible diagnostic AppKit surface instead of a blank `NSView`; this is covered by `GhosttySurfaceRuntimeTests.surfaceCreationPreservesLaunchAndAppearancePayloads`.
 
 The manual correctness baseline remains pending because `ThirdParty/Ghostty/GhosttyPin.json` still points to a pinned source revision and notes that `CGhostty` must be replaced with direct calls into a matching vendored `libghostty` binary artifact when available. This follow-up fixes the silent blank/windowless failure path, but it does not certify real interactive Ghostty terminal behavior for vim-style TUIs, htop-style TUIs, tmux-style workflows, shell input, copy/paste, rendering fidelity, heavy output, or streaming agent output.
+
+## 2026-06-03 Native Ghostty Surface Evidence
+
+Result: Real native Ghostty rendering is now observable, but the full manual baseline is still not certified.
+
+- `swift test --filter 'GhosttySurfaceRuntimeTests|GhosttyAdapterTests|TerminalLaunchTranslatorTests|TerminalHostControllerTests|TerminalHostIntegrationTests|ScaffoldIntegrationTests'` passed 58 tests in 6 suites.
+- `./scripts/run.sh bundle` rebuilt and signed `.build/arm64-apple-macosx/debug/Atelier.app` successfully.
+- `open -n .build/arm64-apple-macosx/debug/Atelier.app --args -ApplePersistenceIgnoreState YES` launched process `NativeMacADE`.
+- `.tmp/atelier-native-ghostty-window-after-string-retain.png` captured a real Ghostty-rendered Codex TUI inside the app, replacing the prior diagnostic placeholder and the previous `Ghostty failed to launch the requested command` surface.
+- The launch-command corruption was fixed by retaining the native Ghostty `working_directory` and `command` strings for the surface lifetime instead of passing transient Swift string pointers into the dynamic C bridge.
+- `swift test` passed 446 tests in 41 suites after the native string-retention change.
+
+Remaining manual baseline items: vim-style TUI, htop-style TUI, tmux-style workflow, shell prompt/input, copy/paste, colors, Unicode, ligatures, alternate screen behavior, long build output, logs, and streaming agent output.
