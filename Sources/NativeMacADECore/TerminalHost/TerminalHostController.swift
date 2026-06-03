@@ -164,6 +164,8 @@ public final class TerminalHostController: WorkspaceTerminalSurfaceManaging {
     }
 
     private func resize(tabID: UUID, size: CGSize) {
+        guard size.width.isFinite, size.height.isFinite else { return }
+
         let columns = max(Int(size.width / 8), 1)
         let rows = max(Int(size.height / 16), 1)
         resize(tabID: tabID, columns: columns, rows: rows)
@@ -239,9 +241,13 @@ public final class TerminalSurfaceHostNSView: NSView {
     }
 
     public override func setFrameSize(_ newSize: NSSize) {
-        super.setFrameSize(newSize)
+        super.setFrameSize(newSize.finiteTerminalHostSize)
         layoutEmbeddedSurfaceView()
         onResize?(contentBounds.size)
+    }
+
+    public override func setFrameOrigin(_ newOrigin: NSPoint) {
+        super.setFrameOrigin(newOrigin.finiteTerminalHostPoint)
     }
 
     public override func layout() {
@@ -278,7 +284,28 @@ public final class TerminalSurfaceHostNSView: NSView {
     }
 
     private var contentBounds: NSRect {
-        bounds.insetBy(dx: Self.contentInsets.left, dy: Self.contentInsets.top)
+        let finiteBounds = bounds.finiteTerminalHostRect
+        let width = max(finiteBounds.width - Self.contentInsets.left - Self.contentInsets.right, 0)
+        let height = max(finiteBounds.height - Self.contentInsets.top - Self.contentInsets.bottom, 0)
+        return NSRect(x: Self.contentInsets.left, y: Self.contentInsets.bottom, width: width, height: height)
+    }
+}
+
+private extension NSPoint {
+    var finiteTerminalHostPoint: NSPoint {
+        NSPoint(x: x.isFinite ? x : 0, y: y.isFinite ? y : 0)
+    }
+}
+
+private extension NSSize {
+    var finiteTerminalHostSize: NSSize {
+        NSSize(width: width.isFinite ? max(width, 0) : 0, height: height.isFinite ? max(height, 0) : 0)
+    }
+}
+
+private extension NSRect {
+    var finiteTerminalHostRect: NSRect {
+        NSRect(origin: origin.finiteTerminalHostPoint, size: size.finiteTerminalHostSize)
     }
 }
 

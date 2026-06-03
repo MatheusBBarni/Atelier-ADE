@@ -95,6 +95,29 @@ struct TerminalHostControllerTests {
         #expect(adapter.destroyedSurfaces == adapter.createdSurfaces)
         #expect(controller.surface(for: tab.id) == nil)
     }
+
+    @Test
+    func terminalHostSanitizesNonFiniteGeometryBeforeLayingOutNativeView() throws {
+        let view = TerminalSurfaceHostNSView()
+        let tab = WorkspaceTab(sessionID: UUID(), workingDirectory: "/tmp/native-mac-ade-unit-finite-geometry", ordinal: 0)
+        let nativeView = NSView()
+        var resizeSizes: [CGSize] = []
+
+        view.onResize = { resizeSizes.append($0) }
+        view.setFrameOrigin(NSPoint(x: CGFloat.infinity, y: CGFloat.nan))
+        view.setFrameSize(NSSize(width: CGFloat.infinity, height: CGFloat.nan))
+        view.attach(surface: GhosttySurfaceHandle(), tab: tab, appearance: .cursorDefault, nativeView: nativeView)
+
+        #expect(view.frame.origin.x.isFinite)
+        #expect(view.frame.origin.y.isFinite)
+        #expect(view.frame.width.isFinite)
+        #expect(view.frame.height.isFinite)
+        #expect(nativeView.frame.origin.x.isFinite)
+        #expect(nativeView.frame.origin.y.isFinite)
+        #expect(nativeView.frame.width.isFinite)
+        #expect(nativeView.frame.height.isFinite)
+        #expect(resizeSizes.allSatisfy { $0.width.isFinite && $0.height.isFinite })
+    }
 }
 
 @MainActor

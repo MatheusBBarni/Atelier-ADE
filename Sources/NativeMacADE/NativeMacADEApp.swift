@@ -252,10 +252,26 @@ struct AtelierApp: App {
     }
 }
 
+@MainActor
 private final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(250)) {
+            self.ensureMainWindowVisible()
+        }
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag {
+            ensureMainWindowVisible()
+        }
+        return true
+    }
+
+    private func ensureMainWindowVisible() {
+        guard !NSApp.windows.contains(where: { $0.isVisible || $0.isMiniaturized }) else { return }
+        NSApp.sendAction(#selector(NSWindow.newWindowForTab(_:)), to: nil, from: nil)
     }
 }
 

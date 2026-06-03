@@ -65,6 +65,9 @@ struct GhosttySurfaceRuntimeTests {
         #expect(storedConfiguration.environment == ["CODEX_TUI_DISABLE_KEYBOARD_ENHANCEMENT": "1"])
         #expect(storedConfiguration.appearance == appearance)
         #expect(runtime.nativeView(for: surface) === nativeView)
+        #expect(nativeView.accessibilityLabel() == "Ghostty bridge diagnostic surface")
+        #expect(nativeView.subviews.isEmpty == false)
+        #expect(nativeView.layer?.backgroundColor != nil)
     }
 
     @Test

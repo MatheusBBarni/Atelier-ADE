@@ -51,3 +51,18 @@ This file records the attempted manual QA evidence. It does not certify the manu
 ## Follow-Up Required
 
 Before task 06 can be marked complete, rerun the manual baseline in an environment where `Atelier.app` creates a visible window and the embedded Ghostty terminal surface is available. If the windowless launch reproduces outside automation, fix the AppKit/SwiftUI startup geometry issue first, then rerun this checklist.
+
+## 2026-06-03 Follow-Up Evidence
+
+Result: Still not certified as complete.
+
+- `swift test --filter 'GhosttySurfaceRuntimeTests|TerminalHostControllerTests|TerminalHostIntegrationTests'` passed 33 tests in 3 suites.
+- `swift test` passed 446 tests in 41 suites.
+- `./scripts/run.sh bundle` rebuilt and signed `.build/arm64-apple-macosx/debug/Atelier.app` successfully.
+- `open -n .build/arm64-apple-macosx/debug/Atelier.app --args -ApplePersistenceIgnoreState YES` launched process `NativeMacADE`.
+- `osascript -e 'tell application "System Events" to tell process "Atelier" to get {frontmost, visible, count of windows, name of windows}'` returned `true, true, 1, Atelier`.
+- Recent `/usr/bin/log show --predicate 'process == "NativeMacADE"' --last 2m` did not include the prior `Invalid view geometry: x is infinity` or `Invalid view geometry: y is infinity` AppKit messages.
+- Window screenshot capture remains unavailable in this automation session: `screencapture -x -l <Atelier window id>` returned `could not create image from window`.
+- The wrapper runtime now returns a visible diagnostic AppKit surface instead of a blank `NSView`; this is covered by `GhosttySurfaceRuntimeTests.surfaceCreationPreservesLaunchAndAppearancePayloads`.
+
+The manual correctness baseline remains pending because `ThirdParty/Ghostty/GhosttyPin.json` still points to a pinned source revision and notes that `CGhostty` must be replaced with direct calls into a matching vendored `libghostty` binary artifact when available. This follow-up fixes the silent blank/windowless failure path, but it does not certify real interactive Ghostty terminal behavior for vim-style TUIs, htop-style TUIs, tmux-style workflows, shell input, copy/paste, rendering fidelity, heavy output, or streaming agent output.
