@@ -39,10 +39,16 @@ typedef struct ade_ghostty_surface {
     int32_t exit_status;
     int32_t columns;
     int32_t rows;
+    uintptr_t environment_count;
     void *native_surface;
     void *native_working_directory;
     void *native_command;
 } ade_ghostty_surface_t;
+
+typedef struct ade_ghostty_env_var {
+    const char *key;
+    const char *value;
+} ade_ghostty_env_var_t;
 
 typedef enum ade_ghostty_key_action {
     ADE_GHOSTTY_KEY_RELEASE = 0,
@@ -97,7 +103,8 @@ ade_ghostty_surface_result_t ade_ghostty_create_surface(
     const char *working_directory,
     const char *command,
     const char *arguments_json,
-    const char *environment_json,
+    const ade_ghostty_env_var_t *environment,
+    uintptr_t environment_count,
     const char *inherited_surface_id,
     void *native_view,
     double scale_factor,

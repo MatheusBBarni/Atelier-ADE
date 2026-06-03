@@ -63,6 +63,7 @@ struct GhosttySurfaceRuntimeTests {
         #expect(storedConfiguration.command == "codex")
         #expect(storedConfiguration.arguments == ["--full-auto", "-c", "tui.raw_output_mode=true"])
         #expect(storedConfiguration.environment == ["CODEX_TUI_DISABLE_KEYBOARD_ENHANCEMENT": "1"])
+        #expect(runtime.environmentVariableCount(surface: surface) == 1)
         #expect(storedConfiguration.appearance == appearance)
         #expect(runtime.nativeView(for: surface) === nativeView)
         #expect(nativeView.accessibilityLabel() == "Ghostty bridge diagnostic surface")

@@ -298,7 +298,8 @@ ade_ghostty_surface_result_t ade_ghostty_create_surface(
     const char *working_directory,
     const char *command,
     const char *arguments_json,
-    const char *environment_json,
+    const ade_ghostty_env_var_t *environment,
+    uintptr_t environment_count,
     const char *inherited_surface_id,
     void *native_view,
     double scale_factor,
@@ -308,7 +309,6 @@ ade_ghostty_surface_result_t ade_ghostty_create_surface(
     bool force_failure
 ) {
     (void)arguments_json;
-    (void)environment_json;
 
     if (!app_initialized || app_context.id != 1) {
         return (ade_ghostty_surface_result_t) {
@@ -334,6 +334,7 @@ ade_ghostty_surface_result_t ade_ghostty_create_surface(
     ade_native_surface_t native_surface = NULL;
     char *native_working_directory = NULL;
     char *native_command = NULL;
+    ade_native_env_var_t *native_environment = NULL;
     if (native_context.app != NULL && native_view != NULL) {
         ade_native_surface_config_t config = native_api.surface_config_new();
         native_working_directory = strdup(working_directory);
@@ -355,6 +356,41 @@ ade_ghostty_surface_result_t ade_ghostty_create_surface(
                 };
             }
         }
+        if (environment_count > 0) {
+            if (environment == NULL || environment_count > SIZE_MAX / sizeof(ade_native_env_var_t)) {
+                free(native_working_directory);
+                free(native_command);
+                return (ade_ghostty_surface_result_t) {
+                    .code = ADE_GHOSTTY_SURFACE_CREATE_FAILED,
+                    .message = "Invalid Ghostty launch environment",
+                    .surface = { 0 }
+                };
+            }
+            native_environment = calloc((size_t)environment_count, sizeof(ade_native_env_var_t));
+            if (native_environment == NULL) {
+                free(native_working_directory);
+                free(native_command);
+                return (ade_ghostty_surface_result_t) {
+                    .code = ADE_GHOSTTY_SURFACE_CREATE_FAILED,
+                    .message = "Failed to retain Ghostty launch environment",
+                    .surface = { 0 }
+                };
+            }
+            for (uintptr_t i = 0; i < environment_count; i++) {
+                if (environment[i].key == NULL || environment[i].value == NULL) {
+                    free(native_environment);
+                    free(native_working_directory);
+                    free(native_command);
+                    return (ade_ghostty_surface_result_t) {
+                        .code = ADE_GHOSTTY_SURFACE_CREATE_FAILED,
+                        .message = "Invalid Ghostty launch environment",
+                        .surface = { 0 }
+                    };
+                }
+                native_environment[i].key = environment[i].key;
+                native_environment[i].value = environment[i].value;
+            }
+        }
 
         config.platform_tag = ADE_NATIVE_PLATFORM_MACOS;
         config.platform.macos.nsview = native_view;
@@ -363,8 +399,12 @@ ade_ghostty_surface_result_t ade_ghostty_create_surface(
         config.font_size = font_size;
         config.working_directory = native_working_directory;
         config.command = native_command;
+        config.env_vars = native_environment;
+        config.env_var_count = (size_t)environment_count;
         config.context = ADE_NATIVE_SURFACE_CONTEXT_TAB;
         native_surface = native_api.surface_new(native_context.app, &config);
+        free(native_environment);
+        native_environment = NULL;
         if (native_surface != NULL) {
             native_api.surface_set_content_scale(native_surface, config.scale_factor, config.scale_factor);
             native_api.surface_set_size(native_surface, width_px > 0 ? width_px : 1, height_px > 0 ? height_px : 1);
@@ -391,6 +431,7 @@ ade_ghostty_surface_result_t ade_ghostty_create_surface(
             .exit_status = 0,
             .columns = 80,
             .rows = 24,
+            .environment_count = environment_count,
             .native_surface = native_surface,
             .native_working_directory = native_working_directory,
             .native_command = native_command

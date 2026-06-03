@@ -134,6 +134,10 @@ public final class LiveGhosttySurfaceRuntime: GhosttySurfaceRuntime {
         surfaces[surface.id]?.rawSurface.usesNativeRenderer == true
     }
 
+    func environmentVariableCount(surface: GhosttySurfaceHandle) -> Int? {
+        surfaces[surface.id]?.rawSurface.environmentVariableCount
+    }
+
     private func startRendering(surfaceID: UUID) {
         renderTasksBySurfaceID[surfaceID]?.cancel()
         renderTasksBySurfaceID[surfaceID] = Task { @MainActor [weak self] in

@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import Foundation
 @preconcurrency import CGhostty
 
@@ -12,6 +13,7 @@ struct CGhosttyRuntime: Sendable {
         let appContextID: UInt64
         let inheritedSurfaceID: UInt64?
         let usesNativeRenderer: Bool
+        let environmentVariableCount: Int
         fileprivate var rawValue: ade_ghostty_surface_t
     }
 
@@ -73,15 +75,14 @@ struct CGhosttyRuntime: Sendable {
         nativeView: NSView
     ) throws -> Surface {
         let argumentsJSON = String(data: try JSONEncoder().encode(configuration.arguments), encoding: .utf8) ?? "[]"
-        let environmentJSON = String(data: try JSONEncoder().encode(configuration.environment), encoding: .utf8) ?? "{}"
         let inherited = inheritedSurfaceID.map(String.init)
         let commandLine = ghosttyCommandLine(configuration: configuration)
         let metrics = nativeSurfaceMetrics(for: nativeView)
         let nativeViewPointer = Unmanaged.passUnretained(nativeView).toOpaque()
-        let result = configuration.workingDirectory.withCString { workingDirectoryPointer in
-            withOptionalCString(commandLine) { commandPointer in
-                argumentsJSON.withCString { argumentsPointer in
-                    environmentJSON.withCString { environmentPointer in
+        let result = try withNativeEnvironment(configuration.environment) { environmentPointer, environmentCount in
+            configuration.workingDirectory.withCString { workingDirectoryPointer in
+                withOptionalCString(commandLine) { commandPointer in
+                    argumentsJSON.withCString { argumentsPointer in
                         withOptionalCString(inherited) { inheritedPointer in
                             ade_ghostty_create_surface(
                                 ade_ghostty_app_context_t(id: appContext.id),
@@ -89,6 +90,7 @@ struct CGhosttyRuntime: Sendable {
                                 commandPointer,
                                 argumentsPointer,
                                 environmentPointer,
+                                UInt(environmentCount),
                                 inheritedPointer,
                                 nativeViewPointer,
                                 metrics.scaleFactor,
@@ -112,6 +114,7 @@ struct CGhosttyRuntime: Sendable {
             appContextID: result.surface.app_context_id,
             inheritedSurfaceID: result.surface.has_inherited_context ? result.surface.inherited_surface_id : nil,
             usesNativeRenderer: result.surface.uses_native_renderer,
+            environmentVariableCount: Int(result.surface.environment_count),
             rawValue: result.surface
         )
     }
@@ -244,4 +247,44 @@ private func withOptionalCString<Result>(
 ) -> Result {
     guard let string else { return body(nil) }
     return string.withCString(body)
+}
+
+private func withNativeEnvironment<Result>(
+    _ environment: [String: String],
+    _ body: (UnsafePointer<ade_ghostty_env_var_t>?, Int) throws -> Result
+) throws -> Result {
+    guard !environment.isEmpty else {
+        return try body(nil, 0)
+    }
+
+    var retainedStrings: [UnsafeMutablePointer<CChar>] = []
+    var entries: [ade_ghostty_env_var_t] = []
+    retainedStrings.reserveCapacity(environment.count * 2)
+    entries.reserveCapacity(environment.count)
+    defer {
+        for pointer in retainedStrings {
+            free(pointer)
+        }
+    }
+
+    for (key, value) in environment.sorted(by: { $0.key < $1.key }) {
+        guard let keyPointer = strdup(key) else {
+            throw GhosttyAdapterError.surfaceCreationFailed("Failed to retain Ghostty launch environment")
+        }
+        retainedStrings.append(keyPointer)
+
+        guard let valuePointer = strdup(value) else {
+            throw GhosttyAdapterError.surfaceCreationFailed("Failed to retain Ghostty launch environment")
+        }
+        retainedStrings.append(valuePointer)
+
+        entries.append(ade_ghostty_env_var_t(
+            key: UnsafePointer(keyPointer),
+            value: UnsafePointer(valuePointer)
+        ))
+    }
+
+    return try entries.withUnsafeBufferPointer { buffer in
+        try body(buffer.baseAddress, buffer.count)
+    }
 }
