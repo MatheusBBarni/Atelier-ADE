@@ -48,12 +48,13 @@ struct TerminalHostIntegrationTests {
         let tab = WorkspaceTab(sessionID: UUID(), workingDirectory: "/tmp/native-mac-ade-theme-default", ordinal: 0)
 
         let view = try #require(controller.makeHostView(for: tab, isActive: true) as? TerminalSurfaceHostNSView)
-        _ = try await controller.createSurface(for: tab)
+        let surface = try await controller.createSurface(for: tab)
+        let nativeView = try #require(adapter.nativeViewsBySurface[surface])
 
         #expect(view.terminalAppearance == AppTheme.defaultTheme.terminalAppearance)
-        #expect(view.attachedSurface != nil)
-        #expect(view.embeddedSurfaceView != nil)
-        #expect(view.subviews.contains(where: { $0 === view.embeddedSurfaceView }))
+        #expect(view.attachedSurface == surface)
+        #expect(view.embeddedSurfaceView === nativeView)
+        #expect(view.subviews.contains(where: { $0 === nativeView }))
         #expect(view.layer?.backgroundColor == NSColor(hex: AppTheme.defaultTheme.terminalAppearance.backgroundHex).cgColor)
     }
 
@@ -301,15 +302,18 @@ struct TerminalHostIntegrationTests {
         let secondTab = WorkspaceTab(sessionID: firstTab.sessionID, workingDirectory: "/tmp/native-mac-ade-second", ordinal: 1)
         let view = try #require(controller.makeHostView(for: firstTab, isActive: true) as? TerminalSurfaceHostNSView)
         let firstSurface = try await controller.createSurface(for: firstTab)
+        let firstNativeView = try #require(adapter.nativeViewsBySurface[firstSurface])
 
         controller.updateHostView(view, tab: secondTab, isActive: true)
         let secondSurface = try await controller.createSurface(for: secondTab)
+        let secondNativeView = try #require(adapter.nativeViewsBySurface[secondSurface])
         controller.releaseSurface(for: firstTab.id)
 
         #expect(firstSurface != secondSurface)
         #expect(view.tabID == secondTab.id)
         #expect(view.attachedSurface == secondSurface)
-        #expect(view.embeddedSurfaceView != nil)
+        #expect(view.embeddedSurfaceView === secondNativeView)
+        #expect(firstNativeView.superview == nil)
     }
 
     @Test
@@ -342,51 +346,47 @@ struct TerminalHostIntegrationTests {
     }
 
     @Test
-    func embeddedShellPreventsCloseWhileProcessIsRunning() async throws {
-        let controller = TerminalHostController(adapter: RecordingGhosttyAdapter(usesEmbeddedSessionDriver: true))
-        let workingDirectory = try makeTemporaryDirectory()
-        let tab = WorkspaceTab(sessionID: UUID(), workingDirectory: workingDirectory, ordinal: 0)
+    func canCloseUsesGhosttyAdapterRuntimeState() async throws {
+        let adapter = RecordingGhosttyAdapter()
+        adapter.canCloseResult = false
+        let controller = TerminalHostController(adapter: adapter)
+        let tab = WorkspaceTab(sessionID: UUID(), workingDirectory: "/tmp/native-mac-ade-close", ordinal: 0)
 
         let surface = try await controller.createSurface(for: tab)
 
         #expect(await controller.canClose(surface: surface) == false)
-
-        controller.releaseSurface(for: tab.id)
     }
 
     @Test
-    func liveTerminalHostRelayoutsSwiftTermViewAfterZeroSizedInitialAttach() async throws {
-        let controller = TerminalHostController(adapter: RecordingGhosttyAdapter(usesEmbeddedSessionDriver: true))
-        let workingDirectory = try makeTemporaryDirectory()
-        let tab = WorkspaceTab(sessionID: UUID(), workingDirectory: workingDirectory, ordinal: 0)
+    func terminalHostRelayoutsGhosttyNativeViewAfterZeroSizedInitialAttach() async throws {
+        let adapter = RecordingGhosttyAdapter()
+        let controller = TerminalHostController(adapter: adapter)
+        let tab = WorkspaceTab(sessionID: UUID(), workingDirectory: "/tmp/native-mac-ade-native-relayout", ordinal: 0)
         let view = try #require(controller.makeHostView(for: tab, isActive: true) as? TerminalSurfaceHostNSView)
 
-        _ = try await controller.createSurface(for: tab)
+        let surface = try await controller.createSurface(for: tab)
         view.setFrameSize(NSSize(width: 800, height: 320))
-        try await waitUntil("swiftterm view attachment") {
-            guard let terminalView = view.localProcessTerminalView else { return false }
-            return terminalView.frame.width > 0 && terminalView.frame.height > 0 && terminalView.process.running
+        let nativeView = try #require(adapter.nativeViewsBySurface[surface])
+
+        try await waitUntil("ghostty native view attachment") {
+            nativeView.frame.width > 0 && nativeView.frame.height > 0
         }
 
-        let terminalView = try #require(view.localProcessTerminalView)
-        #expect(terminalView.frame.width > 0)
-        #expect(terminalView.frame.height > 0)
-        #expect(terminalView.process.running)
+        #expect(view.embeddedSurfaceView === nativeView)
+        #expect(nativeView.frame.width > 0)
+        #expect(nativeView.frame.height > 0)
 
         controller.releaseSurface(for: tab.id)
     }
 
     @Test
-    func liveEmbeddedTerminalHostRefreshesAttachedViewAppearance() async throws {
-        let controller = TerminalHostController(adapter: RecordingGhosttyAdapter(usesEmbeddedSessionDriver: true))
-        let workingDirectory = try makeTemporaryDirectory()
-        let tab = WorkspaceTab(sessionID: UUID(), workingDirectory: workingDirectory, ordinal: 0)
+    func ghosttyTerminalHostRefreshesAttachedViewAppearance() async throws {
+        let adapter = RecordingGhosttyAdapter()
+        let controller = TerminalHostController(adapter: adapter)
+        let tab = WorkspaceTab(sessionID: UUID(), workingDirectory: "/tmp/native-mac-ade-native-appearance", ordinal: 0)
         let view = try #require(controller.makeHostView(for: tab, isActive: true) as? TerminalSurfaceHostNSView)
 
         _ = try await controller.createSurface(for: tab)
-        try await waitUntil("swiftterm view attachment") {
-            view.localProcessTerminalView?.process.running == true
-        }
 
         controller.updateAppearance(AppTheme.dracula.terminalAppearance)
 
@@ -410,7 +410,6 @@ struct TerminalHostIntegrationTests {
 
 @MainActor
 private final class RecordingGhosttyAdapter: GhosttyAdapter {
-    let usesEmbeddedSessionDriver: Bool
     private(set) var initializeCallCount = 0
     private(set) var createdConfigurations: [GhosttyLaunchConfiguration] = []
     private(set) var focusedSurfaces: [GhosttySurfaceHandle] = []
@@ -421,10 +420,6 @@ private final class RecordingGhosttyAdapter: GhosttyAdapter {
     var canCloseResult = true
     var exitedSurfaces: Set<GhosttySurfaceHandle> = []
     var exitsEverySurface = false
-
-    init(usesEmbeddedSessionDriver: Bool = false) {
-        self.usesEmbeddedSessionDriver = usesEmbeddedSessionDriver
-    }
 
     func initializeIfNeeded() async throws {
         initializeCallCount += 1
