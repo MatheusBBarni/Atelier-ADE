@@ -1256,6 +1256,7 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
         try await harness.service.selectTab(id: terminalTab.id)
         let snapshotAfterSelection = try #require(try await harness.persistence.loadRestoreSnapshot())
         let persistedFileTab = try #require(try await harness.persistence.loadTabs().first { $0.id == fileTab.id })
+        let persistedTabsBeforeRestore = try await harness.persistence.loadTabs()
 
         #expect(persistedFileTab.kind == .file)
         #expect(persistedFileTab.fileReference?.path == fileURL.path)
@@ -1277,6 +1278,7 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
         #expect(restoredStore.tabsForSelectedSession.map(\.kind) == [.terminal, .file])
         #expect(restoredStore.selectedTabID == terminalTab.id)
         #expect(restoredTerminal.createdTabs.map(\.id) == [terminalTab.id])
+        #expect(try await harness.persistence.loadTabs() == persistedTabsBeforeRestore)
 
         try await restoredService.closeTab(tabID: fileTab.id, force: false)
         let snapshotAfterClose = try #require(try await harness.persistence.loadRestoreSnapshot())

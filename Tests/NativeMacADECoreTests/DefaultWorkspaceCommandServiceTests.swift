@@ -70,6 +70,52 @@ struct DefaultWorkspaceCommandServiceTests {
     }
 
     @Test
+    func creatingSessionRecordsGhosttySurfaceAndPersistsOnlyAfterCreation() async throws {
+        let harness = makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+        let project = try await harness.service.openProject(path: projectPath)
+
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let firstTab = try #require(harness.store.tabs.first)
+        let surface = try #require(harness.terminal.surface(for: firstTab.id))
+
+        #expect(harness.terminal.createdTabs == [firstTab])
+        #expect(surface == harness.terminal.surfacesByTabID[firstTab.id])
+        #expect(try await harness.persistence.loadSessions() == [session])
+        #expect(try await harness.persistence.loadTabs() == [firstTab])
+        #expect(harness.store.sessions == [session])
+        #expect(harness.store.tabs == [firstTab])
+        #expect(harness.service.metrics.terminalSurfaceCreationCount == 1)
+    }
+
+    @Test
+    func creatingSessionSurfaceFailureDoesNotPersistSessionOrFirstTabAndRecordsTelemetry() async throws {
+        let harness = makeHarness()
+        let project = try await harness.service.openProject(path: makeTemporaryProjectDirectory())
+        let persistedSessionsBefore = try await harness.persistence.loadSessions()
+        let persistedTabsBefore = try await harness.persistence.loadTabs()
+        harness.terminal.surfaceCreationError = GhosttyAdapterError.surfaceCreationFailed("first tab failed")
+
+        await #expect(throws: WorkspaceCommandError.terminalUnavailable("first tab failed")) {
+            _ = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        }
+
+        let attemptedTab = try #require(harness.terminal.createdTabs.first)
+        #expect(harness.store.sessions.isEmpty)
+        #expect(harness.store.tabs.isEmpty)
+        #expect(try await harness.persistence.loadSessions() == persistedSessionsBefore)
+        #expect(try await harness.persistence.loadTabs() == persistedTabsBefore)
+        #expect(harness.terminal.surface(for: attemptedTab.id) == nil)
+        #expect(harness.service.metrics.terminalSurfaceFailureCount == 1)
+        #expect(harness.service.logger.events.contains { event in
+            event.name == "terminal_surface_failed" &&
+                event.fields["tab_id"] == attemptedTab.id.uuidString &&
+                event.fields["session_id"] == attemptedTab.sessionID.uuidString &&
+                event.fields["reason"]?.contains("first tab failed") == true
+        })
+    }
+
+    @Test
     func creatingSessionWithShortcutStoresShortcutAndLaunchesFirstTab() async throws {
         let harness = makeHarness()
         let projectPath = try makeTemporaryProjectDirectory()
@@ -1201,6 +1247,33 @@ struct DefaultWorkspaceCommandServiceTests {
     }
 
     @Test
+    func creatingTerminalTabFailureRecordsSurfaceTelemetryAndLeavesMetadataUnchanged() async throws {
+        let harness = makeHarness()
+        let project = try await harness.service.openProject(path: makeTemporaryProjectDirectory())
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let tabsBefore = harness.store.tabs
+        let persistedTabsBefore = try await harness.persistence.loadTabs()
+        harness.terminal.surfaceCreationError = GhosttyAdapterError.surfaceCreationFailed("tab surface failed")
+
+        await #expect(throws: WorkspaceCommandError.terminalUnavailable("tab surface failed")) {
+            _ = try await harness.service.createTab(sessionID: session.id)
+        }
+
+        let attemptedTab = try #require(harness.terminal.createdTabs.last)
+        #expect(attemptedTab.sessionID == session.id)
+        #expect(harness.store.tabs == tabsBefore)
+        #expect(try await harness.persistence.loadTabs() == persistedTabsBefore)
+        #expect(harness.terminal.surface(for: attemptedTab.id) == nil)
+        #expect(harness.service.metrics.terminalSurfaceFailureCount == 1)
+        #expect(harness.service.logger.events.contains { event in
+            event.name == "terminal_surface_failed" &&
+                event.fields["tab_id"] == attemptedTab.id.uuidString &&
+                event.fields["session_id"] == session.id.uuidString &&
+                event.fields["reason"]?.contains("tab surface failed") == true
+        })
+    }
+
+    @Test
     func shortcutLaunchMappingProducesExpectedGhosttyLaunchConfiguration() throws {
         let shortcut = SessionShortcut(
             label: "Claude",
@@ -1918,6 +1991,7 @@ struct DefaultWorkspaceCommandServiceTests {
         #expect(result.store.tabsForSelectedSession.map(\.kind) == [.terminal, .file])
         #expect(terminal.createdTabs.map(\.id) == [terminalTabID])
         #expect(service.metrics.terminalSurfaceCreationCount == 1)
+        #expect(try await persistence.loadTabs() == [terminalTab, fileTab])
     }
 
     @Test
@@ -1927,15 +2001,36 @@ struct DefaultWorkspaceCommandServiceTests {
         let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
         let tabsBefore = harness.store.tabs
         let tab = try await harness.service.createTab(sessionID: session.id)
+        let surface = try #require(harness.terminal.surface(for: tab.id))
         harness.terminal.canCloseResult = false
 
         await #expect(throws: WorkspaceCommandError.closeRejected(tab.id)) {
             try await harness.service.closeTab(tabID: tab.id, force: false)
         }
 
+        #expect(harness.terminal.canCloseRequests == [surface])
+        #expect(harness.service.metrics.closeConfirmationRejectCount == 1)
+        #expect(harness.terminal.releasedTabIDs.isEmpty)
         #expect(harness.store.tabs == tabsBefore + [tab])
         #expect(harness.store.selectedTabID == tab.id)
         #expect(try await harness.persistence.loadTabs() == tabsBefore + [tab])
+    }
+
+    @Test
+    func forceClosingTerminalTabBypassesGhosttyCanCloseAndReleasesSurface() async throws {
+        let harness = makeHarness()
+        let project = try await harness.service.openProject(path: makeTemporaryProjectDirectory())
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        let tab = try #require(harness.store.tabs.first { $0.sessionID == session.id })
+        harness.terminal.canCloseResult = false
+
+        try await harness.service.closeTab(tabID: tab.id, force: true)
+
+        #expect(harness.terminal.canCloseRequests.isEmpty)
+        #expect(harness.terminal.releasedTabIDs == [tab.id])
+        #expect(harness.terminal.surface(for: tab.id) == nil)
+        #expect(harness.store.tabs.isEmpty)
+        #expect(try await harness.persistence.loadTabs().isEmpty)
     }
 
     @Test
@@ -1951,6 +2046,8 @@ struct DefaultWorkspaceCommandServiceTests {
         try await harness.service.closeTab(tabID: closedTab.id, force: true)
 
         #expect(harness.terminalExitEvents.snapshot(tabID: closedTab.id) == nil)
+        #expect(harness.terminal.releasedTabIDs == [closedTab.id])
+        #expect(harness.terminal.surface(for: closedTab.id) == nil)
         let retainedSnapshot = try #require(harness.terminalExitEvents.snapshot(tabID: retainedTab.id))
         #expect(retainedSnapshot == TerminalExitObservation(tabID: retainedTab.id, exitStatus: 0))
     }
@@ -2728,6 +2825,7 @@ private final class FakeTerminalSurfaceManager: WorkspaceTerminalSurfaceManaging
     private(set) var resizedTabIDs: [UUID] = []
     private(set) var releasedTabIDs: [UUID] = []
     private(set) var canCloseRequestCount = 0
+    private(set) var canCloseRequests: [GhosttySurfaceHandle] = []
     var surfaceCreationError: Error?
     var surfacesByTabID: [UUID: GhosttySurfaceHandle] = [:]
     var canCloseResult = true
@@ -2749,6 +2847,7 @@ private final class FakeTerminalSurfaceManager: WorkspaceTerminalSurfaceManaging
 
     func canClose(surface: GhosttySurfaceHandle) async -> Bool {
         canCloseRequestCount += 1
+        canCloseRequests.append(surface)
         return canCloseResult
     }
 

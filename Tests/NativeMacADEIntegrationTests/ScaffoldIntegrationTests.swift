@@ -54,6 +54,35 @@ struct ScaffoldIntegrationTests {
     }
 
     @Test
+    func ghosttyExitCallbackPublishesObservationAndTerminalProcessLog() async throws {
+        let container = AppDependencyContainer.live()
+        let project = WorkspaceProject(path: try makeTemporaryDirectory(), displayName: "ghostty-exit")
+        let session = WorkspaceSession(projectID: project.id)
+        let tab = WorkspaceTab(sessionID: session.id, workingDirectory: project.path, ordinal: 0)
+        var observations: [TerminalExitObservation] = []
+
+        container.workspaceStore.upsertProject(project, select: false)
+        container.workspaceStore.upsertSession(session, select: false)
+        container.workspaceStore.upsertTab(tab, select: false)
+        _ = container.terminalExitEvents.subscribe { observations.append($0) }
+
+        container.terminalHostController.onSurfaceExited?(tab.id, 17)
+
+        try await waitUntil("ghostty exit fan-out") {
+            observations.count == 1
+                && container.workspaceLogger.events.filter { $0.name == "terminal_process_exited" }.count == 1
+        }
+
+        let event = try #require(container.workspaceLogger.events.first { $0.name == "terminal_process_exited" })
+        #expect(observations == [TerminalExitObservation(tabID: tab.id, exitStatus: 17)])
+        #expect(container.terminalExitEvents.snapshot(tabID: tab.id) == TerminalExitObservation(tabID: tab.id, exitStatus: 17))
+        #expect(container.performanceMetrics.terminalProcessExitCount == 1)
+        #expect(event.fields["tab_id"] == tab.id.uuidString)
+        #expect(event.fields["session_id"] == session.id.uuidString)
+        #expect(event.fields["exit_status"] == "17")
+    }
+
+    @Test
     func liveContainerConstructsWrapperBackedGhosttyAdapter() throws {
         let container = AppDependencyContainer.live()
         let adapter = try #require(container.ghosttyAdapter as? LiveGhosttyAdapter)

@@ -18,6 +18,19 @@ struct PerformanceMetricsTests {
     }
 
     @Test
+    func terminalSurfaceFailureRateAboveThresholdBlocksRelease() {
+        let metrics = PerformanceMetrics()
+
+        metrics.recordTabCreation(duration: 1)
+        metrics.recordTerminalSurfaceFailure()
+
+        let diagnostics = metrics.diagnostics()
+
+        #expect(diagnostics.terminalSurfaceFailureRate == 0.5)
+        #expect(diagnostics.releaseBlockingReasons.contains("terminal surface failure rate above 1%"))
+    }
+
+    @Test
     func settingsCountersTrackOpenedSavedFailuresThemeAndKeybindingChanges() {
         let metrics = PerformanceMetrics()
 
