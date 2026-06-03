@@ -266,12 +266,89 @@ struct DefaultWorkspaceCommandServiceTests {
 
         #expect(AppPreferences.defaults.themeID == AppTheme.systemSelectionID)
         #expect(AppPreferences.defaults.focusWorkspaceEnabled == false)
+        #expect(AppPreferences.defaults.focusWorkspaceContinuityEnabled == false)
         #expect(AppPreferences.defaultThemeID == AppTheme.systemSelectionID)
         #expect(AppPreferences.isSupportedThemeSelectionID(AppTheme.systemSelectionID))
         #expect(loadedPreferences.themeID == AppTheme.systemSelectionID)
         #expect(loadedPreferences.focusWorkspaceEnabled == false)
+        #expect(loadedPreferences.focusWorkspaceContinuityEnabled == false)
         #expect(harness.store.appPreferences.themeID == AppTheme.systemSelectionID)
         #expect(harness.store.appPreferences.focusWorkspaceEnabled == false)
+        #expect(harness.store.appPreferences.focusWorkspaceContinuityEnabled == false)
+    }
+
+    @Test
+    func savingPreferencesWithFocusWorkspaceOffNormalizesContinuityOff() async throws {
+        let now = Date(timeIntervalSince1970: 1_717_393_700)
+        let harness = makeHarness(now: { now })
+
+        try await harness.service.saveAppPreferences(AppPreferences(
+            themeID: AppTheme.systemSelectionID,
+            focusWorkspaceEnabled: false,
+            focusWorkspaceContinuityEnabled: true
+        ))
+
+        let persistedPreferences = try await harness.persistence.loadAppPreferences()
+        #expect(persistedPreferences.focusWorkspaceEnabled == false)
+        #expect(persistedPreferences.focusWorkspaceContinuityEnabled == false)
+        #expect(persistedPreferences.updatedAt == now)
+        #expect(harness.store.appPreferences == persistedPreferences)
+    }
+
+    @Test
+    func loadingPreferencesWithFocusWorkspaceOffRepairsContinuityOff() async throws {
+        let now = Date(timeIntervalSince1970: 1_717_393_701)
+        let harness = makeHarness(now: { now })
+        try await harness.persistence.save(appPreferences: AppPreferences(
+            themeID: "catppuccin",
+            focusWorkspaceEnabled: false,
+            focusWorkspaceContinuityEnabled: true,
+            updatedAt: Date(timeIntervalSince1970: 200)
+        ))
+
+        let loadedPreferences = try await harness.service.loadAppPreferences()
+        let persistedPreferences = try await harness.persistence.loadAppPreferences()
+
+        #expect(loadedPreferences.focusWorkspaceEnabled == false)
+        #expect(loadedPreferences.focusWorkspaceContinuityEnabled == false)
+        #expect(loadedPreferences.themeID == "catppuccin")
+        #expect(loadedPreferences.updatedAt == now)
+        #expect(persistedPreferences == loadedPreferences)
+        #expect(harness.store.appPreferences == loadedPreferences)
+    }
+
+    @Test
+    func savingPreferencesWithFocusWorkspaceContinuityOptedInPreservesChildFlag() async throws {
+        let harness = makeHarness()
+
+        try await harness.service.saveAppPreferences(AppPreferences(
+            focusWorkspaceEnabled: true,
+            focusWorkspaceContinuityEnabled: true
+        ))
+
+        let persistedPreferences = try await harness.persistence.loadAppPreferences()
+        #expect(persistedPreferences.focusWorkspaceEnabled)
+        #expect(persistedPreferences.focusWorkspaceContinuityEnabled)
+        #expect(harness.store.appPreferences.focusWorkspaceEnabled)
+        #expect(harness.store.appPreferences.focusWorkspaceContinuityEnabled)
+    }
+
+    @Test
+    func loadingContinuityChildOnlyRepairDoesNotRecordParentFocusTransition() async throws {
+        let harness = makeHarness()
+        try await harness.persistence.save(appPreferences: AppPreferences(
+            focusWorkspaceEnabled: false,
+            focusWorkspaceContinuityEnabled: true
+        ))
+
+        let loadedPreferences = try await harness.service.loadAppPreferences()
+
+        #expect(loadedPreferences.focusWorkspaceEnabled == false)
+        #expect(loadedPreferences.focusWorkspaceContinuityEnabled == false)
+        #expect(harness.service.metrics.focusWorkspaceEnableCount == 0)
+        #expect(harness.service.metrics.focusWorkspaceDisableCount == 0)
+        #expect(harness.service.logger.events.contains { $0.name == "focus_workspace_enabled" } == false)
+        #expect(harness.service.logger.events.contains { $0.name == "focus_workspace_disabled" } == false)
     }
 
     @Test

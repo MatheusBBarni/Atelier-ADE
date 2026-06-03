@@ -73,7 +73,32 @@ struct AppShellStateTests {
         #expect(result.restoreErrorDescription == nil)
         #expect(store.appPreferences.focusWorkspaceEnabled == true)
         #expect(FocusWorkspaceActiveCuePresentation(preferences: store.appPreferences).isVisible)
-        #expect(service.events == ["load", "after-preferences:true", "restore:true"])
+        #expect(service.events == ["load", "after-preferences:true", "restore:true:false"])
+    }
+
+    @Test
+    func startupCoordinatorAppliesLoadedContinuityPreferenceBeforeRestore() async {
+        let store = WorkspaceStore()
+        let service = ApplyingPreferencesStartupService(
+            store: store,
+            preferences: AppPreferences(
+                themeID: "catppuccin",
+                focusWorkspaceEnabled: true,
+                focusWorkspaceContinuityEnabled: true
+            )
+        )
+
+        let result = await AppShellStartupCoordinator.run(commandService: service, store: store) {
+            #expect(store.appPreferences.focusWorkspaceEnabled == true)
+            #expect(store.appPreferences.focusWorkspaceContinuityEnabled == true)
+            service.events.append("after-preferences:true:true")
+        }
+
+        #expect(result.preferenceLoadErrorDescription == nil)
+        #expect(result.restoreErrorDescription == nil)
+        #expect(store.appPreferences.focusWorkspaceEnabled == true)
+        #expect(store.appPreferences.focusWorkspaceContinuityEnabled == true)
+        #expect(service.events == ["load", "after-preferences:true:true", "restore:true:true"])
     }
 }
 
@@ -175,7 +200,7 @@ private final class ApplyingPreferencesStartupService: AppShellStartupServicing 
     }
 
     func restoreWorkspace() async throws -> RestoreWorkspaceResult {
-        events.append("restore:\(store.appPreferences.focusWorkspaceEnabled)")
+        events.append("restore:\(store.appPreferences.focusWorkspaceEnabled):\(store.appPreferences.focusWorkspaceContinuityEnabled)")
         return RestoreWorkspaceResult(store: WorkspaceStore())
     }
 

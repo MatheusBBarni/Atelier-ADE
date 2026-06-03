@@ -252,6 +252,64 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
     }
 
     @Test
+    func disablingFocusWorkspaceAfterContinuityOptInPersistsBothFlagsFalseAfterReload() async throws {
+        let harness = try makeHarness()
+        try await harness.service.saveAppPreferences(AppPreferences(
+            focusWorkspaceEnabled: true,
+            focusWorkspaceContinuityEnabled: true
+        ))
+
+        var preferences = try await harness.service.loadAppPreferences()
+        preferences.focusWorkspaceEnabled = false
+        try await harness.service.saveAppPreferences(preferences)
+
+        let persistedPreferences = try await harness.persistence.loadAppPreferences()
+        #expect(persistedPreferences.focusWorkspaceEnabled == false)
+        #expect(persistedPreferences.focusWorkspaceContinuityEnabled == false)
+
+        let reloadedStore = WorkspaceStore()
+        let reloadedPersistence = try SQLiteWorkspaceMetadataStore(path: harness.databasePath)
+        let reloadedService = DefaultWorkspaceCommandService(
+            store: reloadedStore,
+            persistenceStore: reloadedPersistence,
+            portableSettingsFileStore: harness.portableSettingsFileStore,
+            restoreCoordinator: RestoreCoordinator(persistenceStore: reloadedPersistence),
+            terminalSurfaceManager: FakeIntegrationTerminalSurfaceManager()
+        )
+
+        let loadedPreferences = try await reloadedService.loadAppPreferences()
+
+        #expect(loadedPreferences.focusWorkspaceEnabled == false)
+        #expect(loadedPreferences.focusWorkspaceContinuityEnabled == false)
+        #expect(reloadedStore.appPreferences == loadedPreferences)
+    }
+
+    @Test
+    func nonOptedInFocusWorkspacePreferencesKeepExistingMultiTabBehavior() async throws {
+        let harness = try makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+        let project = try await harness.service.openProject(path: projectPath)
+
+        try await harness.service.saveAppPreferences(AppPreferences(
+            themeID: "dracula",
+            focusWorkspaceEnabled: false,
+            focusWorkspaceContinuityEnabled: false
+        ))
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: nil)
+        _ = try await harness.service.createTab(sessionID: session.id)
+        let loadedPreferences = try await harness.service.loadAppPreferences()
+
+        #expect(loadedPreferences.themeID == "dracula")
+        #expect(loadedPreferences.focusWorkspaceEnabled == false)
+        #expect(loadedPreferences.focusWorkspaceContinuityEnabled == false)
+        #expect(harness.store.tabsForSelectedSession.count == 2)
+        #expect(harness.service.metrics.focusWorkspaceEnableCount == 0)
+        #expect(harness.service.metrics.focusWorkspaceDisableCount == 0)
+        #expect(harness.service.logger.events.contains { $0.name == "focus_workspace_enabled" } == false)
+        #expect(harness.service.logger.events.contains { $0.name == "focus_workspace_disabled" } == false)
+    }
+
+    @Test
     func loadedKeybindingOverridesResolveAtRuntimeAndResetToDefaults() async throws {
         let harness = try makeHarness()
         let overrides = managedKeybindingOverrides()
@@ -334,6 +392,47 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
                 event.fields["invalid_theme_id"] == "retired-theme" &&
                 event.fields["fallback_theme_id"] == AppTheme.systemSelectionID
         })
+    }
+
+    @Test
+    func startupLoadsNormalizedContinuityPreferencesBeforeRestoreBegins() async throws {
+        let now = Date(timeIntervalSince1970: 1_717_394_001)
+        let harness = try makeHarness(now: { now })
+        let projectPath = try makeTemporaryProjectDirectory()
+        let project = WorkspaceProject(path: projectPath, displayName: "Continuity Startup")
+        let session = WorkspaceSession(projectID: project.id, title: "Restored")
+        let tab = WorkspaceTab(sessionID: session.id, workingDirectory: projectPath, ordinal: 0)
+        try await harness.persistence.save(project: project)
+        try await harness.persistence.save(session: session)
+        try await harness.persistence.save(tab: tab)
+        try await harness.persistence.save(snapshot: RestoreSnapshot(
+            selectedProjectID: project.id,
+            selectedSessionID: session.id,
+            selectedTabID: tab.id,
+            openTabIDs: [tab.id]
+        ))
+        try await harness.persistence.save(appPreferences: AppPreferences(
+            focusWorkspaceEnabled: false,
+            focusWorkspaceContinuityEnabled: true,
+            updatedAt: Date(timeIntervalSince1970: 400)
+        ))
+        var preferencesBeforeRestore: AppPreferences?
+
+        let startupResult = await AppShellStartupCoordinator.run(commandService: harness.service, store: harness.store) {
+            preferencesBeforeRestore = harness.store.appPreferences
+        }
+        let observedPreferencesBeforeRestore = try #require(preferencesBeforeRestore)
+        let persistedPreferences = try await harness.persistence.loadAppPreferences()
+
+        #expect(startupResult.preferenceLoadErrorDescription == nil)
+        #expect(startupResult.restoreErrorDescription == nil)
+        #expect(observedPreferencesBeforeRestore.focusWorkspaceEnabled == false)
+        #expect(observedPreferencesBeforeRestore.focusWorkspaceContinuityEnabled == false)
+        #expect(observedPreferencesBeforeRestore.updatedAt == now)
+        #expect(persistedPreferences == observedPreferencesBeforeRestore)
+        #expect(harness.store.appPreferences.focusWorkspaceContinuityEnabled == false)
+        #expect(harness.store.tabs.map(\.id) == [tab.id])
+        #expect(harness.terminal.createdTabs.map(\.id) == [tab.id])
     }
 
     @Test

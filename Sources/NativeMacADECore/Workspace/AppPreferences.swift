@@ -43,6 +43,18 @@ public struct AppPreferences: Equatable, Sendable {
         AppPreferences()
     }
 
+    public var normalizedFocusWorkspaceContinuity: AppPreferences {
+        var preferences = self
+        preferences.normalizeFocusWorkspaceContinuity()
+        return preferences
+    }
+
+    public mutating func normalizeFocusWorkspaceContinuity() {
+        if !focusWorkspaceEnabled {
+            focusWorkspaceContinuityEnabled = false
+        }
+    }
+
     public static func isSupportedThemeSelectionID(_ themeID: String) -> Bool {
         AppTheme.isSupportedSelectionID(themeID)
     }

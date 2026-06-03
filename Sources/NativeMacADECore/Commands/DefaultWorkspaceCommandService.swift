@@ -312,7 +312,7 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
 
         do {
             try await validateAppPreferences(preferences)
-            var updatedPreferences = preferences
+            var updatedPreferences = preferences.normalizedFocusWorkspaceContinuity
             updatedPreferences.id = AppPreferences.fixedID
             updatedPreferences.updatedAt = now()
 
@@ -402,7 +402,7 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
             return projection.result
         }
 
-        var updatedPreferences = projection.preferences
+        var updatedPreferences = projection.preferences.normalizedFocusWorkspaceContinuity
         updatedPreferences.id = AppPreferences.fixedID
         updatedPreferences.updatedAt = now()
 
@@ -1121,6 +1121,12 @@ public final class DefaultWorkspaceCommandService: WorkspaceCommandService {
     private func loadNormalizedAppPreferences(healStaleReferences: Bool) async throws -> AppPreferences {
         var preferences = try await persist { try await persistenceStore.loadAppPreferences() }
         var shouldPersistRepair = false
+
+        let focusNormalizedPreferences = preferences.normalizedFocusWorkspaceContinuity
+        if focusNormalizedPreferences != preferences {
+            preferences = focusNormalizedPreferences
+            shouldPersistRepair = true
+        }
 
         if !AppPreferences.isSupportedThemeSelectionID(preferences.themeID) {
             let invalidThemeID = preferences.themeID
