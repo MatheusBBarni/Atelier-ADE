@@ -72,6 +72,57 @@ struct DefaultWorkspaceCommandServiceIntegrationTests {
     }
 
     @Test
+    func creatingSessionWithBuiltInAgentShortcutPersistsLaunchMetadataForGhosttyTranslation() async throws {
+        let harness = try makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+        let project = try await harness.service.openProject(path: projectPath)
+        let codex = try #require(SessionShortcut.builtInDefaults.first { $0.label == "Codex" })
+
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: codex.id)
+        let launchedTab = try #require(harness.terminal.createdTabs.first)
+        let persistedTab = try #require(try await harness.persistence.loadTabs().first { $0.id == launchedTab.id })
+        let configuration = GhosttyLaunchConfiguration(tab: launchedTab)
+
+        #expect(session.shortcutID == codex.id)
+        #expect(try await harness.persistence.loadSessionShortcuts().contains(codex))
+        #expect(launchedTab.shortcutID == codex.id)
+        #expect(launchedTab.launchCommand == codex.launchCommand)
+        #expect(launchedTab.launchArgumentsJSON == codex.launchArgumentsJSON)
+        #expect(persistedTab.launchCommand == codex.launchCommand)
+        #expect(persistedTab.launchArgumentsJSON == codex.launchArgumentsJSON)
+        #expect(configuration.command == "codex")
+        #expect(configuration.arguments == ["--no-alt-screen", "-c", "tui.raw_output_mode=true"])
+        #expect(configuration.environment["CODEX_TUI_DISABLE_KEYBOARD_ENHANCEMENT"] == "1")
+    }
+
+    @Test
+    func creatingAdditionalAgentTabReusesStoredSessionShortcutLaunchMetadata() async throws {
+        let harness = try makeHarness()
+        let projectPath = try makeTemporaryProjectDirectory()
+        let project = try await harness.service.openProject(path: projectPath)
+        var claude = try #require(SessionShortcut.builtInDefaults.first { $0.label == "Claude" })
+        claude.launchArgumentsJSON = "[\"--continue\"]"
+        claude.hasUserOverride = true
+        let savedClaude = try await harness.service.saveSessionShortcut(claude)
+
+        let session = try await harness.service.createSession(projectID: project.id, shortcutID: savedClaude.id)
+        let laterTab = try await harness.service.createTab(sessionID: session.id)
+        let persistedLaterTab = try #require(try await harness.persistence.loadTabs().first { $0.id == laterTab.id })
+        let configuration = GhosttyLaunchConfiguration(tab: laterTab)
+
+        #expect(session.shortcutID == savedClaude.id)
+        #expect(laterTab.shortcutID == savedClaude.id)
+        #expect(laterTab.launchCommand == savedClaude.launchCommand)
+        #expect(laterTab.launchArgumentsJSON == savedClaude.launchArgumentsJSON)
+        #expect(persistedLaterTab.launchCommand == savedClaude.launchCommand)
+        #expect(persistedLaterTab.launchArgumentsJSON == savedClaude.launchArgumentsJSON)
+        #expect(harness.terminal.createdTabs.last == laterTab)
+        #expect(configuration.command == "claude")
+        #expect(configuration.arguments == ["--continue", "--dangerously-skip-permissions"])
+        #expect(configuration.environment["CLAUDE_CODE_DISABLE_MOUSE"] == "1")
+    }
+
+    @Test
     func creatingSessionWithoutExplicitShortcutUsesSavedDefaultProfile() async throws {
         let harness = try makeHarness()
         let projectPath = try makeTemporaryProjectDirectory()

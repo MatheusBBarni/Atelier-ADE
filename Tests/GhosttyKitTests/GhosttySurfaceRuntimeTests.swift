@@ -51,6 +51,7 @@ struct GhosttySurfaceRuntimeTests {
             workingDirectory: "/tmp/ade-ghostty-payload",
             command: "codex",
             arguments: ["--full-auto", "-c", "tui.raw_output_mode=true"],
+            environment: ["CODEX_TUI_DISABLE_KEYBOARD_ENHANCEMENT": "1"],
             appearance: appearance
         )
 
@@ -61,6 +62,7 @@ struct GhosttySurfaceRuntimeTests {
         #expect(storedConfiguration.workingDirectory == "/tmp/ade-ghostty-payload")
         #expect(storedConfiguration.command == "codex")
         #expect(storedConfiguration.arguments == ["--full-auto", "-c", "tui.raw_output_mode=true"])
+        #expect(storedConfiguration.environment == ["CODEX_TUI_DISABLE_KEYBOARD_ENHANCEMENT": "1"])
         #expect(storedConfiguration.appearance == appearance)
         #expect(runtime.nativeView(for: surface) === nativeView)
     }

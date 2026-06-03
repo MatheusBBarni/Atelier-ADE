@@ -1,5 +1,4 @@
 import AppKit
-import Darwin
 import Foundation
 import GhosttyKit
 @preconcurrency import SwiftTerm
@@ -417,13 +416,15 @@ final class TerminalSessionDriver: NSObject {
             throw TerminalSessionDriverError.directoryUnavailable(tab.workingDirectory)
         }
 
-        terminalView.feed(text: launchBanner())
+        let launch = TerminalLaunchTranslator(tab: tab).translate()
+
+        terminalView.feed(text: launchBanner(translation: launch))
 
         terminalView.startProcess(
-            executable: preferredShellPath(),
-            args: launchArguments(),
-            environment: processEnvironment(),
-            execName: loginExecName(),
+            executable: launch.shellExecutable,
+            args: launch.shellArguments,
+            environment: launch.processEnvironmentEntries,
+            execName: launch.loginExecName,
             currentDirectory: tab.workingDirectory
         )
 
@@ -440,31 +441,8 @@ final class TerminalSessionDriver: NSObject {
         hasExited = true
     }
 
-    private func launchArguments() -> [String] {
-        if let commandLine = launchCommandLine() {
-            return ["-ilc", commandLine]
-        }
-
-        return ["-il"]
-    }
-
-    private func processEnvironment() -> [String] {
-        var environment = ProcessInfo.processInfo.environment
-        environment["SHELL"] = preferredShellPath()
-        environment["TERM"] = environment["TERM"] ?? "xterm-256color"
-        environment["COLORTERM"] = environment["COLORTERM"] ?? "truecolor"
-        for (key, value) in launchEnvironmentOverrides() {
-            environment[key] = value
-        }
-        return environment
-            .sorted { $0.key < $1.key }
-            .map { "\($0.key)=\($0.value)" }
-    }
-
-    private func launchBanner() -> String {
-        let commandDescription = resolvedCommandDescription()
-
-        return "Atelier terminal\nWorking directory: \(tab.workingDirectory)\nCommand: \(commandDescription)\n\n"
+    private func launchBanner(translation: TerminalLaunchTranslation) -> String {
+        "Atelier terminal\nWorking directory: \(tab.workingDirectory)\nCommand: \(translation.commandDescription)\n\n"
     }
 
     private func applyAppearance(_ appearance: TerminalAppearance) {
@@ -478,134 +456,6 @@ final class TerminalSessionDriver: NSObject {
         terminalView.caretTextColor = background
     }
 
-    private func loginExecName() -> String {
-        "-\(URL(fileURLWithPath: preferredShellPath()).lastPathComponent)"
-    }
-
-    private func preferredShellPath() -> String {
-        let candidates = [
-            Self.userLoginShellPath(),
-            ProcessInfo.processInfo.environment["SHELL"],
-            "/bin/zsh"
-        ]
-            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-
-        for candidate in candidates {
-            let path = URL(fileURLWithPath: candidate).standardizedFileURL.path
-            if FileManager.default.isExecutableFile(atPath: path) {
-                return path
-            }
-        }
-
-        return "/bin/zsh"
-    }
-
-    private func launchCommandLine() -> String? {
-        guard let command = tab.launchCommand?.trimmingCharacters(in: .whitespacesAndNewlines), !command.isEmpty else {
-            return nil
-        }
-
-        return TerminalLaunchCommandBuilder(
-            command: command,
-            arguments: resolvedLaunchArguments(for: command),
-            environment: launchEnvironmentOverrides()
-        ).commandLine()
-    }
-
-    private func resolvedLaunchArguments(for command: String) -> [String] {
-        var arguments = GhosttyLaunchConfiguration.decodeArguments(from: tab.launchArgumentsJSON)
-        let executableName = URL(fileURLWithPath: command).lastPathComponent.lowercased()
-
-        if executableName == "codex", !arguments.contains("--no-alt-screen") {
-            arguments.append("--no-alt-screen")
-        }
-
-        if executableName == "codex", !arguments.contains("-c") {
-            arguments.append(contentsOf: ["-c", "tui.raw_output_mode=true"])
-        }
-
-        if executableName == "claude", !arguments.contains("--dangerously-skip-permissions") {
-            arguments.append("--dangerously-skip-permissions")
-        }
-
-        return arguments
-    }
-
-    private func launchEnvironmentOverrides() -> [String: String] {
-        let executableName = tab.launchCommand.map { URL(fileURLWithPath: $0).lastPathComponent.lowercased() }
-        var environment: [String: String] = [:]
-
-        guard let executableName else {
-            return environment
-        }
-
-        if executableName == "codex" {
-            environment["CODEX_TUI_DISABLE_KEYBOARD_ENHANCEMENT"] = "1"
-        }
-
-        if executableName == "claude" {
-            environment["CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN"] = "1"
-            environment["CLAUDE_CODE_DISABLE_MOUSE"] = "1"
-            environment["CLAUDE_CODE_ACCESSIBILITY"] = "1"
-            environment["CLAUDE_CODE_DISABLE_TERMINAL_TITLE"] = "1"
-            environment["CLAUDE_CODE_SYNTAX_HIGHLIGHT"] = "false"
-        }
-
-        return environment
-    }
-
-    private func resolvedCommandDescription() -> String {
-        guard let command = tab.launchCommand?.trimmingCharacters(in: .whitespacesAndNewlines), !command.isEmpty else {
-            return URL(fileURLWithPath: preferredShellPath()).lastPathComponent
-        }
-
-        return ([command] + resolvedLaunchArguments(for: command)).joined(separator: " ")
-    }
-
-    private static func userLoginShellPath() -> String? {
-        guard let passwd = getpwuid(getuid()) else { return nil }
-        let shell = String(cString: passwd.pointee.pw_shell)
-        return shell.isEmpty ? nil : shell
-    }
-
-}
-
-struct TerminalLaunchCommandBuilder: Equatable, Sendable {
-    var command: String
-    var arguments: [String]
-    var environment: [String: String]
-
-    func commandLine() -> String {
-        let environmentTokens = environment
-            .sorted { $0.key < $1.key }
-            .map { key, value in
-                "\(key)=\(Self.shellEscape(value))"
-            }
-        let invocation = (environmentTokens + [Self.commandToken(command)] + arguments.map(Self.shellEscape))
-            .joined(separator: " ")
-
-        return "\(invocation); __ade_launch_status=$?; exit $__ade_launch_status"
-    }
-
-    static func shellEscape(_ value: String) -> String {
-        "'" + value.replacingOccurrences(of: "'", with: "'\"'\"'") + "'"
-    }
-
-    private static func commandToken(_ value: String) -> String {
-        guard isSafeUnquotedCommandWord(value) else {
-            return shellEscape(value)
-        }
-
-        return value
-    }
-
-    private static func isSafeUnquotedCommandWord(_ value: String) -> Bool {
-        guard !value.isEmpty else { return false }
-
-        let allowedScalars = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_+-./:@")
-        return value.unicodeScalars.allSatisfy { allowedScalars.contains($0) }
-    }
 }
 
 enum TerminalSessionDriverError: Error, Equatable, Sendable, CustomStringConvertible {

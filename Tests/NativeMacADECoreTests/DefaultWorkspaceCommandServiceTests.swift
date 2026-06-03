@@ -1221,6 +1221,7 @@ struct DefaultWorkspaceCommandServiceTests {
         #expect(configuration.workingDirectory == "/Users/example/project")
         #expect(configuration.command == "claude")
         #expect(configuration.arguments == ["--dangerously-skip-permissions"])
+        #expect(configuration.environment["CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN"] == "1")
         #expect(configuration.appearance == AppTheme.defaultTheme.terminalAppearance)
     }
 

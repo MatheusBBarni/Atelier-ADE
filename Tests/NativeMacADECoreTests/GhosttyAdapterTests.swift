@@ -117,7 +117,8 @@ struct GhosttyAdapterTests {
 
         #expect(configuration.workingDirectory == "/tmp/native-mac-ade-themed")
         #expect(configuration.command == "claude")
-        #expect(configuration.arguments == ["--continue"])
+        #expect(configuration.arguments == ["--continue", "--dangerously-skip-permissions"])
+        #expect(configuration.environment["CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN"] == "1")
         #expect(configuration.inheritedSurfaceID == nil)
         #expect(configuration.appearance == AppTheme.dracula.terminalAppearance)
     }
