@@ -54,15 +54,28 @@ struct ScaffoldIntegrationTests {
     }
 
     @Test
-    func terminalHostCreatesSingleEmbeddedSurfaceWithoutRequiringGhosttyRuntime() async throws {
-        let host = TerminalHostController()
+    func liveContainerConstructsWrapperBackedGhosttyAdapter() throws {
+        let container = AppDependencyContainer.live()
+        let adapter = try #require(container.ghosttyAdapter as? LiveGhosttyAdapter)
+
+        #expect(adapter.usesEmbeddedSessionDriver == false)
+    }
+
+    @Test
+    func terminalHostCreatesWrapperBackedSurfaceThroughLiveAdapter() async throws {
+        let adapter = LiveGhosttyAdapter()
+        adapter.resetSharedAppContextForTesting()
+        let host = TerminalHostController(adapter: adapter)
         let tab = WorkspaceTab(sessionID: UUID(), workingDirectory: try makeTemporaryDirectory(), ordinal: 0)
 
         let surface = try await host.createSurface(for: tab)
 
         #expect(LiveGhosttyAdapter.pinnedRevision == "cb36966a752982014827a9cabcf630ec3788b3d9")
-        #expect(surface.rawSurfaceID == 0)
-        #expect(surface.appContextID == 0)
+        #expect(surface.rawSurfaceID > 0)
+        #expect(surface.appContextID == 1)
+        #expect(adapter.nativeView(for: surface) != nil)
+
+        host.releaseSurface(for: tab.id)
     }
 
     @Test

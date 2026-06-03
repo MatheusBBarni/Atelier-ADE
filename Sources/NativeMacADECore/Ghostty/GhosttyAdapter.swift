@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import GhosttyKit
 
@@ -24,6 +25,7 @@ public protocol GhosttyAdapter {
         from parent: GhosttySurfaceHandle,
         configuration: GhosttyLaunchConfiguration
     ) async throws -> GhosttySurfaceHandle
+    func nativeView(for surface: GhosttySurfaceHandle) -> NSView?
     func focus(surface: GhosttySurfaceHandle)
     func resize(surface: GhosttySurfaceHandle, columns: Int, rows: Int)
     func canClose(surface: GhosttySurfaceHandle) async -> Bool
@@ -34,6 +36,10 @@ public protocol GhosttyAdapter {
 
 public extension GhosttyAdapter {
     var usesEmbeddedSessionDriver: Bool { false }
+
+    func nativeView(for surface: GhosttySurfaceHandle) -> NSView? {
+        nil
+    }
 }
 
 @MainActor
@@ -58,7 +64,7 @@ public final class LiveGhosttyAdapter: GhosttyAdapter {
         self.callbacks = callbacks
     }
 
-    public var usesEmbeddedSessionDriver: Bool { true }
+    public var usesEmbeddedSessionDriver: Bool { false }
 
     func resetSharedAppContextForTesting() {
         LiveGhosttySurfaceRuntime.resetForTesting()
@@ -87,6 +93,10 @@ public final class LiveGhosttyAdapter: GhosttyAdapter {
 
     public func focus(surface: GhosttySurfaceHandle) {
         runtime.focus(surface: surface)
+    }
+
+    public func nativeView(for surface: GhosttySurfaceHandle) -> NSView? {
+        runtime.nativeView(for: surface)
     }
 
     public func resize(surface: GhosttySurfaceHandle, columns: Int, rows: Int) {

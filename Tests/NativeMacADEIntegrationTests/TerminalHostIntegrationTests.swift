@@ -344,7 +344,7 @@ struct TerminalHostIntegrationTests {
 
     @Test
     func embeddedShellPreventsCloseWhileProcessIsRunning() async throws {
-        let controller = TerminalHostController()
+        let controller = TerminalHostController(adapter: RecordingGhosttyAdapter(usesEmbeddedSessionDriver: true))
         let workingDirectory = try makeTemporaryDirectory()
         let tab = WorkspaceTab(sessionID: UUID(), workingDirectory: workingDirectory, ordinal: 0)
 
@@ -357,7 +357,7 @@ struct TerminalHostIntegrationTests {
 
     @Test
     func liveTerminalHostRelayoutsSwiftTermViewAfterZeroSizedInitialAttach() async throws {
-        let controller = TerminalHostController()
+        let controller = TerminalHostController(adapter: RecordingGhosttyAdapter(usesEmbeddedSessionDriver: true))
         let workingDirectory = try makeTemporaryDirectory()
         let tab = WorkspaceTab(sessionID: UUID(), workingDirectory: workingDirectory, ordinal: 0)
         let view = try #require(controller.makeHostView(for: tab, isActive: true) as? TerminalSurfaceHostNSView)
@@ -379,7 +379,7 @@ struct TerminalHostIntegrationTests {
 
     @Test
     func liveEmbeddedTerminalHostRefreshesAttachedViewAppearance() async throws {
-        let controller = TerminalHostController()
+        let controller = TerminalHostController(adapter: RecordingGhosttyAdapter(usesEmbeddedSessionDriver: true))
         let workingDirectory = try makeTemporaryDirectory()
         let tab = WorkspaceTab(sessionID: UUID(), workingDirectory: workingDirectory, ordinal: 0)
         let view = try #require(controller.makeHostView(for: tab, isActive: true) as? TerminalSurfaceHostNSView)
@@ -467,18 +467,36 @@ struct TerminalHostIntegrationTests {
 
         #expect(run.terminationStatus == 37)
     }
+
+    @Test
+    func testAdapterCapturesNativeViewAccessWithoutRealGhosttySurface() throws {
+        let adapter = RecordingGhosttyAdapter()
+        let surface = GhosttySurfaceHandle()
+        let nativeView = try #require(adapter.nativeView(for: surface))
+        let storedView = try #require(adapter.nativeViewsBySurface[surface])
+
+        #expect(adapter.nativeViewRequests == [surface])
+        #expect(storedView === nativeView)
+    }
 }
 
 @MainActor
 private final class RecordingGhosttyAdapter: GhosttyAdapter {
+    let usesEmbeddedSessionDriver: Bool
     private(set) var initializeCallCount = 0
     private(set) var createdConfigurations: [GhosttyLaunchConfiguration] = []
     private(set) var focusedSurfaces: [GhosttySurfaceHandle] = []
     private(set) var resizeRequests: [ResizeRequest] = []
     private(set) var destroyedSurfaces: [GhosttySurfaceHandle] = []
+    private(set) var nativeViewRequests: [GhosttySurfaceHandle] = []
+    private(set) var nativeViewsBySurface: [GhosttySurfaceHandle: NSView] = [:]
     var canCloseResult = true
     var exitedSurfaces: Set<GhosttySurfaceHandle> = []
     var exitsEverySurface = false
+
+    init(usesEmbeddedSessionDriver: Bool = false) {
+        self.usesEmbeddedSessionDriver = usesEmbeddedSessionDriver
+    }
 
     func initializeIfNeeded() async throws {
         initializeCallCount += 1
@@ -486,7 +504,7 @@ private final class RecordingGhosttyAdapter: GhosttyAdapter {
 
     func createSurface(configuration: GhosttyLaunchConfiguration) async throws -> GhosttySurfaceHandle {
         createdConfigurations.append(configuration)
-        return GhosttySurfaceHandle()
+        return recordSurface()
     }
 
     func createInheritedSurface(
@@ -494,7 +512,18 @@ private final class RecordingGhosttyAdapter: GhosttyAdapter {
         configuration: GhosttyLaunchConfiguration
     ) async throws -> GhosttySurfaceHandle {
         createdConfigurations.append(configuration)
-        return GhosttySurfaceHandle()
+        return recordSurface()
+    }
+
+    func nativeView(for surface: GhosttySurfaceHandle) -> NSView? {
+        nativeViewRequests.append(surface)
+        if let nativeView = nativeViewsBySurface[surface] {
+            return nativeView
+        }
+
+        let nativeView = NSView()
+        nativeViewsBySurface[surface] = nativeView
+        return nativeView
     }
 
     func focus(surface: GhosttySurfaceHandle) {
@@ -519,6 +548,12 @@ private final class RecordingGhosttyAdapter: GhosttyAdapter {
 
     func destroySurface(_ surface: GhosttySurfaceHandle) {
         destroyedSurfaces.append(surface)
+    }
+
+    private func recordSurface() -> GhosttySurfaceHandle {
+        let surface = GhosttySurfaceHandle()
+        nativeViewsBySurface[surface] = NSView()
+        return surface
     }
 }
 
